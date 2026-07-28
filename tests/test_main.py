@@ -27,6 +27,16 @@ def test_parse_args_role_defaults_to_env(monkeypatch):
     assert args.role == "analyst"
 
 
+def test_is_disabled_checks_marker_object(monkeypatch):
+    cs_cls = Mock()
+    cs_cls.return_value.exists.return_value = True
+    monkeypatch.setattr(main, "CloudStorage", cs_cls)
+    monkeypatch.setattr(main, "BUCKET", "bucket")
+
+    assert main.is_disabled("ops") is True
+    assert cs_cls.return_value.exists.call_args.args == ("bucket", "disabled/ops")
+
+
 def test_sync_skills_replaces_dest(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "WS", tmp_path)
     monkeypatch.setattr(main, "BUCKET", "bucket")

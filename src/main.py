@@ -13,6 +13,7 @@ load_dotenv(override=True)
 
 from claude_agent_sdk import ClaudeAgentOptions
 
+from src import slack
 from src.agent import run_agent
 from src.audit import log_run
 from src.bq import BigQuery
@@ -68,14 +69,23 @@ def build_options(role: str) -> ClaudeAgentOptions:
     )
 
 
+def is_disabled(role: str) -> bool:
+    return CloudStorage().exists(BUCKET, f"disabled/{role}")
+
+
 async def main() -> None:
     configure_logging()
     args = parse_args()
+
+    if is_disabled(args.role):
+        logger.warning(f"role {args.role} is disabled (gs://{BUCKET}/disabled/{args.role} exists), aborting")
+        return
 
     sync_skills(ROLES[args.role]["skills"])
     started_at = datetime.now(UTC)
     run = await run_agent(args.prompt, build_options(args.role), echo=True)
     log_run(args.prompt, run, started_at)
+    slack.notify(f"[{args.role}] {run.text}")
 
 
 if __name__ == "__main__":

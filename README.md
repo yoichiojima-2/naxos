@@ -67,6 +67,33 @@ gcloud run jobs update naxos-runner-ops --region asia-northeast1 \
   --image asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:<old-sha>
 ```
 
+## Scheduled runs
+
+Cloud Scheduler (`naxos-p3-ops`, managed in `terraform/`) triggers the
+ops job hourly with a fixed self-monitoring prompt: the platform checks
+its own `audit.runs` for errors and cost anomalies. Schedule and prompt
+are Terraform variables (`p3_schedule`, `p3_prompt`) — changing an
+unattended run is a config change, on purpose.
+
+## Kill switch
+
+A marker object in GCS disables a role: the runtime checks it at startup
+and refuses to run. Works on scheduled and manual executions alike.
+
+```sh
+echo "reason" | gcloud storage cp - "gs://$BUCKET/disabled/ops"   # kill
+gcloud scheduler jobs pause naxos-p3-ops --location asia-northeast1
+gcloud storage rm "gs://$BUCKET/disabled/ops"                     # restore
+gcloud scheduler jobs resume naxos-p3-ops --location asia-northeast1
+```
+
+## Slack
+
+When `SLACK_WEBHOOK_URL` is set, the final answer of every run is posted
+to Slack (`[role] answer`). Unset, notification is skipped. The secret
+container `slack-webhook-url` exists in Terraform; add the value with
+`gcloud secrets versions add` and wire it into the jobs to enable.
+
 ## Skills
 
 `gs://$BUCKET/skills` is the live skill store: users add and edit skills

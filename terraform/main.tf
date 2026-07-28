@@ -38,6 +38,16 @@ variable "audit_dataset" {
   default = "audit"
 }
 
+variable "p3_schedule" {
+  type    = string
+  default = "0 * * * *"
+}
+
+variable "p3_prompt" {
+  type    = string
+  default = "過去1時間の audit.runs を確認し、実行数・合計コスト・エラーの有無を短く報告してください。エラーや異常に高コストな run があれば原因を調査して指摘してください。"
+}
+
 provider "google" {
   project = var.project
   region  = var.region
@@ -181,6 +191,52 @@ resource "google_service_account_iam_member" "deployer_act_as_role" {
   service_account_id = google_service_account.role[each.key].name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_service_account" "scheduler" {
+  account_id   = "sa-scheduler"
+  display_name = "Cloud Scheduler trigger"
+}
+
+resource "google_cloud_run_v2_job_iam_member" "scheduler_invoker" {
+  name     = google_cloud_run_v2_job.runner["ops"].name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
+}
+
+resource "google_cloud_scheduler_job" "p3" {
+  name      = "naxos-p3-ops"
+  schedule  = var.p3_schedule
+  time_zone = "Asia/Tokyo"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project}/locations/${var.region}/jobs/${google_cloud_run_v2_job.runner["ops"].name}:run"
+    headers     = { "Content-Type" = "application/json" }
+    body = base64encode(jsonencode({
+      overrides = { containerOverrides = [{ args = [var.p3_prompt] }] }
+    }))
+
+    oauth_token {
+      service_account_email = google_service_account.scheduler.email
+    }
+  }
+}
+
+resource "google_secret_manager_secret" "slack_webhook_url" {
+  secret_id = "slack-webhook-url"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_iam_member" "slack_webhook_url_accessor" {
+  for_each  = local.roles
+  secret_id = google_secret_manager_secret.slack_webhook_url.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.role[each.key].email}"
 }
 
 resource "google_secret_manager_secret" "anthropic_api_key" {

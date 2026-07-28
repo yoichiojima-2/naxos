@@ -54,6 +54,9 @@ class CloudStorage:
             "storage_class": blob.storage_class,
         }
 
+    def exists(self, bucket: str, path: str) -> bool:
+        return self.client.bucket(bucket).blob(path).exists()
+
     def read_text(self, bucket: str, path: str) -> str:
         logger.info(f"read: gs://{bucket}/{path}")
         blob = self.client.bucket(bucket).get_blob(path)

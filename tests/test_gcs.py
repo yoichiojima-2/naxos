@@ -95,6 +95,14 @@ def test_download_prefix_skips_prefix_itself(tmp_path):
     assert (tmp_path / "examples").is_dir()
 
 
+def test_exists():
+    cs = make_cs()
+    cs.client.bucket.return_value.blob.return_value.exists.return_value = True
+
+    assert cs.exists("bucket", "disabled/ops") is True
+    cs.client.bucket.return_value.blob.assert_called_once_with("disabled/ops")
+
+
 def test_tools_are_read_only():
     names = {t.name for t in make_cs().tools()}
 
