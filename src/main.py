@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,16 +18,36 @@ from src.audit import log_run
 from src.bq import BigQuery
 from src.gcs import CloudStorage
 
-WS = Path(__file__).parent.parent / "ws"
-ROLES = json.loads((Path(__file__).parent.parent / "roles.json").read_text())
+ROOT = Path(__file__).parent.parent
+WS = ROOT / "ws"
+ROLES = json.loads((ROOT / "roles.json").read_text())
 BUCKET = os.environ["BUCKET"]
 
 logger = logging.getLogger(__name__)
 
 
-def sync_skills() -> None:
-    count = CloudStorage().download_prefix(BUCKET, "skills/", WS / ".claude" / "skills")
-    logger.info(f"synced {count} skill files from gs://{BUCKET}/skills")
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logging.getLogger("mcp").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("prompt")
+    parser.add_argument("--role", default="ops", choices=ROLES)
+    return parser.parse_args()
+
+
+def sync_skills(skills: list[str]) -> None:
+    dest = WS / ".claude" / "skills"
+    shutil.rmtree(dest, ignore_errors=True)
+    cs = CloudStorage()
+    count = sum(cs.download_prefix(BUCKET, f"skills/{name}/", dest / name) for name in skills)
+    logger.info(f"synced {count} skill files from gs://{BUCKET}/skills for {skills}")
 
 
 def build_options(role: str) -> ClaudeAgentOptions:
@@ -40,7 +61,6 @@ def build_options(role: str) -> ClaudeAgentOptions:
         cwd=str(WS),
         setting_sources=["project"],
         mcp_servers=servers,
-        skills=config["skills"],
         thinking={"type": "adaptive", "display": "summarized"},
         permission_mode="bypassPermissions",
         max_turns=20,
@@ -48,18 +68,10 @@ def build_options(role: str) -> ClaudeAgentOptions:
 
 
 async def main() -> None:
-    logging.basicConfig(
-        level=os.environ.get("LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    logging.getLogger("mcp").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    parser = argparse.ArgumentParser()
-    parser.add_argument("prompt")
-    parser.add_argument("--role", default="ops", choices=ROLES)
-    args = parser.parse_args()
+    configure_logging()
+    args = parse_args()
 
-    sync_skills()
+    sync_skills(ROLES[args.role]["skills"])
     started_at = datetime.now(UTC)
     run = await run_agent(args.prompt, build_options(args.role), echo=True)
     log_run(args.prompt, run, started_at)
