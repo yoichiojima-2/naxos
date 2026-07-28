@@ -1,8 +1,7 @@
 [project]
 name = "naxos"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "Multi-tenant agent platform on GCP"
 requires-python = ">=3.13"
 dependencies = [
     "claude-agent-sdk>=0.2.128",
