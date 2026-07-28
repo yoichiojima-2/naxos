@@ -21,6 +21,7 @@ src/
   main.py    # CLI entrypoint
 skills/      # out-of-the-box skills, seeded to gs://$BUCKET/skills
 terraform/   # service accounts + IAM (state in gs://$BUCKET/terraform)
+tests/       # unit tests (mocked GCP clients, no credentials needed): uv run pytest
 roles.json   # role -> mounted MCP servers + synced skills
 ws/          # agent workspace; skills sync in at startup (gitignored)
 notebook/    # experimentation playground
