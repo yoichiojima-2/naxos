@@ -217,7 +217,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-ws/.claude/
+ws/*
+!ws/.gitkeep
 
 # Terraform
 .terraform/
