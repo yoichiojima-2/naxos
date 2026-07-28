@@ -40,6 +40,11 @@ def principal_of(request: Request) -> str:
     return claims["email"]
 
 
+@app.get("/api/me")
+def me(request: Request) -> dict:
+    return {"email": principal_of(request)}
+
+
 @app.get("/api/roles")
 def roles() -> list[str]:
     return sorted(ROLES)

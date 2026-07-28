@@ -26,6 +26,7 @@ export default function Page() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [me, setMe] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,6 +37,10 @@ export default function Page() {
         if (list.length) setRole(list[0]);
       })
       .catch(() => setRoles([]));
+    fetch("/api/me")
+      .then((r) => r.json())
+      .then((data) => setMe(data.email))
+      .catch(() => setMe(""));
   }, []);
 
   async function loadRuns() {
@@ -114,6 +119,7 @@ export default function Page() {
           </button>
         </nav>
         <div className="controls">
+          {me && <span className="me">{me}</span>}
           <select value={role} onChange={(e) => setRole(e.target.value)} disabled={sessionId != null}>
             {roles.map((r) => (
               <option key={r}>{r}</option>

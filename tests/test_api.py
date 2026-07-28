@@ -13,6 +13,16 @@ def test_roles():
     assert client.get("/api/roles").json() == sorted(api.ROLES)
 
 
+def test_me():
+    assert client.get("/api/me").json() == {"email": "local-dev"}
+
+
+def test_me_requires_iap_when_audience_set(monkeypatch):
+    monkeypatch.setattr(api, "IAP_AUDIENCE", "/projects/1/services/x")
+
+    assert client.get("/api/me").status_code == 401
+
+
 def test_run_returns_result(monkeypatch):
     captured = {}
 
