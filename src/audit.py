@@ -1,12 +1,10 @@
 import json
 import logging
-import os
 import uuid
 from datetime import UTC, datetime
 
-from google.cloud import bigquery
-
 from src.agent import AgentRun
+from src.bq import BigQuery
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +12,7 @@ TABLE = "audit.runs"
 
 
 def log_run(prompt: str, run: AgentRun, started_at: datetime) -> str:
-    client = bigquery.Client(project=os.environ.get("GCLOUD_PROJECT_ID"))
+    client = BigQuery().client
     run_id = str(uuid.uuid4())
     row = {
         "run_id": run_id,

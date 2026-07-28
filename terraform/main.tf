@@ -67,3 +67,18 @@ resource "google_storage_bucket_iam_member" "bucket_reader" {
   role     = "roles/storage.objectViewer"
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
 }
+
+resource "google_secret_manager_secret" "anthropic_api_key" {
+  secret_id = "anthropic-api-key"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_iam_member" "anthropic_api_key_accessor" {
+  for_each  = var.roles
+  secret_id = google_secret_manager_secret.anthropic_api_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.role[each.key].email}"
+}

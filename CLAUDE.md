@@ -86,7 +86,7 @@ Later phases: Phase 2 = LB/IAP + shared UI + DLP + approval gate + P11 (after bu
 
 ## Hard constraints (do not violate)
 
-- **Vertex AI is the only model exit.** Never introduce Anthropic API keys or direct API calls; org policy restricts egress.
+- **Vertex AI is the only model exit.** Never introduce Anthropic API keys or direct API calls; org policy restricts egress. *Temporary Phase 1 exception: the runtime uses an Anthropic API key (Secret Manager, never in code or state) until Claude models are enabled in Vertex Model Garden — revisit before any real internal data is connected.*
 - **Governance lives in the runtime wrapper layer**, where tenant config cannot bypass it.
 - **Single project, `asia-northeast1`.** Claude model availability in this region is an open question — if a model requires another region, surface it (data-residency implications), don't silently decide.
 - **Budget: ¥100k/month hard cap, ¥70k target** (sized for the current working group — a deployment parameter that grows with adoption, not a platform property). Infra ≈ ¥20k/month (LB+IAP ~3k, UI min=1 ~5k, runner/jobs ~2k, Cloud SQL ~7k, rest ~3k), leaving ~¥50k for model usage. Budget alerts at both thresholds. Prefer scale-to-zero; the only always-on service is the UI (Phase 2).

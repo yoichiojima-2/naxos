@@ -45,6 +45,7 @@ def parse_args() -> argparse.Namespace:
 def sync_skills(skills: list[str]) -> None:
     dest = WS / ".claude" / "skills"
     shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
     cs = CloudStorage()
     count = sum(cs.download_prefix(BUCKET, f"skills/{name}/", dest / name) for name in skills)
     logger.info(f"synced {count} skill files from gs://{BUCKET}/skills for {skills}")
