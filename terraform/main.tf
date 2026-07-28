@@ -50,18 +50,23 @@ resource "google_bigquery_dataset" "audit" {
 }
 
 resource "google_cloud_run_v2_job" "runner" {
-  name     = "naxos-runner"
+  for_each = var.roles
+  name     = "naxos-runner-${each.key}"
   location = var.region
 
   template {
     template {
-      service_account = google_service_account.role["ops"].email
+      service_account = google_service_account.role[each.key].email
       max_retries     = 0
       timeout         = "1800s"
 
       containers {
-        image = "asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner"
+        image = "asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:latest"
 
+        env {
+          name  = "ROLE"
+          value = each.key
+        }
         env {
           name  = "BUCKET"
           value = var.project

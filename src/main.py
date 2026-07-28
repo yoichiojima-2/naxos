@@ -38,7 +38,7 @@ def configure_logging() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("prompt")
-    parser.add_argument("--role", default="ops", choices=ROLES)
+    parser.add_argument("--role", default=os.environ.get("ROLE", "ops"), choices=ROLES)
     return parser.parse_args()
 
 

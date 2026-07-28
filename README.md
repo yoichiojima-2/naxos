@@ -40,13 +40,25 @@ uv run python -m src.main "how many rows does bigquery-public-data.samples.shake
 
 Requires GCP Application Default Credentials (`gcloud auth application-default login`).
 
-On Cloud Run, the same entrypoint runs as job `naxos-runner` with the
-prompt given per execution (the `^@^` prefix keeps commas in the prompt
-from being split into separate args):
+On Cloud Run there is one job per role (`naxos-runner-ops`,
+`naxos-runner-analyst`), each running as its role's service account with
+`ROLE` baked in as an env var. The prompt is given per execution (the
+`^@^` prefix keeps commas in the prompt from being split into separate
+args):
 
 ```sh
-gcloud run jobs execute naxos-runner --region asia-northeast1 \
+gcloud run jobs execute naxos-runner-ops --region asia-northeast1 \
   --args="^@^any prompt here, commas included"
+```
+
+To ship a new image, build once and roll it to every job:
+
+```sh
+gcloud builds submit --tag asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner
+gcloud run jobs update naxos-runner-ops --region asia-northeast1 \
+  --image asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:latest
+gcloud run jobs update naxos-runner-analyst --region asia-northeast1 \
+  --image asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:latest
 ```
 
 ## Skills
