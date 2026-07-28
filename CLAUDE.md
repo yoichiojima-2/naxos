@@ -86,6 +86,8 @@ Later phases: Phase 2 = LB/IAP + shared UI + DLP + approval gate + P11 (after bu
 
 **Status (2026-07-28): the Phase 1 loop is built and running** — daily Scheduler → per-role Cloud Run Jobs → Agent SDK (Anthropic API key exception, see below) → Slack, with `audit.runs`, kill switch, and CI/CD (GitHub Actions + WIF). Phase-1 stand-ins that upgrade later, with the seams already in place: "tenants" are `roles.json` roles (no Cloud SQL yet — the tenant concept is deliberately parked); the kill switch is a GCS marker (`gs://$BUCKET/disabled/<role>`) checked at run start only — the before-every-tool-call check specified under Governance is not yet implemented; audit is a single `runs` table with tool calls embedded as JSON (no separate `tool_calls` table, no `principal` until IAP exists); sessions persist to `gs://$BUCKET/sessions/` for cross-run `--resume`.
 
+An early slice of Phase 2 is also deployed: `naxos-ui` (Next.js + FastAPI on the same image, chat + run history) fronted by **IAP directly on Cloud Run rather than LB → IAP** — the LB is only needed for a custom domain, and skipping it saves the ~¥3k/month it would cost. It is not reachable yet: IAP needs a custom OAuth client because this project has no parent organization (see README). The approval gate and DLP remain Phase 2 work.
+
 ## Hard constraints (do not violate)
 
 - **Vertex AI is the only model exit.** Never introduce Anthropic API keys or direct API calls; org policy restricts egress. *Temporary Phase 1 exception: the runtime uses an Anthropic API key (Secret Manager, never in code or state) until Claude models are enabled in Vertex Model Garden — revisit before any real internal data is connected.*

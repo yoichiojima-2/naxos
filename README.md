@@ -16,19 +16,27 @@ kill switch built in from the start. The platform monitors itself
 daily (dogfooding).
 
 ```
-src/
-  agent.py   # run_agent(): one agent task -> AgentRun (text, tool calls, thinking, cost)
-  audit.py   # records every run to BigQuery audit.runs
-  bq.py      # BigQuery tools: scan/row/timeout caps
-  gcs.py     # Cloud Storage tools: read-only, size-capped reads
-  main.py    # entrypoint: kill-switch check, skills/session sync, run, audit, notify
-  slack.py   # webhook notification
-skills/      # out-of-the-box skills, seeded to gs://$BUCKET/skills
-terraform/   # all topology: SAs + IAM, jobs, scheduler, secrets, WIF (state in gs://$BUCKET/terraform)
-tests/       # unit tests (mocked GCP clients, no credentials needed): uv run pytest
-roles.json   # role -> servers, skills, notify
-ws/          # agent workspace; skills sync in at startup (gitignored)
+src/naxos/
+  runner.py    # execute(): kill-switch check, skills/session sync, run, audit, persist
+  cli.py       # entrypoint for Cloud Run Jobs (unattended): run, then notify Slack
+  api.py       # entrypoint for Cloud Run Service (interactive): FastAPI behind IAP
+  agent.py     # run_agent(): one agent task -> AgentRun (text, tool calls, thinking, cost)
+  audit.py     # records every run to BigQuery audit.runs
+  bq.py        # BigQuery tools: scan/row/timeout caps
+  gcs.py       # Cloud Storage tools: read-only, size-capped reads
+  artifacts.py # publish_artifact tool: immutable publish to the shared store
+  config.py    # env, paths, roles.json
+  slack.py     # webhook notification
+frontend/      # Next.js UI, statically exported and served by api.py
+skills/        # out-of-the-box skills, seeded to gs://$BUCKET/skills
+terraform/     # all topology: SAs + IAM, jobs, scheduler, secrets, WIF (state in gs://$BUCKET/terraform)
+tests/         # unit tests (mocked GCP clients, no credentials needed): uv run pytest
+roles.json     # role -> servers, skills, notify
+ws/            # agent workspace; skills sync in at startup (gitignored)
 ```
+
+One image serves both run modes: the job entrypoint is `naxos.cli`, and the
+UI service overrides the command to run `naxos.api` under uvicorn.
 
 Guardrails live in code and IAM, never in prompts: tools are restricted by
 not being passed to the agent, query scan size is rejected server-side
@@ -39,7 +47,7 @@ before running, and write access is blocked at the service-account level.
 ```sh
 uv sync
 echo 'ANTHROPIC_API_KEY=...' > .env   # or use Vertex AI via CLAUDE_CODE_USE_VERTEX
-uv run python -m src.main "how many rows does bigquery-public-data.samples.shakespeare have?"
+uv run python -m naxos.cli "how many rows does bigquery-public-data.samples.shakespeare have?"
 ```
 
 Requires GCP Application Default Credentials (`gcloud auth application-default login`).
@@ -61,7 +69,7 @@ gcloud run jobs execute naxos-runner-ops --region asia-northeast1 \
 ```
 
 Shipping is automated: every push to `main` runs ruff, builds the image
-tagged with the commit SHA, and rolls it to both jobs
+tagged with the commit SHA, and rolls it to every job and the UI service
 (`.github/workflows/deploy.yml`, keyless GCP auth via Workload Identity
 Federation). To roll back, point the jobs at an earlier commit's tag:
 
@@ -69,6 +77,39 @@ Federation). To roll back, point the jobs at an earlier commit's tag:
 gcloud run jobs update naxos-runner-ops --region asia-northeast1 \
   --image asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:<old-sha>
 ```
+
+## Web UI
+
+`naxos-ui` is a Cloud Run Service running the same image: a Next.js chat
+and run-history view, statically exported and served by FastAPI
+(`naxos.api`). Chat picks a role, continues a session by `session_id`,
+and history reads `audit.runs` — clicking a row reopens that session.
+Locally:
+
+```sh
+uv run uvicorn naxos.api:app --reload            # api on :8000
+cd frontend && npm run dev                       # ui on :3000, proxies /api
+```
+
+Access is Identity-Aware Proxy directly on Cloud Run — no load balancer.
+The service accepts requests only from the IAP service agent, and
+`naxos.api` independently verifies the `x-goog-iap-jwt-assertion` header
+against `IAP_AUDIENCE` before accepting a request, so the identity is
+checked in the runtime too, not only at the edge. That principal is what
+lands in `audit.runs.principal`.
+
+```sh
+gcloud beta iap web add-iam-policy-binding --resource-type=cloud-run \
+  --service=naxos-ui --region=asia-northeast1 \
+  --member=user:someone@example.com --role=roles/iap.httpsResourceAccessor
+```
+
+**Not yet reachable.** IAP is enabled but returns `502 Empty Google
+Account OAuth client ID(s)/secret(s)`: this project does not belong to an
+organization, so IAP cannot provision its own OAuth client and needs a
+[custom one](https://cloud.google.com/run/docs/securing/identity-aware-proxy-cloud-run#custom-oauth-client)
+created in the Console. Nothing is exposed in the meantime — only the IAP
+service agent holds `run.invoker`.
 
 ## Scheduled runs
 
@@ -127,7 +168,7 @@ immutable, and every publish is a tool call in the audit trail.
 ## Skills
 
 `gs://$BUCKET/skills` is the live skill store: users add and edit skills
-there directly. At startup `main.py` downloads the role's skills into
+there directly. At startup the runtime downloads the role's skills into
 `ws/.claude/skills/` — locally and on Cloud Run alike. The main bucket
 is read-only for the runtime (enforced by IAM, not convention); the
 only thing it writes is session transcripts, which live in per-role
@@ -144,7 +185,7 @@ gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
 ## Roles
 
 `roles.json` maps a role to the MCP servers and skills its sessions get
-(`uv run python -m src.main --role analyst "..."`), plus per-role
+(`uv run python -m naxos.cli --role analyst "..."`), plus per-role
 behavior: `notify` (Slack). This controls which
 guarded tools are mounted — the hard data boundary comes from IAM,
 since built-in tools like Bash can reach anything the runtime
@@ -163,7 +204,7 @@ conversation continues anywhere with `--resume`, files included.
 Locally:
 
 ```sh
-uv run python -m src.main --resume <session_id> "follow-up question"
+uv run python -m naxos.cli --resume <session_id> "follow-up question"
 ```
 
 or on Cloud Run — gcloud's comma-splitting yields the three arguments;
@@ -180,7 +221,7 @@ gcloud run jobs execute naxos-runner-ops \
 The agent can query its own trail:
 
 ```sh
-uv run python -m src.main "how much have agent runs cost so far? check audit.runs"
+uv run python -m naxos.cli "how much have agent runs cost so far? check audit.runs"
 ```
 
 ## Design
