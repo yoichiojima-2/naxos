@@ -43,16 +43,18 @@ Requires GCP Application Default Credentials (`gcloud auth application-default l
 
 On Cloud Run there is one job per role (`naxos-runner-ops`,
 `naxos-runner-analyst`), each running as its role's service account with
-`ROLE` baked in as an env var. The prompt is given per execution — either
-in the console's "Execute job with overrides" container-arguments field,
-or from the CLI. Split arguments are joined back with spaces, so however
-the console or gcloud tokenizes the prompt it still arrives whole; the
-`^@^` prefix is only needed to keep literal commas (gcloud otherwise
-splits on them):
+`ROLE` baked in as an env var. The prompt is a single argument, given per
+execution. In the console's "Execute job with overrides"
+container-arguments field, wrap it in double quotes. From the CLI, gcloud
+splits `--args` on commas only, so the `^@^` delimiter prefix is needed
+just for prompts containing literal commas:
 
 ```sh
 gcloud run jobs execute naxos-runner-ops --region asia-northeast1 \
-  --args="^@^any prompt here, commas included"
+  --args="a prompt without commas needs nothing special"
+
+gcloud run jobs execute naxos-runner-ops --region asia-northeast1 \
+  --args="^@^a prompt with commas, like this one"
 ```
 
 Shipping is automated: every push to `main` runs ruff, builds the image
