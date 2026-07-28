@@ -331,9 +331,34 @@ form button:disabled {
   gap: 1rem;
 }
 
+.schedules .empty {
+  margin-top: 2rem;
+}
+
+.schedules-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.schedules-head .hint {
+  flex: 1;
+}
+
 .hint {
   font-size: 0.8rem;
   color: var(--dim);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .schedule-error {
@@ -354,7 +379,7 @@ form button:disabled {
 .schedule-head {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
+  gap: 0.7rem;
 }
 
 .schedule-head label {
@@ -365,15 +390,62 @@ form button:disabled {
   color: var(--dim);
 }
 
-.schedule-head button {
+.schedule-actions {
   margin-left: auto;
+  display: flex;
+  gap: 0.5rem;
 }
 
-.schedule .cron {
+.schedule-actions button {
+  font-size: 0.85rem;
+}
+
+.chip {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  background: #eceae4;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+
+.chip.active {
+  color: #2c6e49;
+  background: #e3efe7;
+}
+
+.schedule-when {
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+
+.schedule-when code {
+  font-family: var(--font-mono), monospace;
+  color: var(--ink);
+}
+
+.schedule-prompt {
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+
+.schedule-fields {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.schedule-fields input {
+  flex: 1;
+  min-width: 180px;
+  cursor: text;
+}
+
+.schedule-fields .cron {
   font-family: var(--font-mono), monospace;
   font-size: 0.85rem;
-  max-width: 200px;
-  cursor: text;
+  flex: 0 1 160px;
 }
 
 .schedule textarea {

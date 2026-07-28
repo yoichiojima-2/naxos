@@ -7,7 +7,7 @@ from functools import lru_cache
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from google.api_core.exceptions import InvalidArgument
+from google.api_core.exceptions import InvalidArgument, NotFound
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pydantic import BaseModel
@@ -16,7 +16,7 @@ from naxos import audit
 from naxos.agent import AgentRun
 from naxos.config import ROLES, ROOT, configure_logging
 from naxos.runner import RoleDisabled, execute
-from naxos.schedules import Schedules
+from naxos.schedules import PREFIX, Schedules
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,14 @@ class RunRequest(BaseModel):
 
 
 class ScheduleUpdate(BaseModel):
+    name: str
     cron: str
     prompt: str
     paused: bool = False
+
+
+class ScheduleCreate(ScheduleUpdate):
+    role: str
 
 
 def principal_of(request: Request) -> str:
@@ -146,17 +151,47 @@ def schedules(request: Request) -> list[dict]:
     return get_schedules().list()
 
 
-@app.put("/api/schedules/{role}")
-def update_schedule(role: str, body: ScheduleUpdate, request: Request) -> dict:
+@app.post("/api/schedules")
+def create_schedule(body: ScheduleCreate, request: Request) -> dict:
     principal = principal_of(request)
-    if role not in ROLES:
-        raise HTTPException(status_code=400, detail=f"unknown role: {role}")
+    if body.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"unknown role: {body.role}")
     try:
-        get_schedules().update(role, body.cron, body.prompt, body.paused)
+        job_id = get_schedules().create(body.role, body.name, body.cron, body.prompt, body.paused)
     except InvalidArgument as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
-    logger.info(f"schedule for {role} updated by {principal}")
-    return {"role": role, **body.model_dump()}
+    logger.info(f"schedule {job_id} created by {principal}")
+    return {"id": job_id, **body.model_dump()}
+
+
+def known_schedule(job_id: str) -> str:
+    if not job_id.startswith(PREFIX):
+        raise HTTPException(status_code=404, detail=f"unknown schedule: {job_id}")
+    return job_id
+
+
+@app.put("/api/schedules/{job_id}")
+def update_schedule(job_id: str, body: ScheduleUpdate, request: Request) -> dict:
+    principal = principal_of(request)
+    try:
+        get_schedules().update(known_schedule(job_id), body.name, body.cron, body.prompt, body.paused)
+    except InvalidArgument as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+    logger.info(f"schedule {job_id} updated by {principal}")
+    return {"id": job_id, **body.model_dump()}
+
+
+@app.delete("/api/schedules/{job_id}")
+def delete_schedule(job_id: str, request: Request) -> dict:
+    principal = principal_of(request)
+    try:
+        get_schedules().delete(known_schedule(job_id))
+    except NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+    logger.info(f"schedule {job_id} deleted by {principal}")
+    return {"id": job_id}
 
 
 static = ROOT / "frontend" / "out"

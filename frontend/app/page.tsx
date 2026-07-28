@@ -19,7 +19,24 @@ type Run = {
   is_error: boolean;
 };
 
-type Schedule = { role: string; cron: string; prompt: string; paused: boolean };
+type Schedule = {
+  id: string;
+  name: string;
+  role: string;
+  cron: string;
+  prompt: string;
+  paused: boolean;
+  next_run: string | null;
+};
+
+type ScheduleForm = {
+  id?: string;
+  name: string;
+  role: string;
+  cron: string;
+  prompt: string;
+  paused: boolean;
+};
 
 export default function Page() {
   const [tab, setTab] = useState<"chat" | "history" | "schedules">("chat");
@@ -33,8 +50,10 @@ export default function Page() {
   const [me, setMe] = useState("");
   const [status, setStatus] = useState("");
   const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [proposal, setProposal] = useState<Schedule | null>(null);
-  const [saving, setSaving] = useState("");
+  const [proposal, setProposal] = useState<ScheduleForm | null>(null);
+  const [form, setForm] = useState<ScheduleForm | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState("");
   const [scheduleError, setScheduleError] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -60,20 +79,17 @@ export default function Page() {
     }
   }
 
-  async function loadSchedules(): Promise<Schedule[]> {
+  async function loadSchedules() {
     try {
-      const list = await (await fetch("/api/schedules")).json();
-      setSchedules(list);
-      return list;
+      setSchedules(await (await fetch("/api/schedules")).json());
     } catch {
       setSchedules([]);
-      return [];
     }
   }
 
   useEffect(() => {
     if (tab === "history" && runs.length === 0) loadRuns();
-    if (tab === "schedules" && schedules.length === 0) loadSchedules();
+    if (tab === "schedules") loadSchedules();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -129,7 +145,13 @@ export default function Page() {
             final = `error: ${event.detail}`;
           } else {
             if (event.event === "proposal" && event.kind === "schedule") {
-              setProposal({ role: event.role, cron: event.cron, prompt: event.prompt, paused: false });
+              setProposal({
+                name: event.name ?? "",
+                role: event.role,
+                cron: event.cron,
+                prompt: event.prompt,
+                paused: false,
+              });
             }
             setStatus(statusLabel(event));
           }
@@ -160,25 +182,29 @@ export default function Page() {
     setProposal(null);
   }
 
-  async function reviewProposal() {
+  function reviewProposal() {
     if (!proposal) return;
-    const list = await loadSchedules();
-    if (!list.some((s) => s.role === proposal.role)) {
-      setScheduleError(`no scheduler job for role ${proposal.role}`);
-    }
-    setSchedules(list.map((s) => (s.role === proposal.role ? { ...s, cron: proposal.cron, prompt: proposal.prompt } : s)));
+    setForm(proposal);
     setProposal(null);
+    setScheduleError("");
     setTab("schedules");
   }
 
-  async function saveSchedule(schedule: Schedule) {
-    setSaving(schedule.role);
+  async function saveForm() {
+    if (!form) return;
+    setSaving(true);
     setScheduleError("");
     try {
-      const response = await fetch(`/api/schedules/${schedule.role}`, {
-        method: "PUT",
+      const response = await fetch(form.id ? `/api/schedules/${form.id}` : "/api/schedules", {
+        method: form.id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cron: schedule.cron, prompt: schedule.prompt, paused: schedule.paused }),
+        body: JSON.stringify({
+          name: form.name,
+          role: form.role,
+          cron: form.cron,
+          prompt: form.prompt,
+          paused: form.paused,
+        }),
       });
       if (!response.ok) {
         const text = await response.text();
@@ -189,16 +215,33 @@ export default function Page() {
         setScheduleError(detail);
         return;
       }
+      setForm(null);
       await loadSchedules();
     } catch (e) {
       setScheduleError(String(e));
     } finally {
-      setSaving("");
+      setSaving(false);
     }
   }
 
-  function editSchedule(role: string, patch: Partial<Schedule>) {
-    setSchedules((list) => list.map((s) => (s.role === role ? { ...s, ...patch } : s)));
+  async function deleteSchedule(schedule: Schedule) {
+    if (confirmDelete !== schedule.id) {
+      setConfirmDelete(schedule.id);
+      return;
+    }
+    setConfirmDelete("");
+    setScheduleError("");
+    try {
+      const response = await fetch(`/api/schedules/${schedule.id}`, { method: "DELETE" });
+      if (!response.ok) setScheduleError(await response.text());
+      await loadSchedules();
+    } catch (e) {
+      setScheduleError(String(e));
+    }
+  }
+
+  function editForm(patch: Partial<ScheduleForm>) {
+    setForm((f) => (f ? { ...f, ...patch } : f));
   }
 
   return (
@@ -261,7 +304,8 @@ export default function Page() {
           {proposal && (
             <div className="proposal">
               <span>
-                proposed schedule — <strong>{proposal.role}</strong> · <code>{proposal.cron}</code>
+                proposed: <strong>{proposal.name || "scheduled task"}</strong> — {proposal.role} ·{" "}
+                <code>{proposal.cron}</code>
               </span>
               <button onClick={reviewProposal}>review &amp; save</button>
               <button onClick={() => setProposal(null)}>dismiss</button>
@@ -289,38 +333,90 @@ export default function Page() {
 
       {tab === "schedules" && (
         <section className="schedules">
-          <p className="hint">
-            one scheduler job per role, seeded by terraform — the values here (cron, prompt, paused) are live and take
-            effect on save. cron is evaluated in Asia/Tokyo. you can also ask the agent in chat to propose one.
-          </p>
+          <div className="schedules-head">
+            <p className="hint">
+              scheduled tasks run the role unattended (cron in Asia/Tokyo). you can also ask the agent in chat to
+              propose one.
+            </p>
+            {!form && (
+              <button
+                className="primary"
+                onClick={() => setForm({ name: "", role, cron: "0 9 * * *", prompt: "", paused: true })}
+              >
+                new task
+              </button>
+            )}
+          </div>
           {scheduleError && <p className="schedule-error">{scheduleError}</p>}
-          {schedules.map((schedule) => (
-            <div key={schedule.role} className="schedule">
+          {form && (
+            <div className="schedule form">
               <div className="schedule-head">
-                <strong>{schedule.role}</strong>
+                <strong>{form.id ? "edit task" : "new task"}</strong>
                 <label>
-                  <input
-                    type="checkbox"
-                    checked={schedule.paused}
-                    onChange={(e) => editSchedule(schedule.role, { paused: e.target.checked })}
-                  />
+                  <input type="checkbox" checked={form.paused} onChange={(e) => editForm({ paused: e.target.checked })} />
                   paused
                 </label>
-                <button onClick={() => saveSchedule(schedule)} disabled={saving === schedule.role}>
-                  {saving === schedule.role ? "saving…" : "save"}
-                </button>
+                <div className="schedule-actions">
+                  <button onClick={() => setForm(null)}>cancel</button>
+                  <button className="primary" onClick={saveForm} disabled={saving || !form.name || !form.prompt}>
+                    {saving ? "saving…" : "save"}
+                  </button>
+                </div>
               </div>
-              <input
-                className="cron"
-                value={schedule.cron}
-                onChange={(e) => editSchedule(schedule.role, { cron: e.target.value })}
-                placeholder="0 9 * * *"
-              />
+              <div className="schedule-fields">
+                <input
+                  value={form.name}
+                  onChange={(e) => editForm({ name: e.target.value })}
+                  placeholder="task name (e.g. daily cost report)"
+                />
+                <select value={form.role} onChange={(e) => editForm({ role: e.target.value })} disabled={!!form.id}>
+                  {roles.map((r) => (
+                    <option key={r}>{r}</option>
+                  ))}
+                </select>
+                <input
+                  className="cron"
+                  value={form.cron}
+                  onChange={(e) => editForm({ cron: e.target.value })}
+                  placeholder="0 9 * * *"
+                />
+              </div>
               <textarea
-                value={schedule.prompt}
-                onChange={(e) => editSchedule(schedule.role, { prompt: e.target.value })}
+                value={form.prompt}
+                onChange={(e) => editForm({ prompt: e.target.value })}
+                placeholder="what should the agent do on each run?"
                 rows={3}
               />
+            </div>
+          )}
+          {schedules.length === 0 && !form && <p className="empty">no scheduled tasks yet</p>}
+          {schedules.map((schedule) => (
+            <div key={schedule.id} className="schedule">
+              <div className="schedule-head">
+                <strong>{schedule.name}</strong>
+                <span className="chip">{schedule.role}</span>
+                <span className={`chip ${schedule.paused ? "paused" : "active"}`}>
+                  {schedule.paused ? "paused" : "active"}
+                </span>
+                <div className="schedule-actions">
+                  <button onClick={() => deleteSchedule(schedule)}>
+                    {confirmDelete === schedule.id ? "confirm delete?" : "delete"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setForm({ ...schedule });
+                      setConfirmDelete("");
+                    }}
+                  >
+                    edit
+                  </button>
+                </div>
+              </div>
+              <p className="schedule-when">
+                <code>{schedule.cron}</code>
+                {schedule.next_run && <span> · next run {new Date(schedule.next_run).toLocaleString()}</span>}
+              </p>
+              <p className="schedule-prompt">{schedule.prompt}</p>
             </div>
           ))}
         </section>

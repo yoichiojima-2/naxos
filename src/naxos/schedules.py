@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
 
 import google.auth
@@ -12,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 REGION = "asia-northeast1"
 PREFIX = "naxos-schedule-"
+RUNNER = "naxos-runner-"
+
+
+def run_body(prompt: str) -> bytes:
+    return json.dumps({"overrides": {"containerOverrides": [{"args": [prompt]}]}}).encode()
 
 
 @dataclass
@@ -30,29 +36,62 @@ class Schedules:
     def list(self) -> list[dict]:
         out = []
         for job in self.client.list_jobs(parent=self.parent):
-            name = job.name.rsplit("/", 1)[-1]
-            if not name.startswith(PREFIX):
+            job_id = job.name.rsplit("/", 1)[-1]
+            if not job_id.startswith(PREFIX):
                 continue
             body = json.loads(job.http_target.body) if job.http_target.body else {}
             args = (body.get("overrides", {}).get("containerOverrides") or [{}])[0].get("args", [])
+            role = job.http_target.uri.rsplit(f"/jobs/{RUNNER}", 1)[-1].removesuffix(":run")
+            paused = job.state == scheduler_v1.Job.State.PAUSED
             out.append(
                 {
-                    "role": name.removeprefix(PREFIX),
+                    "id": job_id,
+                    "name": job.description or role,
+                    "role": role,
                     "cron": job.schedule,
                     "prompt": args[-1] if args else "",
-                    "paused": job.state == scheduler_v1.Job.State.PAUSED,
+                    "paused": paused,
+                    "next_run": job.schedule_time.isoformat() if not paused and job.schedule_time.timestamp() > 0 else None,
                 }
             )
-        return sorted(out, key=lambda s: s["role"])
+        return sorted(out, key=lambda s: (s["role"], s["name"]))
 
-    def update(self, role: str, cron: str, prompt: str, paused: bool) -> None:
-        name = f"{self.parent}/jobs/{PREFIX}{role}"
-        body = json.dumps({"overrides": {"containerOverrides": [{"args": [prompt]}]}}).encode()
-        job = scheduler_v1.Job(name=name, schedule=cron, http_target=scheduler_v1.HttpTarget(body=body))
-        updated = self.client.update_job(job=job, update_mask={"paths": ["schedule", "http_target.body"]})
+    def create(self, role: str, name: str, cron: str, prompt: str, paused: bool) -> str:
+        job_id = f"{PREFIX}{uuid.uuid4().hex[:8]}"
+        job = scheduler_v1.Job(
+            name=f"{self.parent}/jobs/{job_id}",
+            description=name,
+            schedule=cron,
+            time_zone="Asia/Tokyo",
+            http_target=scheduler_v1.HttpTarget(
+                http_method=scheduler_v1.HttpMethod.POST,
+                uri=f"https://run.googleapis.com/v2/{self.parent}/jobs/{RUNNER}{role}:run",
+                headers={"Content-Type": "application/json"},
+                body=run_body(prompt),
+                oauth_token=scheduler_v1.OAuthToken(
+                    service_account_email=f"sa-scheduler@{self.project}.iam.gserviceaccount.com"
+                ),
+            ),
+        )
+        self.client.create_job(parent=self.parent, job=job)
+        if paused:
+            self.client.pause_job(name=job.name)
+        logger.info(f"schedule created: {job_id} role={role} cron={cron!r} paused={paused}")
+        return job_id
+
+    def update(self, job_id: str, name: str, cron: str, prompt: str, paused: bool) -> None:
+        job_name = f"{self.parent}/jobs/{job_id}"
+        job = scheduler_v1.Job(
+            name=job_name, description=name, schedule=cron, http_target=scheduler_v1.HttpTarget(body=run_body(prompt))
+        )
+        updated = self.client.update_job(job=job, update_mask={"paths": ["description", "schedule", "http_target.body"]})
         if paused != (updated.state == scheduler_v1.Job.State.PAUSED):
-            self.client.pause_job(name=name) if paused else self.client.resume_job(name=name)
-        logger.info(f"schedule updated: {role} cron={cron!r} paused={paused}")
+            self.client.pause_job(name=job_name) if paused else self.client.resume_job(name=job_name)
+        logger.info(f"schedule updated: {job_id} cron={cron!r} paused={paused}")
+
+    def delete(self, job_id: str) -> None:
+        self.client.delete_job(name=f"{self.parent}/jobs/{job_id}")
+        logger.info(f"schedule deleted: {job_id}")
 
 
 def proposals_mcp():
@@ -67,9 +106,10 @@ def proposals_mcp():
         "propose_schedule",
         "Propose a scheduled task for the user to review and save. This does "
         "not write anything: the proposal appears to the user as a prefilled "
-        "form, and only the user can save it. cron is a standard 5-field cron "
-        "expression evaluated in Asia/Tokyo.",
-        {"role": str, "cron": str, "prompt": str},
+        "form, and only the user can save it. name is a short human-readable "
+        "title for the task. cron is a standard 5-field cron expression "
+        "evaluated in Asia/Tokyo.",
+        {"role": str, "name": str, "cron": str, "prompt": str},
     )
     async def propose_schedule(args):
         return mcp.result(f"Proposed to the user for review: role={args['role']} cron={args['cron']}. Not saved yet.")

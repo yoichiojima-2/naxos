@@ -32,25 +32,6 @@ variable "github_repo" {
 locals {
   role_config = jsondecode(file("${path.module}/../roles.json"))
   roles       = toset(keys(local.role_config))
-
-  # creation-time seeds only: cron, prompt, and paused are day-to-day values,
-  # edited via the UI or `gcloud scheduler jobs update` and ignored by
-  # Terraform after creation; every role gets a job (paused placeholder
-  # unless seeded here) so the UI can enable it without an apply
-  schedule_seeds = {
-    ops = {
-      schedule = "0 9 * * *"
-      prompt   = "Check audit.runs for the past 24 hours and report briefly: run count, total cost, and whether any runs errored. If there are errors or unusually expensive runs, investigate and point out the cause."
-      paused   = false
-    }
-  }
-  schedules = {
-    for role in local.roles : role => lookup(local.schedule_seeds, role, {
-      schedule = "0 9 * * *"
-      prompt   = "placeholder: edit before enabling"
-      paused   = true
-    })
-  }
 }
 
 variable "audit_dataset" {
@@ -272,36 +253,11 @@ resource "google_service_account" "scheduler" {
 # run.developer, not run.invoker: triggering with containerOverrides (the
 # prompt in the request body) requires run.jobs.runWithOverrides
 resource "google_cloud_run_v2_job_iam_member" "scheduler_runner" {
-  for_each = local.schedules
+  for_each = local.roles
   name     = google_cloud_run_v2_job.runner[each.key].name
   location = var.region
   role     = "roles/run.developer"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
-}
-
-resource "google_cloud_scheduler_job" "scheduled" {
-  for_each  = local.schedules
-  name      = "naxos-schedule-${each.key}"
-  schedule  = each.value.schedule
-  time_zone = "Asia/Tokyo"
-  paused    = each.value.paused
-
-  http_target {
-    http_method = "POST"
-    uri         = "https://run.googleapis.com/v2/projects/${var.project}/locations/${var.region}/jobs/${google_cloud_run_v2_job.runner[each.key].name}:run"
-    headers     = { "Content-Type" = "application/json" }
-    body = base64encode(jsonencode({
-      overrides = { containerOverrides = [{ args = [each.value.prompt] }] }
-    }))
-
-    oauth_token {
-      service_account_email = google_service_account.scheduler.email
-    }
-  }
-
-  lifecycle {
-    ignore_changes = [schedule, http_target[0].body, paused]
-  }
 }
 
 resource "google_secret_manager_secret" "slack_webhook_url" {
@@ -401,15 +357,17 @@ resource "google_project_iam_member" "ui_bigquery_job_user" {
   member  = "serviceAccount:${google_service_account.ui.email}"
 }
 
-# the UI edits schedule values (cron/prompt/paused); job existence stays in
-# Terraform, so the IAM boundary excludes create/delete/run on purpose
+# scheduled tasks (naxos-schedule-*) are user data owned by the UI/gcloud,
+# not Terraform; the IAM boundary still excludes jobs.run on purpose
 resource "google_project_iam_custom_role" "scheduler_editor" {
   role_id     = "naxosSchedulerEditor"
-  title       = "naxos scheduler value editor"
+  title       = "naxos scheduler task editor"
   permissions = [
     "cloudscheduler.jobs.get",
     "cloudscheduler.jobs.list",
+    "cloudscheduler.jobs.create",
     "cloudscheduler.jobs.update",
+    "cloudscheduler.jobs.delete",
     "cloudscheduler.jobs.pause",
     "cloudscheduler.jobs.enable",
     "cloudscheduler.locations.get",
