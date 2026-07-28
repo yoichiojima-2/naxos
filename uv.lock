@@ -7,6 +7,15 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "annotated-doc"
+version = "0.0.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/8e/38aa427ed5402449e226975b649c5dc73ccadfefeb95e6aecb8f8ea4b6b6/annotated_doc-0.0.5.tar.gz", hash = "sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb", size = 10758, upload-time = "2026-07-28T13:50:58.129Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl", hash = "sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101", size = 5302, upload-time = "2026-07-28T13:50:57.239Z" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -428,6 +437,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cc/28/c14e053b6762b1044f34a13aab6859bbf40456d37d23aa286ac24cfd9a5d/executing-2.2.1.tar.gz", hash = "sha256:3632cc370565f6648cc328b32435bd120a1e4ebb20c77e3fdde9a13cd1e533c4", size = 1129488, upload-time = "2025-09-01T09:48:10.866Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl", hash = "sha256:760643d3452b4d777d295bb167ccc74c64a81df23fb5e08eff250c425a4b2017", size = 28317, upload-time = "2025-09-01T09:48:08.5Z" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.140.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/a4/7e4dc8867a5c7f53355655314f3007e4a1f18b3ada60d49b6509b303fe29/fastapi-0.140.9.tar.gz", hash = "sha256:fadc1dae3671c34a542a34b14e3cec92ebe774b9f6ae6ae8da7339a9f0e9c287", size = 422649, upload-time = "2026-07-28T12:38:57.359Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/91/ea/113074d315b02e94ea452b0a0e0397d91d7791000215b098c03b68c2d471/fastapi-0.140.9-py3-none-any.whl", hash = "sha256:313ab1c00f02d1a2255573d456d2cb519e87826d3eb82ce75ea2da2e983bcb64", size = 131098, upload-time = "2026-07-28T12:38:55.736Z" },
 ]
 
 [[package]]
@@ -1116,12 +1141,15 @@ wheels = [
 [[package]]
 name = "naxos"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
+    { name = "fastapi" },
+    { name = "google-auth" },
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-storage" },
     { name = "python-dotenv" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -1130,15 +1158,19 @@ dev = [
     { name = "ruff" },
 ]
 test = [
+    { name = "httpx" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.2.128" },
+    { name = "fastapi", specifier = ">=0.140.9" },
+    { name = "google-auth", specifier = ">=2.40.0" },
     { name = "google-cloud-bigquery", specifier = ">=3.42.2" },
     { name = "google-cloud-storage", specifier = ">=3.13.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "uvicorn", specifier = ">=0.51.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -1146,7 +1178,10 @@ dev = [
     { name = "jupyterlab", specifier = ">=4.6.2" },
     { name = "ruff", specifier = ">=0.16.0" },
 ]
-test = [{ name = "pytest", specifier = ">=9.1.1" }]
+test = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pytest", specifier = ">=9.1.1" },
+]
 
 [[package]]
 name = "nbclient"

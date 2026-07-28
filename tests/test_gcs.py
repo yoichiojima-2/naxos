@@ -5,7 +5,7 @@ from unittest.mock import Mock, call
 import pytest
 from google.api_core.exceptions import NotFound
 
-from src.gcs import CloudStorage
+from naxos.gcs import CloudStorage
 
 
 def make_cs() -> CloudStorage:
@@ -22,7 +22,7 @@ def make_blob(name: str) -> Mock:
 
 def test_client_omits_project_when_unset(monkeypatch):
     client_cls = Mock()
-    monkeypatch.setattr("src.gcs.storage.Client", client_cls)
+    monkeypatch.setattr("naxos.gcs.storage.Client", client_cls)
 
     _ = CloudStorage(project=None).client
     _ = CloudStorage(project="p").client

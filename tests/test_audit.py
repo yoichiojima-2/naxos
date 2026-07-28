@@ -2,13 +2,13 @@ import json
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
-from src.agent import AgentRun
-from src.audit import log_run
+from naxos.agent import AgentRun
+from naxos.audit import log_run
 
 
 def make_client(monkeypatch) -> Mock:
     bq_cls = Mock()
-    monkeypatch.setattr("src.audit.BigQuery", bq_cls)
+    monkeypatch.setattr("naxos.audit.BigQuery", bq_cls)
     client = bq_cls.return_value.client
     client.insert_rows_json.return_value = []
     return client

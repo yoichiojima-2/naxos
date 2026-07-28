@@ -3,7 +3,7 @@ import json
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
-from src.bq import BigQuery
+from naxos.bq import BigQuery
 
 
 def make_bq() -> BigQuery:

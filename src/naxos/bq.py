@@ -6,7 +6,7 @@ from functools import cached_property
 from google.cloud import bigquery
 from google.cloud.bigquery import Client
 
-from src import mcp
+from naxos import mcp
 
 logger = logging.getLogger(__name__)
 

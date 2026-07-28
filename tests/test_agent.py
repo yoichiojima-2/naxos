@@ -9,7 +9,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from src.agent import run_agent
+from naxos.agent import run_agent
 
 
 def result_message(**overrides) -> ResultMessage:
@@ -32,7 +32,7 @@ def patch_query(monkeypatch, messages):
         for message in messages:
             yield message
 
-    monkeypatch.setattr("src.agent.query", fake_query)
+    monkeypatch.setattr("naxos.agent.query", fake_query)
 
 
 def test_run_agent_collects_everything(monkeypatch):

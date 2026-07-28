@@ -8,7 +8,7 @@ from google.api_core.exceptions import NotFound
 from google.cloud import storage
 from google.cloud.storage import Client
 
-from src import mcp
+from naxos import mcp
 
 logger = logging.getLogger(__name__)
 

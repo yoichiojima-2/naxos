@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.artifacts import Artifacts
+from naxos.artifacts import Artifacts
 
 
 def make_artifacts(tmp_path) -> tuple[Artifacts, Mock]:

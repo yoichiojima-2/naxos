@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from src import mcp
+from naxos import mcp
 
 
 def test_result_shape():

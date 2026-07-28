@@ -47,3 +47,6 @@ jobs:
           for role in $(jq -r 'keys[]' roles.json); do
             gcloud run jobs update "naxos-runner-$role" --region "$REGION" --image "$IMAGE:$GITHUB_SHA"
           done
+          if gcloud run services describe naxos-ui --region "$REGION" >/dev/null 2>&1; then
+            gcloud run services update naxos-ui --region "$REGION" --image "$IMAGE:$GITHUB_SHA"
+          fi

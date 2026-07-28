@@ -1,13 +1,13 @@
 import json
 from unittest.mock import Mock
 
-from src import slack
+from naxos import slack
 
 
 def test_notify_posts_payload(monkeypatch):
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/x")
     urlopen = Mock()
-    monkeypatch.setattr("src.slack.urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("naxos.slack.urllib.request.urlopen", urlopen)
 
     slack.notify("[ops] all good")
 
@@ -19,7 +19,7 @@ def test_notify_posts_payload(monkeypatch):
 def test_notify_skips_without_url(monkeypatch):
     monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
     urlopen = Mock()
-    monkeypatch.setattr("src.slack.urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("naxos.slack.urllib.request.urlopen", urlopen)
 
     slack.notify("hello")
 
@@ -28,6 +28,6 @@ def test_notify_skips_without_url(monkeypatch):
 
 def test_notify_survives_failure(monkeypatch):
     monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/x")
-    monkeypatch.setattr("src.slack.urllib.request.urlopen", Mock(side_effect=OSError("down")))
+    monkeypatch.setattr("naxos.slack.urllib.request.urlopen", Mock(side_effect=OSError("down")))
 
     slack.notify("hello")

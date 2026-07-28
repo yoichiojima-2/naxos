@@ -372,3 +372,117 @@ resource "google_storage_bucket_iam_member" "artifacts_admin" {
   role   = "roles/storage.objectAdmin"
   member = var.admin
 }
+
+resource "google_service_account" "ui" {
+  account_id   = "sa-naxos-ui"
+  display_name = "naxos UI (interactive runs; union of role grants until the runner service split)"
+}
+
+resource "google_project_iam_member" "ui_aiplatform_user" {
+  project = var.project
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.ui.email}"
+}
+
+resource "google_project_iam_member" "ui_bigquery_job_user" {
+  project = var.project
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.ui.email}"
+}
+
+resource "google_bigquery_dataset_iam_member" "ui_audit_writer" {
+  dataset_id = var.audit_dataset
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.ui.email}"
+}
+
+resource "google_storage_bucket_iam_member" "ui_bucket_reader" {
+  bucket = var.project
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.ui.email}"
+
+  condition {
+    title      = "everything-but-state"
+    expression = "!resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/terraform/\")"
+  }
+}
+
+resource "google_storage_bucket_iam_member" "ui_session_user" {
+  for_each = local.roles
+  bucket   = google_storage_bucket.sessions[each.key].name
+  role     = "roles/storage.objectUser"
+  member   = "serviceAccount:${google_service_account.ui.email}"
+}
+
+resource "google_storage_bucket_iam_member" "ui_artifact_creator" {
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.ui.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "ui_anthropic_api_key_accessor" {
+  secret_id = google_secret_manager_secret.anthropic_api_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.ui.email}"
+}
+
+resource "google_service_account_iam_member" "deployer_act_as_ui" {
+  service_account_id = google_service_account.ui.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_cloud_run_v2_service" "ui" {
+  name                = "naxos-ui"
+  location            = var.region
+  deletion_protection = false
+
+  template {
+    service_account                  = google_service_account.ui.email
+    timeout                          = "1800s"
+    max_instance_request_concurrency = 1
+
+    scaling {
+      max_instance_count = 5
+    }
+
+    containers {
+      image   = "${var.region}-docker.pkg.dev/${var.project}/cloud-run-source-deploy/naxos-runner:latest"
+      command = ["/app/.venv/bin/uvicorn"]
+      args    = ["naxos.api:app", "--host", "0.0.0.0", "--port", "8080"]
+
+      env {
+        name  = "BUCKET"
+        value = var.project
+      }
+      env {
+        name  = "LOG_LEVEL"
+        value = "INFO"
+      }
+      env {
+        name  = "IAP_AUDIENCE"
+        value = "/projects/${data.google_project.main.number}/locations/${var.region}/services/naxos-ui"
+      }
+      env {
+        name = "ANTHROPIC_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.anthropic_api_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [client, client_version, template[0].containers[0].image]
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "ui_iap_invoker" {
+  name     = google_cloud_run_v2_service.ui.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:service-${data.google_project.main.number}@gcp-sa-iap.iam.gserviceaccount.com"
+}

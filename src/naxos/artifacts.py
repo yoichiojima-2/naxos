@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from src import mcp
-from src.gcs import CloudStorage
+from naxos import mcp
+from naxos.gcs import CloudStorage
 
 logger = logging.getLogger(__name__)
 

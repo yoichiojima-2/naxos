@@ -1,0 +1,190 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #101418;
+  --panel: #1a2028;
+  --border: #2a323d;
+  --text: #dce3ea;
+  --dim: #7c8a99;
+  --accent: #4a9eff;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.6 -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+}
+
+nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+button,
+select,
+input {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+nav button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.controls {
+  margin-left: auto;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-top: 1rem;
+}
+
+.messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+}
+
+.empty {
+  color: var(--dim);
+  text-align: center;
+  margin-top: 4rem;
+}
+
+.message {
+  max-width: 85%;
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.message.you {
+  align-self: flex-end;
+  border-color: var(--accent);
+}
+
+.message pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+.message .meta {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+.thinking {
+  color: var(--dim);
+}
+
+form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+form input {
+  flex: 1;
+  cursor: text;
+}
+
+form button {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.session {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+.history {
+  padding-top: 1rem;
+  overflow-x: auto;
+}
+
+.refresh {
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--dim);
+  font-weight: 500;
+}
+
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr:hover {
+  background: var(--panel);
+}
+
+tr.error td {
+  color: #ff7b72;
+}
+
+td.prompt {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

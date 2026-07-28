@@ -1,0 +1,14 @@
+.git
+.venv
+ws
+notebook
+terraform
+tests
+frontend/node_modules
+frontend/.next
+frontend/out
+.pytest_cache
+.ruff_cache
+__pycache__
+*.md
+.env
