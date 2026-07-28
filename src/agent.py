@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 
 from claude_agent_sdk import (
@@ -9,6 +10,8 @@ from claude_agent_sdk import (
     ToolUseBlock,
     query,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -52,4 +55,5 @@ async def run_agent(prompt: str, options: ClaudeAgentOptions, echo: bool = False
             run.num_turns = message.num_turns
             run.usage = message.usage
             run.is_error = message.is_error
+            logger.info(f"run complete: cost_usd={run.cost_usd} turns={run.num_turns} error={run.is_error}")
     return run

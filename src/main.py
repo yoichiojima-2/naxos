@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import logging
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,13 +31,18 @@ def build_options(tenant: str) -> ClaudeAgentOptions:
 
 
 async def main() -> None:
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logging.getLogger("mcp").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     parser = argparse.ArgumentParser()
     parser.add_argument("prompt")
     parser.add_argument("--tenant", default="default")
     args = parser.parse_args()
 
-    run = await run_agent(args.prompt, build_options(args.tenant), echo=True)
-    print(f"\ncost: ${run.cost_usd:.4f}, turns: {run.num_turns}, error: {run.is_error}")
+    await run_agent(args.prompt, build_options(args.tenant), echo=True)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
 
 from google.cloud import storage
 from google.cloud.storage import Client
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,6 +54,7 @@ class CloudStorage:
         }
 
     def read_text(self, bucket: str, path: str) -> str:
+        logger.info(f"read [{self.tenant}]: gs://{bucket}/{path}")
         blob = self.client.bucket(bucket).get_blob(path)
         if blob is None:
             raise FileNotFoundError(f"gs://{bucket}/{path} not found")

@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
 
 from google.cloud import bigquery
 from google.cloud.bigquery import Client
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,6 +31,7 @@ class BigQuery:
         return bigquery.Client(project=self.project)
 
     def query(self, sql: str, max_rows: int | None = None) -> list[dict]:
+        logger.info(f"query [{self.tenant}]: {sql[:200]}")
         job_config = bigquery.QueryJobConfig(
             maximum_bytes_billed=self.max_bytes_billed,
             labels={"tenant": self.tenant},
