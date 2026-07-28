@@ -97,7 +97,7 @@ def save_session(cs: CloudStorage, session_id: str) -> None:
 
 def slack_message(role: str, run: AgentRun, max_chars: int = 3000) -> str:
     text = run.text[:max_chars] + ("…" if len(run.text) > max_chars else "")
-    return f"[{role}] {text}\n---\ncost ${run.cost_usd or 0:.4f} · session {run.session_id} (--resume で継続可)"
+    return f"[{role}] {text}\n---\ncost ${run.cost_usd or 0:.4f} · session {run.session_id}"
 
 
 async def main() -> None:
