@@ -323,12 +323,15 @@ resource "google_secret_manager_secret_iam_member" "anthropic_api_key_accessor" 
   member    = "serviceAccount:${google_service_account.role[each.key].email}"
 }
 
+data "google_project" "main" {
+}
+
 resource "google_billing_budget" "monthly" {
   billing_account = var.billing_account
   display_name    = "naxos monthly"
 
   budget_filter {
-    projects = ["projects/${var.project}"]
+    projects = ["projects/${data.google_project.main.number}"]
   }
 
   amount {
