@@ -146,11 +146,16 @@ resource "google_storage_bucket_iam_member" "bucket_reader" {
   bucket   = var.project
   role     = "roles/storage.objectViewer"
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
+
+  condition {
+    title      = "everything-but-sessions"
+    expression = "!resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/\")"
+  }
 }
 
 resource "google_storage_bucket_iam_member" "admin" {
   bucket = var.project
-  role   = "roles/storage.admin"
+  role   = "roles/storage.objectAdmin"
   member = var.admin
 }
 
@@ -161,8 +166,8 @@ resource "google_storage_bucket_iam_member" "session_writer" {
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
 
   condition {
-    title      = "sessions-prefix-only"
-    expression = "resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/\")"
+    title      = "own-sessions-prefix-only"
+    expression = "resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/${each.key}/\")"
   }
 }
 

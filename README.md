@@ -137,12 +137,15 @@ anywhere with `--resume` — locally:
 uv run python -m src.main --resume <session_id> "follow-up question"
 ```
 
-or on Cloud Run, where gcloud's comma-splitting of `--args` is exactly
-what's needed:
+or on Cloud Run — gcloud's comma-splitting yields the three arguments;
+for a follow-up containing literal commas, switch the delimiter:
 
 ```sh
 gcloud run jobs execute naxos-runner-ops \
   --args="--resume,<session_id>,follow-up question"
+
+gcloud run jobs execute naxos-runner-ops \
+  --args="^@^--resume@<session_id>@follow-up, with commas"
 ```
 
 The agent can query its own trail:

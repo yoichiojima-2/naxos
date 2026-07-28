@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from unittest.mock import Mock, call
 
 import pytest
+from google.api_core.exceptions import NotFound
 
 from src.gcs import CloudStorage
 
@@ -110,21 +111,21 @@ def test_exists():
 
 def test_download_file_creates_parent_dirs(tmp_path):
     cs = make_cs()
-    blob = cs.client.bucket.return_value.get_blob.return_value
+    blob = cs.client.bucket.return_value.blob.return_value
     dest = tmp_path / "nested" / "s1.jsonl"
 
-    cs.download_file("bucket", "sessions/s1.jsonl", dest)
+    cs.download_file("bucket", "sessions/ops/s1.jsonl", dest)
 
     blob.download_to_filename.assert_called_once_with(dest)
     assert dest.parent.is_dir()
 
 
-def test_download_file_missing_object():
+def test_download_file_missing_object(tmp_path):
     cs = make_cs()
-    cs.client.bucket.return_value.get_blob.return_value = None
+    cs.client.bucket.return_value.blob.return_value.download_to_filename.side_effect = NotFound("missing")
 
     with pytest.raises(FileNotFoundError):
-        cs.download_file("bucket", "sessions/missing.jsonl", "x.jsonl")
+        cs.download_file("bucket", "sessions/ops/missing.jsonl", tmp_path / "x.jsonl")
 
 
 def test_tools_are_read_only():

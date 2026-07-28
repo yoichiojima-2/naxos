@@ -67,41 +67,41 @@ def test_slack_message_truncates_long_text():
 
 
 def test_restore_session_skips_when_local_exists(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
     (tmp_path / "s1.jsonl").touch()
     cs = Mock()
 
-    main.restore_session(cs, "s1")
+    main.restore_session(cs, "ops", "s1")
 
     cs.download_file.assert_not_called()
 
 
 def test_restore_session_downloads(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
     monkeypatch.setattr(main, "BUCKET", "bucket")
     cs = Mock()
 
-    main.restore_session(cs, "s1")
+    main.restore_session(cs, "ops", "s1")
 
-    assert cs.download_file.call_args.args == ("bucket", "sessions/s1.jsonl", tmp_path / "s1.jsonl")
+    assert cs.download_file.call_args.args == ("bucket", "sessions/ops/s1.jsonl", tmp_path / "s1.jsonl")
 
 
 def test_save_session_uploads(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
     monkeypatch.setattr(main, "BUCKET", "bucket")
     (tmp_path / "s1.jsonl").touch()
     cs = Mock()
 
-    main.save_session(cs, "s1")
+    main.save_session(cs, "ops", "s1")
 
-    assert cs.upload_file.call_args.args == ("bucket", "sessions/s1.jsonl", tmp_path / "s1.jsonl")
+    assert cs.upload_file.call_args.args == ("bucket", "sessions/ops/s1.jsonl", tmp_path / "s1.jsonl")
 
 
 def test_save_session_skips_when_file_missing(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
     cs = Mock()
 
-    main.save_session(cs, "s1")
+    main.save_session(cs, "ops", "s1")
 
     cs.upload_file.assert_not_called()
 

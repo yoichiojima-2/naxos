@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
+from google.api_core.exceptions import NotFound
 from google.cloud import storage
 from google.cloud.storage import Client
 
@@ -80,12 +81,12 @@ class CloudStorage:
 
     def download_file(self, bucket: str, path: str, dest: Path | str) -> None:
         """Programmatic use only - deliberately not exposed in tools()."""
-        blob = self.client.bucket(bucket).get_blob(path)
-        if blob is None:
-            raise FileNotFoundError(f"gs://{bucket}/{path} not found")
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        blob.download_to_filename(dest)
+        try:
+            self.client.bucket(bucket).blob(path).download_to_filename(dest)
+        except NotFound:
+            raise FileNotFoundError(f"gs://{bucket}/{path} not found") from None
 
     def download_prefix(self, bucket: str, prefix: str, dest: Path | str) -> int:
         """Programmatic use only - deliberately not exposed in tools()."""

@@ -21,6 +21,7 @@ from src.gcs import CloudStorage
 
 ROOT = Path(__file__).parent.parent
 WS = ROOT / "ws"
+SESSION_DIR = Path.home() / ".claude" / "projects" / str(WS).replace("/", "-")
 ROLES = json.loads((ROOT / "roles.json").read_text())
 BUCKET = os.environ["BUCKET"]
 
@@ -74,29 +75,25 @@ def is_disabled(cs: CloudStorage, role: str) -> bool:
     return cs.exists(BUCKET, f"disabled/{role}")
 
 
-def session_dir() -> Path:
-    return Path.home() / ".claude" / "projects" / str(WS).replace("/", "-")
-
-
-def restore_session(cs: CloudStorage, session_id: str) -> None:
-    target = session_dir() / f"{session_id}.jsonl"
+def restore_session(cs: CloudStorage, role: str, session_id: str) -> None:
+    target = SESSION_DIR / f"{session_id}.jsonl"
     if target.exists():
         return
-    cs.download_file(BUCKET, f"sessions/{session_id}.jsonl", target)
-    logger.info(f"session restored: gs://{BUCKET}/sessions/{session_id}.jsonl")
+    cs.download_file(BUCKET, f"sessions/{role}/{session_id}.jsonl", target)
+    logger.info(f"session restored: gs://{BUCKET}/sessions/{role}/{session_id}.jsonl")
 
 
-def save_session(cs: CloudStorage, session_id: str) -> None:
-    source = session_dir() / f"{session_id}.jsonl"
+def save_session(cs: CloudStorage, role: str, session_id: str) -> None:
+    source = SESSION_DIR / f"{session_id}.jsonl"
     if not source.exists():
-        logger.warning(f"session file not found, skipping save: {source}")
+        logger.error(f"session file not found, transcript lost: {source}")
         return
-    uri = cs.upload_file(BUCKET, f"sessions/{session_id}.jsonl", source)
+    uri = cs.upload_file(BUCKET, f"sessions/{role}/{session_id}.jsonl", source)
     logger.info(f"session saved: {uri}")
 
 
-def slack_message(role: str, run: AgentRun, max_chars: int = 3000) -> str:
-    text = run.text[:max_chars] + ("…" if len(run.text) > max_chars else "")
+def slack_message(role: str, run: AgentRun) -> str:
+    text = run.text[:3000] + ("…" if len(run.text) > 3000 else "")
     return f"[{role}] {text}\n---\ncost ${run.cost_usd or 0:.4f} · session {run.session_id}"
 
 
@@ -111,12 +108,14 @@ async def main() -> None:
 
     sync_skills(cs, ROLES[args.role]["skills"])
     if args.resume:
-        restore_session(cs, args.resume)
+        restore_session(cs, args.role, args.resume)
     started_at = datetime.now(UTC)
     run = await run_agent(args.prompt, build_options(args.role, cs, args.resume), echo=True)
     log_run(args.prompt, run, started_at)
+    if args.resume and run.session_id != args.resume:
+        logger.error(f"resume failed: expected session {args.resume}, got {run.session_id}")
     if run.session_id:
-        save_session(cs, run.session_id)
+        save_session(cs, args.role, run.session_id)
     if ROLES[args.role].get("notify"):
         slack.notify(slack_message(args.role, run))
 
