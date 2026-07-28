@@ -33,13 +33,10 @@ def principal_of(request: Request) -> str:
     if not token:
         raise HTTPException(status_code=401, detail="missing IAP assertion")
     try:
-        claims = id_token.verify_token(token, google_requests.Request(), certs_url=IAP_CERTS_URL)
+        claims = id_token.verify_token(token, google_requests.Request(), audience=IAP_AUDIENCE, certs_url=IAP_CERTS_URL)
     except Exception as e:
         logger.error(f"IAP token verification failed: {e}")
         raise HTTPException(status_code=401, detail="invalid IAP assertion") from None
-    if claims.get("aud") != IAP_AUDIENCE:
-        logger.error(f"IAP audience mismatch: expected {IAP_AUDIENCE}, got {claims.get('aud')}")
-        raise HTTPException(status_code=401, detail="invalid IAP audience")
     return claims["email"]
 
 
