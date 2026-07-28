@@ -39,6 +39,56 @@ provider "google" {
   region  = var.region
 }
 
+resource "google_storage_bucket" "main" {
+  name     = var.project
+  location = var.region
+}
+
+resource "google_bigquery_dataset" "audit" {
+  dataset_id = var.audit_dataset
+  location   = var.region
+}
+
+resource "google_cloud_run_v2_job" "runner" {
+  name     = "naxos-runner"
+  location = var.region
+
+  template {
+    template {
+      service_account = google_service_account.role["ops"].email
+      max_retries     = 0
+      timeout         = "1800s"
+
+      containers {
+        image = "asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner"
+        args  = ["Query audit.runs and report how many agent runs happened today and their total cost. One sentence."]
+
+        env {
+          name  = "BUCKET"
+          value = var.project
+        }
+        env {
+          name  = "LOG_LEVEL"
+          value = "INFO"
+        }
+        env {
+          name = "ANTHROPIC_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.anthropic_api_key.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [client, client_version, template[0].template[0].containers[0].image]
+  }
+}
+
 resource "google_service_account" "role" {
   for_each     = var.roles
   account_id   = "sa-role-${each.key}"
