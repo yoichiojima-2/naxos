@@ -486,6 +486,11 @@ resource "google_cloud_run_v2_service" "ui" {
       command = ["/app/.venv/bin/uvicorn"]
       args    = ["naxos.api:app", "--host", "0.0.0.0", "--port", "8080"]
 
+      # the live-client pool keeps up to MAX_CLIENTS SDK subprocesses resident
+      resources {
+        limits = { memory = "2Gi", cpu = "1" }
+      }
+
       env {
         name  = "BUCKET"
         value = var.project
