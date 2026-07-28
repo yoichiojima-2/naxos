@@ -109,7 +109,12 @@ export default function Page() {
   return (
     <main>
       <header>
-        <h1>naxos</h1>
+        <h1>
+          <svg width="13" height="16" viewBox="0 0 13 16" fill="none" strokeWidth="2" aria-hidden="true">
+            <path d="M2 16V1h9v15" />
+          </svg>
+          naxos
+        </h1>
         <nav>
           <button className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}>
             chat
@@ -139,7 +144,13 @@ export default function Page() {
                 {message.meta && <span className="meta">{message.meta}</span>}
               </div>
             ))}
-            {busy && <div className="message agent thinking">…</div>}
+            {busy && (
+              <div className="message agent thinking">
+                <span />
+                <span />
+                <span />
+              </div>
+            )}
             <div ref={bottom} />
           </div>
           <form
@@ -167,30 +178,37 @@ export default function Page() {
           <button className="refresh" onClick={loadRuns}>
             refresh
           </button>
-          <table>
-            <thead>
-              <tr>
-                <th>started</th>
-                <th>role</th>
-                <th>principal</th>
-                <th>prompt</th>
-                <th>cost</th>
-                <th>turns</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run) => (
-                <tr key={run.run_id} className={run.is_error ? "error" : ""} onClick={() => openSession(run)}>
-                  <td>{run.started_at?.replace("T", " ").slice(0, 16)}</td>
-                  <td>{run.role ?? "-"}</td>
-                  <td>{run.principal ?? "-"}</td>
-                  <td className="prompt">{run.prompt}</td>
-                  <td>{run.cost_usd != null ? `$${run.cost_usd.toFixed(3)}` : "-"}</td>
-                  <td>{run.num_turns ?? "-"}</td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>started</th>
+                  <th>role</th>
+                  <th>principal</th>
+                  <th>prompt</th>
+                  <th>cost</th>
+                  <th>turns</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.length === 0 && (
+                  <tr className="empty-row">
+                    <td colSpan={6}>no runs yet</td>
+                  </tr>
+                )}
+                {runs.map((run) => (
+                  <tr key={run.run_id} className={run.is_error ? "error" : ""} onClick={() => openSession(run)}>
+                    <td>{run.started_at?.replace("T", " ").slice(0, 16)}</td>
+                    <td>{run.role ?? "-"}</td>
+                    <td>{run.principal ?? "-"}</td>
+                    <td className="prompt">{run.prompt}</td>
+                    <td>{run.cost_usd != null ? `$${run.cost_usd.toFixed(3)}` : "-"}</td>
+                    <td>{run.num_turns ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </main>
