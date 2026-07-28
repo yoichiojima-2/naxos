@@ -89,10 +89,11 @@ gcloud scheduler jobs resume naxos-schedule-ops --location asia-northeast1
 
 ## Slack
 
-Roles with `"notify": true` in `roles.json` post the final answer of
-every run to Slack (`[role] answer`) via the webhook in the
-`slack-webhook-url` secret. Without `SLACK_WEBHOOK_URL` set,
-notification is skipped.
+Roles with `"notify": true` in `roles.json` post each run's final
+answer to Slack via the webhook in the `slack-webhook-url` secret —
+truncated at 3000 chars, with a footer carrying the cost and the
+`session_id` so the conversation can be picked up with `--resume`.
+Without `SLACK_WEBHOOK_URL` set, notification is skipped.
 
 ## Skills
 

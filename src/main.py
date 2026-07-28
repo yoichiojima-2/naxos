@@ -14,7 +14,7 @@ load_dotenv(override=True)
 from claude_agent_sdk import ClaudeAgentOptions
 
 from src import slack
-from src.agent import run_agent
+from src.agent import AgentRun, run_agent
 from src.audit import log_run
 from src.bq import BigQuery
 from src.gcs import CloudStorage
@@ -95,6 +95,11 @@ def save_session(cs: CloudStorage, session_id: str) -> None:
     logger.info(f"session saved: {uri}")
 
 
+def slack_message(role: str, run: AgentRun, max_chars: int = 3000) -> str:
+    text = run.text[:max_chars] + ("…" if len(run.text) > max_chars else "")
+    return f"[{role}] {text}\n---\ncost ${run.cost_usd or 0:.4f} · session {run.session_id} (--resume で継続可)"
+
+
 async def main() -> None:
     configure_logging()
     args = parse_args()
@@ -113,7 +118,7 @@ async def main() -> None:
     if run.session_id:
         save_session(cs, run.session_id)
     if ROLES[args.role].get("notify"):
-        slack.notify(f"[{args.role}] {run.text}")
+        slack.notify(slack_message(args.role, run))
 
 
 if __name__ == "__main__":

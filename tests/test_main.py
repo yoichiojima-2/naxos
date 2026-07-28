@@ -47,6 +47,25 @@ def test_is_disabled_checks_marker_object(monkeypatch):
     assert cs.exists.call_args.args == ("bucket", "disabled/ops")
 
 
+def test_slack_message_has_footer():
+    run = main.AgentRun(text="all good", session_id="s1", cost_usd=0.0263)
+
+    message = main.slack_message("ops", run)
+
+    assert message.startswith("[ops] all good\n---\n")
+    assert "cost $0.0263" in message
+    assert "session s1" in message
+
+
+def test_slack_message_truncates_long_text():
+    run = main.AgentRun(text="x" * 5000, session_id="s1", cost_usd=0.1)
+
+    message = main.slack_message("ops", run)
+
+    assert "x" * 3000 + "…" in message
+    assert "x" * 3001 not in message
+
+
 def test_restore_session_skips_when_local_exists(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
     (tmp_path / "s1.jsonl").touch()
