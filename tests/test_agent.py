@@ -54,6 +54,7 @@ def test_run_agent_collects_everything(monkeypatch):
     run = asyncio.run(run_agent("prompt", ClaudeAgentOptions()))
 
     assert run.text == "final answer"
+    assert run.session_id == "s1"
     assert run.texts == ["the answer is 1"]
     assert run.thinkings == ["let me check"]
     assert run.tool_calls == [{"name": "query_bigquery", "input": {"sql": "select 1"}}]

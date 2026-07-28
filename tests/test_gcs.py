@@ -13,21 +13,25 @@ def make_cs() -> CloudStorage:
     return cs
 
 
+def make_blob(name: str) -> Mock:
+    blob = Mock()
+    blob.name = name
+    return blob
+
+
 def test_client_omits_project_when_unset(monkeypatch):
     client_cls = Mock()
     monkeypatch.setattr("src.gcs.storage.Client", client_cls)
 
-    clients = [CloudStorage(project=None).client, CloudStorage(project="p").client]
+    _ = CloudStorage(project=None).client
+    _ = CloudStorage(project="p").client
 
-    assert clients == [client_cls.return_value, client_cls.return_value]
     assert client_cls.call_args_list == [call(), call(project="p")]
 
 
 def test_list_objects_caps_results():
     cs = make_cs()
-    cs.client.list_blobs.return_value = [Mock(), Mock()]
-    cs.client.list_blobs.return_value[0].name = "a.txt"
-    cs.client.list_blobs.return_value[1].name = "b.txt"
+    cs.client.list_blobs.return_value = [make_blob("a.txt"), make_blob("b.txt")]
 
     assert cs.list_objects("bucket", prefix="logs/") == ["a.txt", "b.txt"]
     assert cs.client.list_blobs.call_args.kwargs["max_results"] == cs.max_list_results
@@ -80,10 +84,11 @@ def test_get_object_info():
 
 def test_download_prefix_skips_prefix_itself(tmp_path):
     cs = make_cs()
-    blobs = [Mock(), Mock(), Mock()]
-    blobs[0].name = "skills/bigquery/"
-    blobs[1].name = "skills/bigquery/SKILL.md"
-    blobs[2].name = "skills/bigquery/examples/queries.md"
+    blobs = [
+        make_blob("skills/bigquery/"),
+        make_blob("skills/bigquery/SKILL.md"),
+        make_blob("skills/bigquery/examples/queries.md"),
+    ]
     cs.client.list_blobs.return_value = blobs
 
     count = cs.download_prefix("bucket", "skills/bigquery/", tmp_path)

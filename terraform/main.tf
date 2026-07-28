@@ -30,22 +30,14 @@ variable "github_repo" {
 }
 
 locals {
-  roles = toset(keys(jsondecode(file("${path.module}/../roles.json"))))
+  role_config = jsondecode(file("${path.module}/../roles.json"))
+  roles       = toset(keys(local.role_config))
+  schedules   = { for role, config in local.role_config : role => config if can(config.schedule) }
 }
 
 variable "audit_dataset" {
   type    = string
   default = "audit"
-}
-
-variable "p3_schedule" {
-  type    = string
-  default = "0 * * * *"
-}
-
-variable "p3_prompt" {
-  type    = string
-  default = "過去1時間の audit.runs を確認し、実行数・合計コスト・エラーの有無を短く報告してください。エラーや異常に高コストな run があれば原因を調査して指摘してください。"
 }
 
 provider "google" {
@@ -208,23 +200,25 @@ resource "google_service_account" "scheduler" {
 }
 
 resource "google_cloud_run_v2_job_iam_member" "scheduler_invoker" {
-  name     = google_cloud_run_v2_job.runner["ops"].name
+  for_each = local.schedules
+  name     = google_cloud_run_v2_job.runner[each.key].name
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
 
-resource "google_cloud_scheduler_job" "p3" {
-  name      = "naxos-p3-ops"
-  schedule  = var.p3_schedule
+resource "google_cloud_scheduler_job" "scheduled" {
+  for_each  = local.schedules
+  name      = "naxos-schedule-${each.key}"
+  schedule  = each.value.schedule
   time_zone = "Asia/Tokyo"
 
   http_target {
     http_method = "POST"
-    uri         = "https://run.googleapis.com/v2/projects/${var.project}/locations/${var.region}/jobs/${google_cloud_run_v2_job.runner["ops"].name}:run"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project}/locations/${var.region}/jobs/${google_cloud_run_v2_job.runner[each.key].name}:run"
     headers     = { "Content-Type" = "application/json" }
     body = base64encode(jsonencode({
-      overrides = { containerOverrides = [{ args = [var.p3_prompt] }] }
+      overrides = { containerOverrides = [{ args = [each.value.schedule_prompt] }] }
     }))
 
     oauth_token {

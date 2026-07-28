@@ -69,11 +69,11 @@ gcloud run jobs update naxos-runner-ops --region asia-northeast1 \
 
 ## Scheduled runs
 
-Cloud Scheduler (`naxos-p3-ops`, managed in `terraform/`) triggers the
-ops job hourly with a fixed self-monitoring prompt: the platform checks
-its own `audit.runs` for errors and cost anomalies. Schedule and prompt
-are Terraform variables (`p3_schedule`, `p3_prompt`) — changing an
-unattended run is a config change, on purpose.
+A role with `schedule` and `schedule_prompt` keys in `roles.json` gets
+a Cloud Scheduler job (`naxos-schedule-<role>`, managed in `terraform/`).
+ops runs hourly with a self-monitoring prompt: the platform checks its
+own `audit.runs` for errors and cost anomalies. Changing an unattended
+run is a config change plus `terraform apply`, on purpose.
 
 ## Kill switch
 
@@ -82,17 +82,17 @@ and refuses to run. Works on scheduled and manual executions alike.
 
 ```sh
 echo "reason" | gcloud storage cp - "gs://$BUCKET/disabled/ops"   # kill
-gcloud scheduler jobs pause naxos-p3-ops --location asia-northeast1
+gcloud scheduler jobs pause naxos-schedule-ops --location asia-northeast1
 gcloud storage rm "gs://$BUCKET/disabled/ops"                     # restore
-gcloud scheduler jobs resume naxos-p3-ops --location asia-northeast1
+gcloud scheduler jobs resume naxos-schedule-ops --location asia-northeast1
 ```
 
 ## Slack
 
-When `SLACK_WEBHOOK_URL` is set, the final answer of every run is posted
-to Slack (`[role] answer`). Unset, notification is skipped. The secret
-container `slack-webhook-url` exists in Terraform; add the value with
-`gcloud secrets versions add` and wire it into the jobs to enable.
+Roles with `"notify": true` in `roles.json` post the final answer of
+every run to Slack (`[role] answer`) via the webhook in the
+`slack-webhook-url` secret. Without `SLACK_WEBHOOK_URL` set,
+notification is skipped.
 
 ## Skills
 
@@ -121,7 +121,10 @@ managed in `terraform/`) that Cloud Run jobs will run as.
 
 Every run is recorded to BigQuery: `audit.runs` (partitioned on
 `started_at`) holds the prompt, final answer, tool calls, token usage,
-and cost per run. The agent can query its own trail:
+and cost per run, along with the Agent SDK `session_id` — locally a
+previous conversation can be continued with `--resume <session_id>`
+(not yet on Cloud Run, where session state dies with the container).
+The agent can query its own trail:
 
 ```sh
 uv run python -m src.main "how much have agent runs cost so far? check audit.runs"

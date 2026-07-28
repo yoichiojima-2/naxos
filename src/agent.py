@@ -22,6 +22,7 @@ class AgentRun:
     texts: list[str] = field(default_factory=list)
     thinkings: list[str] = field(default_factory=list)
     tool_calls: list[dict] = field(default_factory=list)
+    session_id: str | None = None
     cost_usd: float | None = None
     num_turns: int | None = None
     usage: dict | None = None
@@ -51,6 +52,7 @@ async def run_agent(prompt: str, options: ClaudeAgentOptions, echo: bool = False
                         print(f"[thinking] {block.thinking}")
         elif isinstance(message, ResultMessage):
             run.text = message.result or (run.texts[-1] if run.texts else "")
+            run.session_id = message.session_id
             run.cost_usd = message.total_cost_usd
             run.num_turns = message.num_turns
             run.usage = message.usage

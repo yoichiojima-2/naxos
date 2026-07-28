@@ -17,6 +17,7 @@ def log_run(prompt: str, run: AgentRun, started_at: datetime) -> str:
     run_id = str(uuid.uuid4())
     row = {
         "run_id": run_id,
+        "session_id": run.session_id,
         "started_at": started_at.isoformat(),
         "ended_at": datetime.now(UTC).isoformat(),
         "prompt": prompt,

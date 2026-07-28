@@ -19,6 +19,7 @@ def test_log_run_inserts_row(monkeypatch):
     run = AgentRun(
         text="answer",
         tool_calls=[{"name": "query_bigquery", "input": {"sql": "select 1"}}],
+        session_id="s1",
         cost_usd=0.05,
         num_turns=2,
         usage={"input_tokens": 100},
@@ -31,6 +32,7 @@ def test_log_run_inserts_row(monkeypatch):
     assert table == "audit.runs"
     row = rows[0]
     assert row["run_id"] == run_id
+    assert row["session_id"] == "s1"
     assert row["started_at"] == "2026-07-28T12:00:00+00:00"
     assert row["prompt"] == "prompt"
     assert row["text"] == "answer"

@@ -1127,8 +1127,10 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "jupyterlab" },
-    { name = "pytest" },
     { name = "ruff" },
+]
+test = [
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -1142,9 +1144,9 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "jupyterlab", specifier = ">=4.6.2" },
-    { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.0" },
 ]
+test = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "nbclient"

@@ -40,25 +40,25 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("prompt")
     parser.add_argument("--role", default=os.environ.get("ROLE", "ops"), choices=ROLES)
+    parser.add_argument("--resume", help="session_id of a previous run to continue")
     return parser.parse_args()
 
 
-def sync_skills(skills: list[str]) -> None:
+def sync_skills(cs: CloudStorage, skills: list[str]) -> None:
     dest = WS / ".claude" / "skills"
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
-    cs = CloudStorage()
     count = sum(cs.download_prefix(BUCKET, f"skills/{name}/", dest / name) for name in skills)
     logger.info(f"synced {count} skill files from gs://{BUCKET}/skills for {skills}")
 
 
-def build_options(role: str) -> ClaudeAgentOptions:
+def build_options(role: str, cs: CloudStorage, resume: str | None = None) -> ClaudeAgentOptions:
     config = ROLES[role]
     servers = {}
     if "bq" in config["servers"]:
         servers["bq"] = BigQuery().mcp()
     if "gcs" in config["servers"]:
-        servers["gcs"] = CloudStorage().mcp()
+        servers["gcs"] = cs.mcp()
     return ClaudeAgentOptions(
         cwd=str(WS),
         setting_sources=["project"],
@@ -66,26 +66,29 @@ def build_options(role: str) -> ClaudeAgentOptions:
         thinking={"type": "adaptive", "display": "summarized"},
         permission_mode=config["permission_mode"],
         max_turns=config["max_turns"],
+        resume=resume,
     )
 
 
-def is_disabled(role: str) -> bool:
-    return CloudStorage().exists(BUCKET, f"disabled/{role}")
+def is_disabled(cs: CloudStorage, role: str) -> bool:
+    return cs.exists(BUCKET, f"disabled/{role}")
 
 
 async def main() -> None:
     configure_logging()
     args = parse_args()
+    cs = CloudStorage()
 
-    if is_disabled(args.role):
+    if is_disabled(cs, args.role):
         logger.warning(f"role {args.role} is disabled (gs://{BUCKET}/disabled/{args.role} exists), aborting")
         return
 
-    sync_skills(ROLES[args.role]["skills"])
+    sync_skills(cs, ROLES[args.role]["skills"])
     started_at = datetime.now(UTC)
-    run = await run_agent(args.prompt, build_options(args.role), echo=True)
+    run = await run_agent(args.prompt, build_options(args.role, cs, args.resume), echo=True)
     log_run(args.prompt, run, started_at)
-    slack.notify(f"[{args.role}] {run.text}")
+    if ROLES[args.role].get("notify"):
+        slack.notify(f"[{args.role}] {run.text}")
 
 
 if __name__ == "__main__":
