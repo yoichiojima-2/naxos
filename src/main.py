@@ -15,11 +15,19 @@ from src.bq import BigQuery
 from src.gcs import CloudStorage
 
 WS = Path(__file__).parent.parent / "ws"
+BUCKET = os.environ["BUCKET"]
+
+logger = logging.getLogger(__name__)
 
 
-def build_options(tenant: str) -> ClaudeAgentOptions:
-    bq = BigQuery(tenant=tenant)
-    cs = CloudStorage(tenant=tenant)
+def sync_skills() -> None:
+    count = CloudStorage().download_prefix(BUCKET, "skills/", WS / ".claude" / "skills")
+    logger.info(f"synced {count} skill files from gs://{BUCKET}/skills")
+
+
+def build_options() -> ClaudeAgentOptions:
+    bq = BigQuery()
+    cs = CloudStorage()
     return ClaudeAgentOptions(
         cwd=str(WS),
         setting_sources=["project"],
@@ -39,10 +47,10 @@ async def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     parser = argparse.ArgumentParser()
     parser.add_argument("prompt")
-    parser.add_argument("--tenant", default="default")
     args = parser.parse_args()
 
-    await run_agent(args.prompt, build_options(args.tenant), echo=True)
+    sync_skills()
+    await run_agent(args.prompt, build_options(), echo=True)
 
 
 if __name__ == "__main__":

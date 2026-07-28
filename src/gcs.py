@@ -3,6 +3,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
+from pathlib import Path
 
 from google.cloud import storage
 from google.cloud.storage import Client
@@ -22,7 +23,6 @@ class CloudStorage:
     """
 
     project: str | None = os.environ.get("GCLOUD_PROJECT_ID")
-    tenant: str = "playground"
     max_read_bytes: int = 1024**2  # 1 MB per object read
     max_list_results: int = 200
 
@@ -54,7 +54,7 @@ class CloudStorage:
         }
 
     def read_text(self, bucket: str, path: str) -> str:
-        logger.info(f"read [{self.tenant}]: gs://{bucket}/{path}")
+        logger.info(f"read: gs://{bucket}/{path}")
         blob = self.client.bucket(bucket).get_blob(path)
         if blob is None:
             raise FileNotFoundError(f"gs://{bucket}/{path} not found")
@@ -68,6 +68,20 @@ class CloudStorage:
         """Programmatic use only - deliberately not exposed in tools()."""
         self.client.bucket(bucket).blob(path).upload_from_string(data)
         return f"gs://{bucket}/{path}"
+
+    def download_prefix(self, bucket: str, prefix: str, dest: Path | str) -> int:
+        """Programmatic use only - deliberately not exposed in tools()."""
+        dest = Path(dest)
+        count = 0
+        for blob in self.client.list_blobs(bucket, prefix=prefix):
+            relative = blob.name.removeprefix(prefix)
+            if not relative:
+                continue
+            target = dest / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            blob.download_to_filename(target)
+            count += 1
+        return count
 
     def mcp(self):
         from claude_agent_sdk import create_sdk_mcp_server

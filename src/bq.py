@@ -21,7 +21,6 @@ class BigQuery:
     """
 
     project: str | None = os.environ.get("GCLOUD_PROJECT_ID")
-    tenant: str = "playground"
     max_bytes_billed: int = 10 * 1024**3  # 10 GB scan cap per query
     max_rows: int = 200
     timeout_seconds: float = 60.0
@@ -31,11 +30,8 @@ class BigQuery:
         return bigquery.Client(project=self.project)
 
     def query(self, sql: str, max_rows: int | None = None) -> list[dict]:
-        logger.info(f"query [{self.tenant}]: {sql[:200]}")
-        job_config = bigquery.QueryJobConfig(
-            maximum_bytes_billed=self.max_bytes_billed,
-            labels={"tenant": self.tenant},
-        )
+        logger.info(f"query: {sql[:200]}")
+        job_config = bigquery.QueryJobConfig(maximum_bytes_billed=self.max_bytes_billed)
         rows = self.client.query(sql, job_config=job_config).result(
             timeout=self.timeout_seconds,
             max_results=max_rows or self.max_rows,

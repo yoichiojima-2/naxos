@@ -36,6 +36,20 @@ uv run python -m src.main "how many rows does bigquery-public-data.samples.shake
 
 Requires GCP Application Default Credentials (`gcloud auth application-default login`).
 
+## Skills
+
+`gs://$BUCKET/skills` is the live skill store: users add and edit skills
+there directly. `main.py` downloads it into `ws/.claude/skills/` at
+startup; on Cloud Run the bucket will be volume-mounted instead. The
+runtime only ever reads the bucket. Set `BUCKET` in `.env`.
+
+Out-of-the-box skills are versioned in `skills/` and seeded to the bucket
+with (no delete flag, so user-added skills survive):
+
+```sh
+gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
+```
+
 ## Design
 
 See [CLAUDE.md](CLAUDE.md) for the full architecture: tenants as
