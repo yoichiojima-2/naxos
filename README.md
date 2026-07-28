@@ -117,9 +117,11 @@ Without `SLACK_WEBHOOK_URL` set, notification is skipped.
 
 `gs://$BUCKET/skills` is the live skill store: users add and edit skills
 there directly. At startup `main.py` downloads the role's skills into
-`ws/.claude/skills/` — locally and on Cloud Run alike. The runtime
-reads the bucket and writes only under `sessions/` (enforced by IAM,
-not convention). Set `BUCKET` in `.env`.
+`ws/.claude/skills/` — locally and on Cloud Run alike. The main bucket
+is read-only for the runtime (enforced by IAM, not convention); the
+only thing it writes is session transcripts, which live in per-role
+buckets (`$BUCKET-sessions-<role>`) so role isolation is plain IAM
+with no conditions. Set `BUCKET` in `.env`.
 
 Out-of-the-box skills are versioned in `skills/` and seeded to the bucket
 with (no delete flag, so user-added skills survive):
@@ -143,7 +145,7 @@ managed in `terraform/`) that Cloud Run jobs will run as.
 Every run is recorded to BigQuery: `audit.runs` (partitioned on
 `started_at`) holds the prompt, final answer, tool calls, token usage,
 and cost per run, along with the Agent SDK `session_id`. Session
-transcripts are saved to `gs://$BUCKET/sessions/` after each run and
+transcripts are saved to the role's session bucket after each run and
 restored on demand, so a previous conversation can be continued
 anywhere with `--resume` — locally:
 

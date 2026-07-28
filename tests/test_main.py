@@ -83,7 +83,7 @@ def test_restore_session_downloads(monkeypatch, tmp_path):
 
     main.restore_session(cs, "ops", "s1")
 
-    assert cs.download_file.call_args.args == ("bucket", "sessions/ops/s1.jsonl", tmp_path / "s1.jsonl")
+    assert cs.download_file.call_args.args == ("bucket-sessions-ops", "s1.jsonl", tmp_path / "s1.jsonl")
 
 
 def test_save_session_uploads(monkeypatch, tmp_path):
@@ -94,7 +94,7 @@ def test_save_session_uploads(monkeypatch, tmp_path):
 
     main.save_session(cs, "ops", "s1")
 
-    assert cs.upload_file.call_args.args == ("bucket", "sessions/ops/s1.jsonl", tmp_path / "s1.jsonl")
+    assert cs.upload_file.call_args.args == ("bucket-sessions-ops", "s1.jsonl", tmp_path / "s1.jsonl")
 
 
 def test_save_session_skips_when_file_missing(monkeypatch, tmp_path):

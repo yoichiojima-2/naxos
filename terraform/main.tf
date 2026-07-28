@@ -156,8 +156,8 @@ resource "google_storage_bucket_iam_member" "bucket_reader" {
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
 
   condition {
-    title      = "everything-but-sessions-and-state"
-    expression = "!resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/\") && !resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/terraform/\")"
+    title      = "everything-but-state"
+    expression = "!resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/terraform/\")"
   }
 }
 
@@ -167,16 +167,25 @@ resource "google_storage_bucket_iam_member" "admin" {
   member = var.admin
 }
 
-resource "google_storage_bucket_iam_member" "session_writer" {
+resource "google_storage_bucket" "sessions" {
+  for_each                    = local.roles
+  name                        = "${var.project}-sessions-${each.key}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+}
+
+resource "google_storage_bucket_iam_member" "session_user" {
   for_each = local.roles
-  bucket   = var.project
+  bucket   = google_storage_bucket.sessions[each.key].name
   role     = "roles/storage.objectUser"
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
+}
 
-  condition {
-    title      = "own-sessions-prefix-only"
-    expression = "resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/${each.key}/\")"
-  }
+resource "google_storage_bucket_iam_member" "sessions_admin" {
+  for_each = local.roles
+  bucket   = google_storage_bucket.sessions[each.key].name
+  role     = "roles/storage.objectAdmin"
+  member   = var.admin
 }
 
 resource "google_iam_workload_identity_pool" "github" {

@@ -79,8 +79,8 @@ def restore_session(cs: CloudStorage, role: str, session_id: str) -> None:
     target = SESSION_DIR / f"{session_id}.jsonl"
     if target.exists():
         return
-    cs.download_file(BUCKET, f"sessions/{role}/{session_id}.jsonl", target)
-    logger.info(f"session restored: gs://{BUCKET}/sessions/{role}/{session_id}.jsonl")
+    cs.download_file(f"{BUCKET}-sessions-{role}", f"{session_id}.jsonl", target)
+    logger.info(f"session restored: gs://{BUCKET}-sessions-{role}/{session_id}.jsonl")
 
 
 def save_session(cs: CloudStorage, role: str, session_id: str) -> None:
@@ -88,7 +88,7 @@ def save_session(cs: CloudStorage, role: str, session_id: str) -> None:
     if not source.exists():
         logger.error(f"session file not found, transcript lost: {source}")
         return
-    uri = cs.upload_file(BUCKET, f"sessions/{role}/{session_id}.jsonl", source)
+    uri = cs.upload_file(f"{BUCKET}-sessions-{role}", f"{session_id}.jsonl", source)
     logger.info(f"session saved: {uri}")
 
 
