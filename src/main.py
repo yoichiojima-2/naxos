@@ -74,6 +74,27 @@ def is_disabled(cs: CloudStorage, role: str) -> bool:
     return cs.exists(BUCKET, f"disabled/{role}")
 
 
+def session_dir() -> Path:
+    return Path.home() / ".claude" / "projects" / str(WS).replace("/", "-")
+
+
+def restore_session(cs: CloudStorage, session_id: str) -> None:
+    target = session_dir() / f"{session_id}.jsonl"
+    if target.exists():
+        return
+    cs.download_file(BUCKET, f"sessions/{session_id}.jsonl", target)
+    logger.info(f"session restored: gs://{BUCKET}/sessions/{session_id}.jsonl")
+
+
+def save_session(cs: CloudStorage, session_id: str) -> None:
+    source = session_dir() / f"{session_id}.jsonl"
+    if not source.exists():
+        logger.warning(f"session file not found, skipping save: {source}")
+        return
+    uri = cs.upload_file(BUCKET, f"sessions/{session_id}.jsonl", source)
+    logger.info(f"session saved: {uri}")
+
+
 async def main() -> None:
     configure_logging()
     args = parse_args()
@@ -84,9 +105,13 @@ async def main() -> None:
         return
 
     sync_skills(cs, ROLES[args.role]["skills"])
+    if args.resume:
+        restore_session(cs, args.resume)
     started_at = datetime.now(UTC)
     run = await run_agent(args.prompt, build_options(args.role, cs, args.resume), echo=True)
     log_run(args.prompt, run, started_at)
+    if run.session_id:
+        save_session(cs, run.session_id)
     if ROLES[args.role].get("notify"):
         slack.notify(f"[{args.role}] {run.text}")
 

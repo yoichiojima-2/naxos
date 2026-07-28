@@ -121,9 +121,23 @@ managed in `terraform/`) that Cloud Run jobs will run as.
 
 Every run is recorded to BigQuery: `audit.runs` (partitioned on
 `started_at`) holds the prompt, final answer, tool calls, token usage,
-and cost per run, along with the Agent SDK `session_id` — locally a
-previous conversation can be continued with `--resume <session_id>`
-(not yet on Cloud Run, where session state dies with the container).
+and cost per run, along with the Agent SDK `session_id`. Session
+transcripts are saved to `gs://$BUCKET/sessions/` after each run and
+restored on demand, so a previous conversation can be continued
+anywhere with `--resume` — locally:
+
+```sh
+uv run python -m src.main --resume <session_id> "follow-up question"
+```
+
+or on Cloud Run, where gcloud's comma-splitting of `--args` is exactly
+what's needed:
+
+```sh
+gcloud run jobs execute naxos-runner-ops \
+  --args="--resume,<session_id>,follow-up question"
+```
+
 The agent can query its own trail:
 
 ```sh

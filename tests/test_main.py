@@ -47,6 +47,46 @@ def test_is_disabled_checks_marker_object(monkeypatch):
     assert cs.exists.call_args.args == ("bucket", "disabled/ops")
 
 
+def test_restore_session_skips_when_local_exists(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    (tmp_path / "s1.jsonl").touch()
+    cs = Mock()
+
+    main.restore_session(cs, "s1")
+
+    cs.download_file.assert_not_called()
+
+
+def test_restore_session_downloads(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "BUCKET", "bucket")
+    cs = Mock()
+
+    main.restore_session(cs, "s1")
+
+    assert cs.download_file.call_args.args == ("bucket", "sessions/s1.jsonl", tmp_path / "s1.jsonl")
+
+
+def test_save_session_uploads(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    monkeypatch.setattr(main, "BUCKET", "bucket")
+    (tmp_path / "s1.jsonl").touch()
+    cs = Mock()
+
+    main.save_session(cs, "s1")
+
+    assert cs.upload_file.call_args.args == ("bucket", "sessions/s1.jsonl", tmp_path / "s1.jsonl")
+
+
+def test_save_session_skips_when_file_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "session_dir", lambda: tmp_path)
+    cs = Mock()
+
+    main.save_session(cs, "s1")
+
+    cs.upload_file.assert_not_called()
+
+
 def test_sync_skills_replaces_dest(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "WS", tmp_path)
     monkeypatch.setattr(main, "BUCKET", "bucket")

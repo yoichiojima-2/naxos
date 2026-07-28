@@ -40,14 +40,20 @@ variable "audit_dataset" {
   default = "audit"
 }
 
+variable "admin" {
+  type    = string
+  default = "user:yoichiojima@gmail.com"
+}
+
 provider "google" {
   project = var.project
   region  = var.region
 }
 
 resource "google_storage_bucket" "main" {
-  name     = var.project
-  location = var.region
+  name                        = var.project
+  location                    = var.region
+  uniform_bucket_level_access = true
 }
 
 resource "google_bigquery_dataset" "audit" {
@@ -140,6 +146,24 @@ resource "google_storage_bucket_iam_member" "bucket_reader" {
   bucket   = var.project
   role     = "roles/storage.objectViewer"
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
+}
+
+resource "google_storage_bucket_iam_member" "admin" {
+  bucket = var.project
+  role   = "roles/storage.admin"
+  member = var.admin
+}
+
+resource "google_storage_bucket_iam_member" "session_writer" {
+  for_each = local.roles
+  bucket   = var.project
+  role     = "roles/storage.objectUser"
+  member   = "serviceAccount:${google_service_account.role[each.key].email}"
+
+  condition {
+    title      = "sessions-prefix-only"
+    expression = "resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/\")"
+  }
 }
 
 resource "google_iam_workload_identity_pool" "github" {

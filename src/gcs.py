@@ -73,6 +73,20 @@ class CloudStorage:
         self.client.bucket(bucket).blob(path).upload_from_string(data)
         return f"gs://{bucket}/{path}"
 
+    def upload_file(self, bucket: str, path: str, source: Path | str) -> str:
+        """Programmatic use only - deliberately not exposed in tools()."""
+        self.client.bucket(bucket).blob(path).upload_from_filename(str(source))
+        return f"gs://{bucket}/{path}"
+
+    def download_file(self, bucket: str, path: str, dest: Path | str) -> None:
+        """Programmatic use only - deliberately not exposed in tools()."""
+        blob = self.client.bucket(bucket).get_blob(path)
+        if blob is None:
+            raise FileNotFoundError(f"gs://{bucket}/{path} not found")
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(dest)
+
     def download_prefix(self, bucket: str, prefix: str, dest: Path | str) -> int:
         """Programmatic use only - deliberately not exposed in tools()."""
         dest = Path(dest)

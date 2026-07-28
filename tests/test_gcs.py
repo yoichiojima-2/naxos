@@ -108,6 +108,25 @@ def test_exists():
     cs.client.bucket.return_value.blob.assert_called_once_with("disabled/ops")
 
 
+def test_download_file_creates_parent_dirs(tmp_path):
+    cs = make_cs()
+    blob = cs.client.bucket.return_value.get_blob.return_value
+    dest = tmp_path / "nested" / "s1.jsonl"
+
+    cs.download_file("bucket", "sessions/s1.jsonl", dest)
+
+    blob.download_to_filename.assert_called_once_with(dest)
+    assert dest.parent.is_dir()
+
+
+def test_download_file_missing_object():
+    cs = make_cs()
+    cs.client.bucket.return_value.get_blob.return_value = None
+
+    with pytest.raises(FileNotFoundError):
+        cs.download_file("bucket", "sessions/missing.jsonl", "x.jsonl")
+
+
 def test_tools_are_read_only():
     names = {t.name for t in make_cs().tools()}
 
