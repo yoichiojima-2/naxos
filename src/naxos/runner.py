@@ -24,6 +24,7 @@ def is_disabled(cs: CloudStorage, role: str) -> bool:
 
 
 def clear_ws() -> None:
+    WS.mkdir(exist_ok=True)
     for path in WS.iterdir():
         if path.name == ".claude":
             continue

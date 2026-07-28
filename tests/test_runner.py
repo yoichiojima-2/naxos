@@ -48,6 +48,14 @@ def test_clear_ws_keeps_claude_dir(monkeypatch, tmp_path):
     assert not (tmp_path / "old-dir").exists()
 
 
+def test_clear_ws_creates_missing_ws(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "WS", tmp_path / "ws")
+
+    runner.clear_ws()
+
+    assert (tmp_path / "ws").is_dir()
+
+
 def session_env(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "SESSION_DIR", tmp_path / "proj")
     monkeypatch.setattr(runner, "WS", tmp_path / "ws")
