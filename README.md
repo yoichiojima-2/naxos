@@ -51,14 +51,14 @@ gcloud run jobs execute naxos-runner-ops --region asia-northeast1 \
   --args="^@^any prompt here, commas included"
 ```
 
-To ship a new image, build once and roll it to every job:
+Shipping is automated: every push to `main` runs ruff, builds the image
+tagged with the commit SHA, and rolls it to both jobs
+(`.github/workflows/deploy.yml`, keyless GCP auth via Workload Identity
+Federation). To roll back, point the jobs at an earlier commit's tag:
 
 ```sh
-gcloud builds submit --tag asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner
 gcloud run jobs update naxos-runner-ops --region asia-northeast1 \
-  --image asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:latest
-gcloud run jobs update naxos-runner-analyst --region asia-northeast1 \
-  --image asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:latest
+  --image asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:<old-sha>
 ```
 
 ## Skills
