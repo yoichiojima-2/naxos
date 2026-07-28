@@ -60,7 +60,7 @@ variable "billing_account" {
 
 variable "budget_jpy" {
   type    = number
-  default = 100000
+  default = 2000
 }
 
 provider "google" {
