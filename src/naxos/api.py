@@ -164,17 +164,17 @@ def create_schedule(body: ScheduleCreate, request: Request) -> dict:
     return {"id": job_id, **body.model_dump()}
 
 
-def known_schedule(job_id: str) -> str:
+def check_known_schedule(job_id: str) -> None:
     if not job_id.startswith(PREFIX):
         raise HTTPException(status_code=404, detail=f"unknown schedule: {job_id}")
-    return job_id
 
 
 @app.put("/api/schedules/{job_id}")
 def update_schedule(job_id: str, body: ScheduleUpdate, request: Request) -> dict:
     principal = principal_of(request)
+    check_known_schedule(job_id)
     try:
-        get_schedules().update(known_schedule(job_id), body.name, body.cron, body.prompt, body.paused)
+        get_schedules().update(job_id, body.name, body.cron, body.prompt, body.paused)
     except InvalidArgument as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
     except NotFound as e:
@@ -186,8 +186,9 @@ def update_schedule(job_id: str, body: ScheduleUpdate, request: Request) -> dict
 @app.delete("/api/schedules/{job_id}")
 def delete_schedule(job_id: str, request: Request) -> dict:
     principal = principal_of(request)
+    check_known_schedule(job_id)
     try:
-        get_schedules().delete(known_schedule(job_id))
+        get_schedules().delete(job_id)
     except NotFound as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
     logger.info(f"schedule {job_id} deleted by {principal}")
