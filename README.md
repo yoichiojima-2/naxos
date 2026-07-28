@@ -20,6 +20,8 @@ src/
   gcs.py     # Cloud Storage tools: read-only, size-capped reads
   main.py    # CLI entrypoint
 skills/      # out-of-the-box skills, seeded to gs://$BUCKET/skills
+terraform/   # service accounts + IAM (state in gs://$BUCKET/terraform)
+roles.json   # role -> mounted MCP servers + synced skills
 ws/          # agent workspace; skills sync in at startup (gitignored)
 notebook/    # experimentation playground
 ```
@@ -56,9 +58,10 @@ gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
 
 `roles.json` maps a role to the MCP servers and skills its sessions get
 (`uv run python -m src.main --role analyst "..."`). This controls which
-guarded tools are mounted — the hard data boundary comes from IAM
-(per-role service accounts) at deploy time, since built-in tools like
-Bash can reach anything the runtime credentials allow.
+guarded tools are mounted — the hard data boundary comes from IAM,
+since built-in tools like Bash can reach anything the runtime
+credentials allow: each role has a service account (`sa-role-<name>`,
+managed in `terraform/`) that Cloud Run jobs will run as.
 
 ## Audit
 
