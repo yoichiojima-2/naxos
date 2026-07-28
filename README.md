@@ -40,6 +40,15 @@ uv run python -m src.main "how many rows does bigquery-public-data.samples.shake
 
 Requires GCP Application Default Credentials (`gcloud auth application-default login`).
 
+On Cloud Run, the same entrypoint runs as job `naxos-runner` with the
+prompt given per execution (the `^@^` prefix keeps commas in the prompt
+from being split into separate args):
+
+```sh
+gcloud run jobs execute naxos-runner --region asia-northeast1 \
+  --args="^@^any prompt here, commas included"
+```
+
 ## Skills
 
 `gs://$BUCKET/skills` is the live skill store: users add and edit skills

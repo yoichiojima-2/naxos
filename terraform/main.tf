@@ -61,7 +61,6 @@ resource "google_cloud_run_v2_job" "runner" {
 
       containers {
         image = "asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner"
-        args  = ["Query audit.runs and report how many agent runs happened today and their total cost. One sentence."]
 
         env {
           name  = "BUCKET"
