@@ -13,7 +13,7 @@ The Phase 1 walking skeleton is complete and running: Cloud Scheduler →
 Cloud Run Job → [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk)
 with guarded GCP tools → Slack notification, with the audit trail and
 kill switch built in from the start. The platform monitors itself
-hourly (dogfooding).
+daily (dogfooding).
 
 ```
 src/
@@ -76,8 +76,8 @@ Terraform creates one Cloud Scheduler job per scheduled role
 (`naxos-schedule-<role>`, seeds in `terraform/main.tf`) and thereafter
 ignores its cron and prompt — like secret values and images, those are
 day-to-day values owned by gcloud, editable without an apply. ops runs
-hourly with a self-monitoring prompt: the platform checks its own
-`audit.runs` for errors and cost anomalies.
+daily at 09:00 JST with a self-monitoring prompt: the platform checks
+its own `audit.runs` for errors and cost anomalies.
 
 ```sh
 # change the cadence

@@ -37,8 +37,8 @@ locals {
   # via `gcloud scheduler jobs update` and ignored by Terraform after creation
   schedules = {
     ops = {
-      schedule = "0 * * * *"
-      prompt   = "過去1時間の audit.runs を確認し、実行数・合計コスト・エラーの有無を短く報告してください。エラーや異常に高コストな run があれば原因を調査して指摘してください。"
+      schedule = "0 9 * * *"
+      prompt   = "過去24時間の audit.runs を確認し、実行数・合計コスト・エラーの有無を短く報告してください。エラーや異常に高コストな run があれば原因を調査して指摘してください。"
     }
   }
 }
@@ -156,8 +156,8 @@ resource "google_storage_bucket_iam_member" "bucket_reader" {
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
 
   condition {
-    title      = "everything-but-sessions"
-    expression = "!resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/\")"
+    title      = "everything-but-sessions-and-state"
+    expression = "!resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/sessions/\") && !resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/terraform/\")"
   }
 }
 
@@ -236,11 +236,13 @@ resource "google_service_account" "scheduler" {
   display_name = "Cloud Scheduler trigger"
 }
 
-resource "google_cloud_run_v2_job_iam_member" "scheduler_invoker" {
+# run.developer, not run.invoker: triggering with containerOverrides (the
+# prompt in the request body) requires run.jobs.runWithOverrides
+resource "google_cloud_run_v2_job_iam_member" "scheduler_runner" {
   for_each = local.schedules
   name     = google_cloud_run_v2_job.runner[each.key].name
   location = var.region
-  role     = "roles/run.invoker"
+  role     = "roles/run.developer"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
 
