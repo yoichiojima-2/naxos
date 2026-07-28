@@ -52,6 +52,14 @@ with (no delete flag, so user-added skills survive):
 gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
 ```
 
+## Roles
+
+`roles.json` maps a role to the MCP servers and skills its sessions get
+(`uv run python -m src.main --role analyst "..."`). This controls which
+guarded tools are mounted — the hard data boundary comes from IAM
+(per-role service accounts) at deploy time, since built-in tools like
+Bash can reach anything the runtime credentials allow.
+
 ## Audit
 
 Every run is recorded to BigQuery: `audit.runs` (partitioned on

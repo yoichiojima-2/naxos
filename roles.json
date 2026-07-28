@@ -1,0 +1,10 @@
+{
+  "ops": {
+    "servers": ["bq", "gcs"],
+    "skills": ["bigquery", "cloud-storage"]
+  },
+  "analyst": {
+    "servers": ["bq"],
+    "skills": ["bigquery"]
+  }
+}
