@@ -181,7 +181,12 @@ export default function Page() {
         body: JSON.stringify({ cron: schedule.cron, prompt: schedule.prompt, paused: schedule.paused }),
       });
       if (!response.ok) {
-        setScheduleError((await response.json()).detail ?? response.statusText);
+        const text = await response.text();
+        let detail = text || response.statusText;
+        try {
+          detail = JSON.parse(text).detail ?? detail;
+        } catch {}
+        setScheduleError(detail);
         return;
       }
       await loadSchedules();
