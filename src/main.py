@@ -37,9 +37,11 @@ def configure_logging() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("prompt")
+    parser.add_argument("prompt", nargs="+", help="prompt text; multiple args are joined with spaces")
     parser.add_argument("--role", default=os.environ.get("ROLE", "ops"), choices=ROLES)
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.prompt = " ".join(args.prompt)
+    return args
 
 
 def sync_skills(skills: list[str]) -> None:

@@ -27,6 +27,12 @@ def test_parse_args_role_defaults_to_env(monkeypatch):
     assert args.role == "analyst"
 
 
+def test_parse_args_joins_split_prompt(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["main", "audit.runs", "の今日のコストを教えて"])
+
+    assert main.parse_args().prompt == "audit.runs の今日のコストを教えて"
+
+
 def test_sync_skills_replaces_dest(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "WS", tmp_path)
     monkeypatch.setattr(main, "BUCKET", "bucket")
