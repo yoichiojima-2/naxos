@@ -3,7 +3,8 @@
     "servers": [
       "bq",
       "gcs",
-      "artifacts"
+      "artifacts",
+      "schedules"
     ],
     "skills": [
       "bigquery",
@@ -16,7 +17,8 @@
   "analyst": {
     "servers": [
       "bq",
-      "artifacts"
+      "artifacts",
+      "schedules"
     ],
     "skills": [
       "bigquery"

@@ -3,20 +3,34 @@ import logging
 import shutil
 from datetime import UTC, datetime
 
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
-from naxos.agent import AgentRun, run_agent
+from naxos.agent import AgentRun, collect, run_agent
 from naxos.artifacts import Artifacts
 from naxos.audit import log_run
 from naxos.bq import BigQuery
 from naxos.config import BUCKET, ROLES, SESSION_DIR, WS
 from naxos.gcs import CloudStorage
+from naxos.schedules import proposals_mcp
 
 logger = logging.getLogger(__name__)
 
 
 class RoleDisabled(Exception):
     pass
+
+
+# live SDK clients by session_id, so follow-up turns skip the connect/replay
+# cost; instance-local, so a lost instance just falls back to --resume
+clients: dict[str, ClaudeSDKClient] = {}
+MAX_CLIENTS = 4
+
+
+async def disconnect(client: ClaudeSDKClient) -> None:
+    try:
+        await client.disconnect()
+    except Exception as e:
+        logger.warning(f"client disconnect failed: {e}")
 
 
 def is_disabled(cs: CloudStorage, role: str) -> bool:
@@ -74,6 +88,8 @@ def build_options(role: str, cs: CloudStorage, resume: str | None = None) -> Cla
         servers["gcs"] = cs.mcp()
     if "artifacts" in config["servers"]:
         servers["artifacts"] = Artifacts(role, f"{BUCKET}-artifacts", WS, cs).mcp()
+    if "schedules" in config["servers"]:
+        servers["schedules"] = proposals_mcp()
     return ClaudeAgentOptions(
         cwd=str(WS),
         setting_sources=["project"],
@@ -85,6 +101,28 @@ def build_options(role: str, cs: CloudStorage, resume: str | None = None) -> Cla
     )
 
 
+async def run_keep_alive(prompt: str, role: str, cs: CloudStorage, resume, echo, on_event, client=None) -> AgentRun:
+    if client is None:
+        client = ClaudeSDKClient(build_options(role, cs, resume))
+        await client.connect()
+    try:
+        await client.query(prompt)
+        run = await collect(client.receive_response(), echo=echo, on_event=on_event)
+    except BaseException:
+        await disconnect(client)
+        raise
+    if run.session_id:
+        clients[run.session_id] = client
+        if len(clients) > MAX_CLIENTS:
+            evicted, old = next(iter(clients.items()))
+            del clients[evicted]
+            await disconnect(old)
+            logger.info(f"evicted idle client for session {evicted}")
+    else:
+        await disconnect(client)
+    return run
+
+
 async def execute(
     prompt: str,
     role: str,
@@ -94,21 +132,27 @@ async def execute(
     echo: bool = False,
     fresh_ws: bool = False,
     on_event=None,
+    keep_alive: bool = False,
 ) -> AgentRun:
     cs = CloudStorage()
+    if await asyncio.to_thread(is_disabled, cs, role):
+        raise RoleDisabled(f"role {role} is disabled (gs://{BUCKET}/disabled/{role} exists)")
+    client = clients.pop(resume, None) if keep_alive and resume else None
 
     def prepare() -> None:
-        if is_disabled(cs, role):
-            raise RoleDisabled(f"role {role} is disabled (gs://{BUCKET}/disabled/{role} exists)")
         if fresh_ws:
             clear_ws()
         sync_skills(cs, ROLES[role]["skills"])
         if resume:
             restore_session(cs, role, resume)
 
-    await asyncio.to_thread(prepare)
+    if client is None:
+        await asyncio.to_thread(prepare)
     started_at = datetime.now(UTC)
-    run = await run_agent(prompt, build_options(role, cs, resume), echo=echo, on_event=on_event)
+    if keep_alive:
+        run = await run_keep_alive(prompt, role, cs, resume, echo, on_event, client)
+    else:
+        run = await run_agent(prompt, build_options(role, cs, resume), echo=echo, on_event=on_event)
     if resume and run.session_id != resume:
         logger.error(f"resume failed: expected session {resume}, got {run.session_id}")
 

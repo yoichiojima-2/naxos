@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.140.9",
     "google-auth>=2.40.0",
     "google-cloud-bigquery>=3.42.2",
+    "google-cloud-scheduler>=2.20.0",
     "google-cloud-storage>=3.13.0",
     "python-dotenv>=1.2.2",
     "uvicorn>=0.51.0",

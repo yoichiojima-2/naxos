@@ -17,10 +17,11 @@ daily (dogfooding).
 
 ```
 src/naxos/
-  runner.py    # execute(): kill-switch check, skills/session sync, run, audit, persist
+  runner.py    # execute(): kill-switch check, skills/session sync, run, audit, persist; live-client pool
   cli.py       # entrypoint for Cloud Run Jobs (unattended): run, then notify Slack
-  api.py       # entrypoint for Cloud Run Service (interactive): FastAPI behind IAP
-  agent.py     # run_agent(): one agent task -> AgentRun (text, tool calls, thinking, cost)
+  api.py       # entrypoint for Cloud Run Service (interactive): FastAPI behind IAP, NDJSON streaming
+  agent.py     # collect()/run_agent(): message stream -> AgentRun (text, tool calls, thinking, cost)
+  schedules.py # Cloud Scheduler values (cron/prompt/paused) + propose_schedule tool (writes nothing)
   audit.py     # records every run to BigQuery audit.runs
   bq.py        # BigQuery tools: scan/row/timeout caps
   gcs.py       # Cloud Storage tools: read-only, size-capped reads
@@ -80,11 +81,16 @@ gcloud run jobs update naxos-runner-ops --region asia-northeast1 \
 
 ## Web UI
 
-`naxos-ui` is a Cloud Run Service running the same image: a Next.js chat
-and run-history view, statically exported and served by FastAPI
-(`naxos.api`). Chat picks a role, continues a session by `session_id`,
-and history reads `audit.runs` — clicking a row reopens that session.
-Locally:
+`naxos-ui` is a Cloud Run Service running the same image: a Next.js app,
+statically exported and served by FastAPI (`naxos.api`). Chat picks a
+role and streams live status while the agent works (`thinking…`,
+`using query_bigquery…`) over NDJSON, rendering the reply as markdown;
+history reads `audit.runs` and clicking a row reopens that session;
+schedules edits each role's Cloud Scheduler values in place. Follow-up
+turns reuse a live SDK client held in instance memory (Cloud Run session
+affinity routes the browser back to it), so multi-turn chat skips the
+connect-and-replay cost; if the instance is gone, the turn falls back to
+`--resume` from the session bucket transparently. Locally:
 
 ```sh
 uv run uvicorn naxos.api:app --reload            # api on :8000
@@ -96,7 +102,10 @@ The service accepts requests only from the IAP service agent, and
 `naxos.api` independently verifies the `x-goog-iap-jwt-assertion` header
 against `IAP_AUDIENCE` before accepting a request, so the identity is
 checked in the runtime too, not only at the edge. That principal is what
-lands in `audit.runs.principal`.
+lands in `audit.runs.principal`. Because this project has no parent
+organization, IAP uses a custom OAuth client (created once in the
+Console, consent screen in Testing mode); onboarding a user is two
+steps — add them as a test user of the OAuth app, and:
 
 ```sh
 gcloud beta iap web add-iam-policy-binding --resource-type=cloud-run \
@@ -104,21 +113,18 @@ gcloud beta iap web add-iam-policy-binding --resource-type=cloud-run \
   --member=user:someone@example.com --role=roles/iap.httpsResourceAccessor
 ```
 
-**Not yet reachable.** IAP is enabled but returns `502 Empty Google
-Account OAuth client ID(s)/secret(s)`: this project does not belong to an
-organization, so IAP cannot provision its own OAuth client and needs a
-[custom one](https://cloud.google.com/run/docs/securing/identity-aware-proxy-cloud-run#custom-oauth-client)
-created in the Console. Nothing is exposed in the meantime — only the IAP
-service agent holds `run.invoker`.
-
 ## Scheduled runs
 
-Terraform creates one Cloud Scheduler job per scheduled role
-(`naxos-schedule-<role>`, seeds in `terraform/main.tf`) and thereafter
-ignores its cron and prompt — like secret values and images, those are
-day-to-day values owned by gcloud, editable without an apply. ops runs
-daily at 09:00 JST with a self-monitoring prompt: the platform checks
-its own `audit.runs` for errors and cost anomalies.
+Terraform creates one Cloud Scheduler job per role
+(`naxos-schedule-<role>`, seeds in `terraform/main.tf` — roles without a
+real schedule yet are seeded paused) and thereafter ignores its cron,
+prompt, and paused state — like secret values and images, those are
+day-to-day values editable without an apply, from the UI's schedules tab
+or gcloud. In chat, the agent can draft one via the `propose_schedule`
+tool — the tool writes nothing; the UI catches the call in the event
+stream and opens a prefilled form, and only a signed-in human saves it.
+ops runs daily at 09:00 JST with a self-monitoring prompt: the platform
+checks its own `audit.runs` for errors and cost anomalies.
 
 ```sh
 # change the cadence

@@ -1,6 +1,8 @@
-from unittest.mock import Mock
+import asyncio
+from unittest.mock import AsyncMock, Mock
 
 from naxos import runner
+from naxos.agent import AgentRun
 
 
 def test_build_options_mounts_only_role_servers(monkeypatch):
@@ -133,3 +135,73 @@ def test_sync_skills_replaces_dest(monkeypatch, tmp_path):
     calls = cs.download_prefix.call_args_list
     assert calls[0].args == ("bucket", "skills/bigquery/", dest / "bigquery")
     assert calls[1].args == ("bucket", "skills/cloud-storage/", dest / "cloud-storage")
+
+
+def fake_client():
+    client = Mock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.query = AsyncMock()
+    client.receive_response = Mock(return_value="stream")
+    return client
+
+
+def keep_alive_env(monkeypatch, client):
+    async def fake_collect(messages, echo=False, on_event=None):
+        return AgentRun(text="hi", session_id="s1")
+
+    monkeypatch.setattr(runner, "ClaudeSDKClient", Mock(return_value=client))
+    monkeypatch.setattr(runner, "collect", fake_collect)
+    monkeypatch.setattr(runner, "clients", {})
+
+
+def test_run_keep_alive_connects_and_pools(monkeypatch):
+    client = fake_client()
+    keep_alive_env(monkeypatch, client)
+
+    run = asyncio.run(runner.run_keep_alive("hello", "ops", Mock(), None, False, None))
+
+    assert run.session_id == "s1"
+    client.connect.assert_awaited_once()
+    client.query.assert_awaited_once_with("hello")
+    assert runner.clients == {"s1": client}
+
+
+def test_run_keep_alive_reuses_acquired_client(monkeypatch):
+    client = fake_client()
+    keep_alive_env(monkeypatch, client)
+
+    asyncio.run(runner.run_keep_alive("again", "ops", Mock(), "s1", False, None, client))
+
+    client.connect.assert_not_awaited()
+    client.query.assert_awaited_once_with("again")
+    assert runner.clients == {"s1": client}
+
+
+def test_run_keep_alive_disconnects_on_failure(monkeypatch):
+    client = fake_client()
+    client.query.side_effect = RuntimeError("gone")
+    keep_alive_env(monkeypatch, client)
+
+    try:
+        asyncio.run(runner.run_keep_alive("again", "ops", Mock(), "s1", False, None, client))
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError:
+        pass
+
+    client.disconnect.assert_awaited_once()
+    assert runner.clients == {}
+
+
+def test_run_keep_alive_evicts_oldest_over_cap(monkeypatch):
+    client = fake_client()
+    keep_alive_env(monkeypatch, client)
+    old = {f"old{i}": fake_client() for i in range(runner.MAX_CLIENTS)}
+    runner.clients.update(old)
+
+    asyncio.run(runner.run_keep_alive("hello", "ops", Mock(), None, False, None))
+
+    assert len(runner.clients) == runner.MAX_CLIENTS
+    assert "old0" not in runner.clients
+    assert "s1" in runner.clients
+    old["old0"].disconnect.assert_awaited_once()

@@ -30,25 +30,20 @@ class AgentRun:
     is_error: bool = False
 
 
-async def run_agent(
-    prompt: str,
-    options: ClaudeAgentOptions,
-    echo: bool = False,
-    on_event: Callable[[dict], None] | None = None,
-) -> AgentRun:
-    """Run one agent task to completion and return the collected result.
+async def collect(messages, echo: bool = False, on_event: Callable[[dict], None] | None = None) -> AgentRun:
+    """Collect a message stream into an AgentRun.
 
     With echo=True, blocks are printed as they arrive. on_event, if given,
     is called with a small status dict per block as it arrives.
     """
     run = AgentRun()
-    async for message in query(prompt=prompt, options=options):
+    async for message in messages:
         if isinstance(message, AssistantMessage):
             for block in message.content:
                 if isinstance(block, ToolUseBlock):
                     run.tool_calls.append({"name": block.name, "input": block.input})
                     if on_event:
-                        on_event({"event": "tool", "name": block.name})
+                        on_event({"event": "tool", "name": block.name, "input": block.input})
                     if echo:
                         print(f"[tool] {block.name}: {block.input}")
                 elif isinstance(block, TextBlock):
@@ -72,3 +67,13 @@ async def run_agent(
             run.is_error = message.is_error
             logger.info(f"run complete: cost_usd={run.cost_usd} turns={run.num_turns} error={run.is_error}")
     return run
+
+
+async def run_agent(
+    prompt: str,
+    options: ClaudeAgentOptions,
+    echo: bool = False,
+    on_event: Callable[[dict], None] | None = None,
+) -> AgentRun:
+    """Run one agent task to completion and return the collected result."""
+    return await collect(query(prompt=prompt, options=options), echo=echo, on_event=on_event)

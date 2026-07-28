@@ -56,7 +56,8 @@ h1 svg {
 
 button,
 select,
-input {
+input,
+textarea {
   font: inherit;
   color: var(--ink);
   background: var(--surface);
@@ -302,6 +303,83 @@ form button:disabled {
 
 .history {
   padding-top: 1rem;
+}
+
+.proposal {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--accent-tint);
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+
+.proposal span {
+  flex: 1;
+}
+
+.proposal code {
+  font-family: var(--font-mono), monospace;
+}
+
+.schedules {
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+
+.schedule-error {
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.schedule {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.schedule-head {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.schedule-head label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--dim);
+}
+
+.schedule-head button {
+  margin-left: auto;
+}
+
+.schedule .cron {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.85rem;
+  max-width: 200px;
+  cursor: text;
+}
+
+.schedule textarea {
+  font-size: 0.9rem;
+  cursor: text;
+  resize: vertical;
 }
 
 .refresh {

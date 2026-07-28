@@ -84,7 +84,7 @@ def test_run_agent_emits_events(monkeypatch):
 
     assert events == [
         {"event": "thinking"},
-        {"event": "tool", "name": "query_bigquery"},
+        {"event": "tool", "name": "query_bigquery", "input": {}},
         {"event": "text"},
     ]
 

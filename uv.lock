@@ -545,6 +545,22 @@ wheels = [
 ]
 
 [[package]]
+name = "google-cloud-scheduler"
+version = "2.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/d2/b38c2b901cf758115861828ee31a08e85ec615ea1f22fda440d6f4cb83ef/google_cloud_scheduler-2.20.0.tar.gz", hash = "sha256:17fee4b894e588587f76518185f20b6f7ddbce04ca91bbbb325ea995222d2b87", size = 151676, upload-time = "2026-06-03T16:13:42.024Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/4f/3fb7f4449be1f6c51b07c7c1cdb137c05a0ae329d8db38f621b99a7f105b/google_cloud_scheduler-2.20.0-py3-none-any.whl", hash = "sha256:7e227cb2438c168ca214dc852eaa96f7066a8f206faec3a88c810a25fb5da6d8", size = 138294, upload-time = "2026-06-03T16:12:18.746Z" },
+]
+
+[[package]]
 name = "google-cloud-storage"
 version = "3.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1147,6 +1163,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "google-auth" },
     { name = "google-cloud-bigquery" },
+    { name = "google-cloud-scheduler" },
     { name = "google-cloud-storage" },
     { name = "python-dotenv" },
     { name = "uvicorn" },
@@ -1168,6 +1185,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.140.9" },
     { name = "google-auth", specifier = ">=2.40.0" },
     { name = "google-cloud-bigquery", specifier = ">=3.42.2" },
+    { name = "google-cloud-scheduler", specifier = ">=2.20.0" },
     { name = "google-cloud-storage", specifier = ">=3.13.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "uvicorn", specifier = ">=0.51.0" },

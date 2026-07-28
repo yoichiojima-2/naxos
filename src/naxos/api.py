@@ -2,10 +2,12 @@ import asyncio
 import json
 import logging
 import os
+from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from google.api_core.exceptions import InvalidArgument
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pydantic import BaseModel
@@ -14,6 +16,7 @@ from naxos import audit
 from naxos.agent import AgentRun
 from naxos.config import ROLES, ROOT, configure_logging
 from naxos.runner import RoleDisabled, execute
+from naxos.schedules import Schedules
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,12 @@ class RunRequest(BaseModel):
     prompt: str
     role: str
     resume: str | None = None
+
+
+class ScheduleUpdate(BaseModel):
+    cron: str
+    prompt: str
+    paused: bool = False
 
 
 def principal_of(request: Request) -> str:
@@ -54,6 +63,16 @@ def roles() -> list[str]:
     return sorted(ROLES)
 
 
+def wire(event: dict) -> dict:
+    """Shape an internal event for the browser: tool inputs stay server-side,
+    except a schedule proposal, which becomes a first-class event."""
+    if event.get("event") != "tool":
+        return event
+    if event["name"].endswith("propose_schedule"):
+        return {"event": "proposal", "kind": "schedule", **event["input"]}
+    return {"event": "tool", "name": event["name"]}
+
+
 def run_payload(result: AgentRun) -> dict:
     return {
         "text": result.text,
@@ -71,7 +90,7 @@ async def run(body: RunRequest, request: Request) -> dict:
     if body.role not in ROLES:
         raise HTTPException(status_code=400, detail=f"unknown role: {body.role}")
     try:
-        result = await execute(body.prompt, body.role, body.resume, principal=principal, fresh_ws=True)
+        result = await execute(body.prompt, body.role, body.resume, principal=principal, fresh_ws=True, keep_alive=True)
     except RoleDisabled as e:
         raise HTTPException(status_code=409, detail=str(e)) from None
     except FileNotFoundError as e:
@@ -88,11 +107,19 @@ async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
     async def events():
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
         task = asyncio.create_task(
-            execute(body.prompt, body.role, body.resume, principal=principal, fresh_ws=True, on_event=queue.put_nowait)
+            execute(
+                body.prompt,
+                body.role,
+                body.resume,
+                principal=principal,
+                fresh_ws=True,
+                on_event=queue.put_nowait,
+                keep_alive=True,
+            )
         )
         task.add_done_callback(lambda _: queue.put_nowait(None))
         while (event := await queue.get()) is not None:
-            yield json.dumps(event) + "\n"
+            yield json.dumps(wire(event)) + "\n"
         try:
             result = task.result()
         except (RoleDisabled, FileNotFoundError) as e:
@@ -106,6 +133,30 @@ async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
 @app.get("/api/runs")
 def runs(limit: int = Query(50, ge=1, le=200)) -> list[dict]:
     return audit.recent_runs(limit)
+
+
+@lru_cache(maxsize=1)
+def get_schedules() -> Schedules:
+    return Schedules()
+
+
+@app.get("/api/schedules")
+def schedules(request: Request) -> list[dict]:
+    principal_of(request)
+    return get_schedules().list()
+
+
+@app.put("/api/schedules/{role}")
+def update_schedule(role: str, body: ScheduleUpdate, request: Request) -> dict:
+    principal = principal_of(request)
+    if role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"unknown role: {role}")
+    try:
+        get_schedules().update(role, body.cron, body.prompt, body.paused)
+    except InvalidArgument as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    logger.info(f"schedule for {role} updated by {principal}")
+    return {"role": role, **body.model_dump()}
 
 
 static = ROOT / "frontend" / "out"

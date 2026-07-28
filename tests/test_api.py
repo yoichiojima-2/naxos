@@ -56,7 +56,14 @@ def test_run_rejects_unknown_role():
 def test_run_stream_emits_events_then_result(monkeypatch):
     async def fake_execute(prompt, role, resume=None, principal=None, fresh_ws=False, on_event=None, **kwargs):
         on_event({"event": "thinking"})
-        on_event({"event": "tool", "name": "query_bigquery"})
+        on_event({"event": "tool", "name": "query_bigquery", "input": {"sql": "select 1"}})
+        on_event(
+            {
+                "event": "tool",
+                "name": "mcp__schedules__propose_schedule",
+                "input": {"role": "ops", "cron": "0 9 * * *", "prompt": "check"},
+            }
+        )
         return AgentRun(text="hi", session_id="s1", cost_usd=0.01, num_turns=1)
 
     monkeypatch.setattr(api, "execute", fake_execute)
@@ -67,9 +74,10 @@ def test_run_stream_emits_events_then_result(monkeypatch):
     lines = [json.loads(line) for line in response.text.strip().splitlines()]
     assert lines[0] == {"event": "thinking"}
     assert lines[1] == {"event": "tool", "name": "query_bigquery"}
-    assert lines[2]["event"] == "result"
-    assert lines[2]["text"] == "hi"
-    assert lines[2]["session_id"] == "s1"
+    assert lines[2] == {"event": "proposal", "kind": "schedule", "role": "ops", "cron": "0 9 * * *", "prompt": "check"}
+    assert lines[3]["event"] == "result"
+    assert lines[3]["text"] == "hi"
+    assert lines[3]["session_id"] == "s1"
 
 
 def test_run_stream_reports_disabled_as_error_event(monkeypatch):
@@ -118,3 +126,38 @@ def test_runs_history(monkeypatch):
 
 def test_runs_limit_validated():
     assert client.get("/api/runs?limit=9999").status_code == 422
+
+
+def test_schedules_list(monkeypatch):
+    schedules = Mock()
+    schedules.list.return_value = [{"role": "ops", "cron": "0 9 * * *", "prompt": "p", "paused": False}]
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    assert client.get("/api/schedules").json() == schedules.list.return_value
+
+
+def test_schedule_update(monkeypatch):
+    schedules = Mock()
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    response = client.put("/api/schedules/ops", json={"cron": "*/30 * * * *", "prompt": "new", "paused": True})
+
+    assert response.status_code == 200
+    assert schedules.update.call_args.args == ("ops", "*/30 * * * *", "new", True)
+
+
+def test_schedule_update_maps_bad_cron_to_400(monkeypatch):
+    from google.api_core.exceptions import InvalidArgument
+
+    schedules = Mock()
+    schedules.update.side_effect = InvalidArgument("Invalid cron expression")
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    response = client.put("/api/schedules/ops", json={"cron": "not a cron", "prompt": "p"})
+
+    assert response.status_code == 400
+    assert "cron" in response.json()["detail"]
+
+
+def test_schedule_update_rejects_unknown_role():
+    assert client.put("/api/schedules/nope", json={"cron": "0 9 * * *", "prompt": "p"}).status_code == 400
