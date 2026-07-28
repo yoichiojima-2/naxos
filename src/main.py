@@ -15,6 +15,7 @@ from claude_agent_sdk import ClaudeAgentOptions
 
 from src import slack
 from src.agent import AgentRun, run_agent
+from src.artifacts import Artifacts
 from src.audit import log_run
 from src.bq import BigQuery
 from src.gcs import CloudStorage
@@ -60,6 +61,8 @@ def build_options(role: str, cs: CloudStorage, resume: str | None = None) -> Cla
         servers["bq"] = BigQuery().mcp()
     if "gcs" in config["servers"]:
         servers["gcs"] = cs.mcp()
+    if "artifacts" in config["servers"]:
+        servers["artifacts"] = Artifacts(role, f"{BUCKET}-artifacts", WS, cs).mcp()
     return ClaudeAgentOptions(
         cwd=str(WS),
         setting_sources=["project"],

@@ -113,6 +113,17 @@ truncated at 3000 chars, with a footer carrying the cost and the
 `session_id` so the conversation can be picked up with `--resume`.
 Without `SLACK_WEBHOOK_URL` set, notification is skipped.
 
+## Artifacts
+
+`gs://$BUCKET-artifacts` is the shared store for deliverables the agent
+produces — HTML slide decks, reports. The `publish_artifact` tool
+uploads a workspace file or directory to
+`<role>/<date>-<title>/` and returns an authenticated
+`storage.cloud.google.com` URL: anyone with viewer IAM opens it in a
+browser and HTML renders directly, relative assets included. Runner
+service accounts hold `objectCreator` only, so published artifacts are
+immutable, and every publish is a tool call in the audit trail.
+
 ## Skills
 
 `gs://$BUCKET/skills` is the live skill store: users add and edit skills

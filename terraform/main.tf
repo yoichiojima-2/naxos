@@ -352,3 +352,23 @@ resource "google_billing_budget" "monthly" {
     spend_basis       = "FORECASTED_SPEND"
   }
 }
+
+resource "google_storage_bucket" "artifacts" {
+  name                        = "${var.project}-artifacts"
+  location                    = var.region
+  uniform_bucket_level_access = true
+}
+
+# objectCreator only: published artifacts cannot be overwritten or deleted
+resource "google_storage_bucket_iam_member" "artifact_creator" {
+  for_each = local.roles
+  bucket   = google_storage_bucket.artifacts.name
+  role     = "roles/storage.objectCreator"
+  member   = "serviceAccount:${google_service_account.role[each.key].email}"
+}
+
+resource "google_storage_bucket_iam_member" "artifacts_admin" {
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.objectAdmin"
+  member = var.admin
+}
