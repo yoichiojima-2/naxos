@@ -49,7 +49,7 @@ Surrounding services:
 - **Access (Phase 2)**: External HTTPS LB → IAP (allow via Google group, never individual emails) → `agent-ui` Cloud Run Service (chat, approval inbox, admin panel); UI must verify the IAP JWT
 - **Triggers**: Cloud Scheduler (cron per tenant), Cloud Tasks (queue/retry), Eventarc/webhooks (later)
 - **State**: Cloud SQL PostgreSQL db-g1-small, private IP — `tenants` (config + disabled flag), `sessions`, `runs`, `approvals`
-- **Audit**: BigQuery dataset `agent_audit` with `tool_calls(run_id, tenant_id, principal, ts, tool_name, args_redacted, result_status, latency_ms, input_tokens, output_tokens)` and `runs(run_id, tenant_id, trigger_type, started_at, ended_at, status, total_tokens, approx_cost_jpy)`
+- **Audit**: BigQuery dataset `audit` with `tool_calls(run_id, tenant_id, principal, ts, tool_name, args_redacted, result_status, latency_ms, input_tokens, output_tokens)` and `runs(run_id, tenant_id, trigger_type, started_at, ended_at, status, total_tokens, approx_cost_jpy)`
 - **Secrets**: internal-system credentials live in Secret Manager, mounted into MCP servers only — the agent never sees raw credentials
 - **Slack**: notifications and interactive approval buttons
 

@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,6 +12,7 @@ load_dotenv(override=True)
 from claude_agent_sdk import ClaudeAgentOptions
 
 from src.agent import run_agent
+from src.audit import log_run
 from src.bq import BigQuery
 from src.gcs import CloudStorage
 
@@ -50,7 +52,9 @@ async def main() -> None:
     args = parser.parse_args()
 
     sync_skills()
-    await run_agent(args.prompt, build_options(), echo=True)
+    started_at = datetime.now(UTC)
+    run = await run_agent(args.prompt, build_options(), echo=True)
+    log_run(args.prompt, run, started_at)
 
 
 if __name__ == "__main__":

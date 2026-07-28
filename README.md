@@ -15,10 +15,12 @@ running with guarded GCP tools and filesystem skills.
 ```
 src/
   agent.py   # run_agent(): one agent task -> AgentRun (text, tool calls, thinking, cost)
-  bq.py      # BigQuery tools: scan/row/timeout caps, per-tenant cost labels
+  audit.py   # records every run to BigQuery audit.runs
+  bq.py      # BigQuery tools: scan/row/timeout caps
   gcs.py     # Cloud Storage tools: read-only, size-capped reads
   main.py    # CLI entrypoint
-ws/          # agent workspace; .claude/skills/ holds investigation skills
+skills/      # out-of-the-box skills, seeded to gs://$BUCKET/skills
+ws/          # agent workspace; skills sync in at startup (gitignored)
 notebook/    # experimentation playground
 ```
 
@@ -48,6 +50,16 @@ with (no delete flag, so user-added skills survive):
 
 ```sh
 gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
+```
+
+## Audit
+
+Every run is recorded to BigQuery: `audit.runs` (partitioned on
+`started_at`) holds the prompt, final answer, tool calls, token usage,
+and cost per run. The agent can query its own trail:
+
+```sh
+uv run python -m src.main "how much have agent runs cost so far? check audit.runs"
 ```
 
 ## Design

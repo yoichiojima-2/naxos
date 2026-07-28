@@ -118,7 +118,7 @@ class BigQuery:
         @tool(
             "list_tables",
             "List the tables in a BigQuery dataset of the current project. "
-            "Dataset name goes without the project prefix, e.g. 'agent_audit'.",
+            "Dataset name goes without the project prefix, e.g. 'audit'.",
             {"dataset": str},
         )
         async def list_tables(args):
