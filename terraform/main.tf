@@ -38,7 +38,7 @@ locals {
   schedules = {
     ops = {
       schedule = "0 9 * * *"
-      prompt   = "過去24時間の audit.runs を確認し、実行数・合計コスト・エラーの有無を短く報告してください。エラーや異常に高コストな run があれば原因を調査して指摘してください。"
+      prompt   = "Check audit.runs for the past 24 hours and report briefly: run count, total cost, and whether any runs errored. If there are errors or unusually expensive runs, investigate and point out the cause."
     }
   }
 }
