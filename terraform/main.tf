@@ -511,7 +511,12 @@ resource "google_cloud_run_v2_service" "ui" {
   }
 
   lifecycle {
-    ignore_changes = [client, client_version, template[0].containers[0].image]
+    # any update this resource sends drops the gcloud-set IAP flag (provider
+    # 6.x cannot carry the system annotation), so everything that drifts on
+    # its own — including the API-materialized empty scaling block — must be
+    # ignored to keep applies from touching the service; after a real config
+    # change here, re-run: gcloud beta run services update naxos-ui --iap
+    ignore_changes = [client, client_version, annotations, launch_stage, scaling, template[0].containers[0].image]
   }
 }
 
