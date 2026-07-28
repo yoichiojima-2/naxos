@@ -88,9 +88,45 @@ export default function Page() {
     return "thinking…";
   }
 
+  function runMeta(run: { cost_usd: number | null; num_turns: number | null }): string {
+    const cost = run.cost_usd != null ? `$${run.cost_usd.toFixed(4)}` : "";
+    return `${cost} · ${run.num_turns} turns`;
+  }
+
+  // the run keeps going server-side after a dropped stream (mobile Safari kills
+  // fetches on screen lock; proxies drop idle connections) — its result still
+  // lands in audit.runs, so poll history for it instead of losing the reply
+  async function recoverRun(prompt: string, sentAt: number, resume: string | null): Promise<boolean> {
+    const deadline = Date.now() + 20 * 60_000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+      let candidates: Run[] = [];
+      try {
+        candidates = await (await fetch("/api/runs")).json();
+      } catch {
+        continue;
+      }
+      const run = candidates.find(
+        (r) =>
+          r.prompt === prompt &&
+          (resume ? r.session_id === resume : r.role === role) &&
+          (!me || !r.principal || r.principal === me) &&
+          Date.parse(r.started_at) >= sentAt - 5 * 60_000
+      );
+      if (run) {
+        if (run.session_id) setSessionId(run.session_id);
+        setMessages((m) => [...m, { who: "agent", text: run.text, meta: `${runMeta(run)} · recovered` }]);
+        return true;
+      }
+    }
+    return false;
+  }
+
   async function send() {
     const prompt = input.trim();
     if (!prompt || busy) return;
+    const resume = sessionId;
+    const sentAt = Date.now();
     setInput("");
     setMessages((m) => [...m, { who: "you", text: prompt }]);
     setBusy(true);
@@ -99,10 +135,13 @@ export default function Page() {
       const response = await fetch("/api/run/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, role, resume: sessionId }),
+        body: JSON.stringify({ prompt, role, resume }),
       });
       if (!response.ok || !response.body) {
-        const detail = (await response.json()).detail ?? response.statusText;
+        let detail = response.statusText;
+        try {
+          detail = (await response.json()).detail ?? detail;
+        } catch {}
         setMessages((m) => [...m, { who: "agent", text: `error: ${detail}` }]);
         return;
       }
@@ -111,6 +150,7 @@ export default function Page() {
       let buffer = "";
       let final = "";
       let meta = "";
+      let ended = false;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -122,12 +162,13 @@ export default function Page() {
           const event = JSON.parse(line);
           if (event.event === "result") {
             setSessionId(event.session_id);
-            const cost = event.cost_usd != null ? `$${event.cost_usd.toFixed(4)}` : "";
             final = event.text;
-            meta = `${cost} · ${event.num_turns} turns`;
+            meta = runMeta(event);
+            ended = true;
           } else if (event.event === "error") {
             final = `error: ${event.detail}`;
-          } else {
+            ended = true;
+          } else if (event.event !== "ping") {
             if (event.event === "proposal" && event.kind === "schedule") {
               setProposal({ role: event.role, cron: event.cron, prompt: event.prompt, paused: false });
             }
@@ -135,9 +176,17 @@ export default function Page() {
           }
         }
       }
+      if (!ended) throw new Error("stream ended before the result arrived");
       setMessages((m) => [...m, { who: "agent", text: final, meta: meta || undefined }]);
     } catch (e) {
-      setMessages((m) => [...m, { who: "agent", text: `error: ${e}` }]);
+      setStatus("connection lost — waiting for the run to finish…");
+      const recovered = await recoverRun(prompt, sentAt, resume);
+      if (!recovered) {
+        setMessages((m) => [
+          ...m,
+          { who: "agent", text: `connection lost (${e}) — the run may still be going; check the history tab for its result` },
+        ]);
+      }
     } finally {
       setBusy(false);
       setStatus("");
