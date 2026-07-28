@@ -144,10 +144,12 @@ managed in `terraform/`) that Cloud Run jobs will run as.
 
 Every run is recorded to BigQuery: `audit.runs` (partitioned on
 `started_at`) holds the prompt, final answer, tool calls, token usage,
-and cost per run, along with the Agent SDK `session_id`. Session
-transcripts are saved to the role's session bucket after each run and
-restored on demand, so a previous conversation can be continued
-anywhere with `--resume` — locally:
+and cost per run, along with the Agent SDK `session_id`. After each run
+the transcript and any workspace files the agent produced are saved to
+the role's session bucket (`<session_id>/transcript.jsonl` +
+`<session_id>/ws/`), and both are restored on demand — so a previous
+conversation continues anywhere with `--resume`, files included.
+Locally:
 
 ```sh
 uv run python -m src.main --resume <session_id> "follow-up question"

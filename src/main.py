@@ -76,20 +76,29 @@ def is_disabled(cs: CloudStorage, role: str) -> bool:
 
 
 def restore_session(cs: CloudStorage, role: str, session_id: str) -> None:
+    bucket = f"{BUCKET}-sessions-{role}"
     target = SESSION_DIR / f"{session_id}.jsonl"
-    if target.exists():
-        return
-    cs.download_file(f"{BUCKET}-sessions-{role}", f"{session_id}.jsonl", target)
-    logger.info(f"session restored: gs://{BUCKET}-sessions-{role}/{session_id}.jsonl")
+    if not target.exists():
+        cs.download_file(bucket, f"{session_id}/transcript.jsonl", target)
+        logger.info(f"session restored: gs://{bucket}/{session_id}/transcript.jsonl")
+    count = cs.download_prefix(bucket, f"{session_id}/ws/", WS)
+    if count:
+        logger.info(f"restored {count} workspace files")
 
 
 def save_session(cs: CloudStorage, role: str, session_id: str) -> None:
+    bucket = f"{BUCKET}-sessions-{role}"
     source = SESSION_DIR / f"{session_id}.jsonl"
-    if not source.exists():
+    if source.exists():
+        cs.upload_file(bucket, f"{session_id}/transcript.jsonl", source)
+    else:
         logger.error(f"session file not found, transcript lost: {source}")
-        return
-    uri = cs.upload_file(f"{BUCKET}-sessions-{role}", f"{session_id}.jsonl", source)
-    logger.info(f"session saved: {uri}")
+    count = 0
+    for file in WS.rglob("*"):
+        if file.is_file() and ".claude" not in file.parts:
+            cs.upload_file(bucket, f"{session_id}/ws/{file.relative_to(WS)}", file)
+            count += 1
+    logger.info(f"session saved: gs://{bucket}/{session_id}/ ({count} workspace files)")
 
 
 def slack_message(role: str, run: AgentRun) -> str:

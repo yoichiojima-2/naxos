@@ -66,39 +66,60 @@ def test_slack_message_truncates_long_text():
     assert "x" * 3001 not in message
 
 
-def test_restore_session_skips_when_local_exists(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
-    (tmp_path / "s1.jsonl").touch()
+def session_env(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "SESSION_DIR", tmp_path / "proj")
+    monkeypatch.setattr(main, "WS", tmp_path / "ws")
+    monkeypatch.setattr(main, "BUCKET", "bucket")
+    (tmp_path / "proj").mkdir()
+    (tmp_path / "ws").mkdir()
+
+
+def test_restore_session_downloads_transcript_and_workspace(monkeypatch, tmp_path):
+    session_env(monkeypatch, tmp_path)
     cs = Mock()
+    cs.download_prefix.return_value = 0
+
+    main.restore_session(cs, "ops", "s1")
+
+    assert cs.download_file.call_args.args == (
+        "bucket-sessions-ops",
+        "s1/transcript.jsonl",
+        tmp_path / "proj" / "s1.jsonl",
+    )
+    assert cs.download_prefix.call_args.args == ("bucket-sessions-ops", "s1/ws/", tmp_path / "ws")
+
+
+def test_restore_session_skips_transcript_when_local_exists(monkeypatch, tmp_path):
+    session_env(monkeypatch, tmp_path)
+    (tmp_path / "proj" / "s1.jsonl").touch()
+    cs = Mock()
+    cs.download_prefix.return_value = 0
 
     main.restore_session(cs, "ops", "s1")
 
     cs.download_file.assert_not_called()
 
 
-def test_restore_session_downloads(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
-    monkeypatch.setattr(main, "BUCKET", "bucket")
-    cs = Mock()
-
-    main.restore_session(cs, "ops", "s1")
-
-    assert cs.download_file.call_args.args == ("bucket-sessions-ops", "s1.jsonl", tmp_path / "s1.jsonl")
-
-
-def test_save_session_uploads(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
-    monkeypatch.setattr(main, "BUCKET", "bucket")
-    (tmp_path / "s1.jsonl").touch()
+def test_save_session_uploads_transcript_and_workspace(monkeypatch, tmp_path):
+    session_env(monkeypatch, tmp_path)
+    (tmp_path / "proj" / "s1.jsonl").touch()
+    (tmp_path / "ws" / "out").mkdir()
+    (tmp_path / "ws" / "out" / "report.md").write_text("x")
+    (tmp_path / "ws" / ".claude" / "skills").mkdir(parents=True)
+    (tmp_path / "ws" / ".claude" / "skills" / "SKILL.md").write_text("x")
     cs = Mock()
 
     main.save_session(cs, "ops", "s1")
 
-    assert cs.upload_file.call_args.args == ("bucket-sessions-ops", "s1.jsonl", tmp_path / "s1.jsonl")
+    uploads = [c.args for c in cs.upload_file.call_args_list]
+    assert uploads == [
+        ("bucket-sessions-ops", "s1/transcript.jsonl", tmp_path / "proj" / "s1.jsonl"),
+        ("bucket-sessions-ops", "s1/ws/out/report.md", tmp_path / "ws" / "out" / "report.md"),
+    ]
 
 
-def test_save_session_skips_when_file_missing(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "SESSION_DIR", tmp_path)
+def test_save_session_survives_missing_transcript(monkeypatch, tmp_path):
+    session_env(monkeypatch, tmp_path)
     cs = Mock()
 
     main.save_session(cs, "ops", "s1")
