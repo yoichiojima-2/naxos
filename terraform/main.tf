@@ -423,6 +423,13 @@ resource "google_project_iam_member" "ui_scheduler_editor" {
   member  = "serviceAccount:${google_service_account.ui.email}"
 }
 
+# updating a job that authenticates as sa-scheduler requires actAs on it
+resource "google_service_account_iam_member" "ui_act_as_scheduler" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.ui.email}"
+}
+
 resource "google_bigquery_dataset_iam_member" "ui_audit_writer" {
   dataset_id = var.audit_dataset
   role       = "roles/bigquery.dataEditor"
