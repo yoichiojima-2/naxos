@@ -21,7 +21,7 @@ src/naxos/
   cli.py       # entrypoint for Cloud Run Jobs (unattended): run, then notify Slack
   api.py       # entrypoint for Cloud Run Service (interactive): FastAPI behind IAP, NDJSON streaming
   agent.py     # collect()/run_agent(): message stream -> AgentRun (text, tool calls, thinking, cost)
-  schedules.py # Cloud Scheduler values (cron/prompt/paused) + propose_schedule tool (writes nothing)
+  schedules.py # scheduled-task CRUD on Cloud Scheduler + propose_schedule tool (writes nothing)
   audit.py     # records every run to BigQuery audit.runs
   bq.py        # BigQuery tools: scan/row/timeout caps
   gcs.py       # Cloud Storage tools: read-only, size-capped reads
@@ -86,7 +86,8 @@ statically exported and served by FastAPI (`naxos.api`). Chat picks a
 role and streams live status while the agent works (`thinking…`,
 `using query_bigquery…`) over NDJSON, rendering the reply as markdown;
 history reads `audit.runs` and clicking a row reopens that session;
-schedules edits each role's Cloud Scheduler values in place. Follow-up
+schedules lists the saved tasks (name, role, cron, next run, state) and
+creates, edits, pauses, or deletes them. Follow-up
 turns reuse a live SDK client held in instance memory (Cloud Run session
 affinity routes the browser back to it), so multi-turn chat skips the
 connect-and-replay cost; if the instance is gone, the turn falls back to
@@ -113,31 +114,36 @@ gcloud beta iap web add-iam-policy-binding --resource-type=cloud-run \
   --member=user:someone@example.com --role=roles/iap.httpsResourceAccessor
 ```
 
-## Scheduled runs
+## Scheduled tasks
 
-Terraform creates one Cloud Scheduler job per role
-(`naxos-schedule-<role>`, seeds in `terraform/main.tf` — roles without a
-real schedule yet are seeded paused) and thereafter ignores its cron,
-prompt, and paused state — like secret values and images, those are
-day-to-day values editable without an apply, from the UI's schedules tab
-or gcloud. In chat, the agent can draft one via the `propose_schedule`
-tool — the tool writes nothing; the UI catches the call in the event
-stream and opens a prefilled form, and only a signed-in human saves it.
-ops runs daily at 09:00 JST with a self-monitoring prompt: the platform
-checks its own `audit.runs` for errors and cost anomalies.
+A scheduled task is a Cloud Scheduler job (`naxos-schedule-*`) that runs
+a role's Cloud Run Job on a cron with a fixed prompt. Tasks are user
+data, not topology: the UI's schedules tab creates, edits, pauses, and
+deletes them (any number per role, each with a name, cron in
+Asia/Tokyo, and prompt), and gcloud works on them the same way.
+Terraform owns only the surrounding IAM — the scheduler service account,
+its invoker grant on the runner jobs, and the UI's custom
+`naxosSchedulerEditor` role, which deliberately excludes `jobs.run` so
+the UI can never trigger a run directly.
+
+In chat, the agent can draft a task via the `propose_schedule` tool —
+the tool writes nothing; the UI catches the call in the event stream and
+opens a prefilled form, and only a signed-in human saves it. The
+platform monitors itself with one: a daily 09:00 JST ops task checks
+`audit.runs` for errors and cost anomalies.
 
 ```sh
-# change the cadence
+# list tasks
+gcloud scheduler jobs list --location asia-northeast1
+
+# change a task's cadence
 gcloud scheduler jobs update http naxos-schedule-ops --location asia-northeast1 \
   --schedule="*/15 * * * *"
 
-# change the prompt (the request body carries it as a container-arg override)
+# change a task's prompt (the request body carries it as a container-arg override)
 gcloud scheduler jobs update http naxos-schedule-ops --location asia-northeast1 \
   --message-body="$(jq -n --arg p 'new prompt' \
     '{overrides:{containerOverrides:[{args:[$p]}]}}')"
-
-# see the current values
-gcloud scheduler jobs describe naxos-schedule-ops --location asia-northeast1
 ```
 
 ## Kill switch

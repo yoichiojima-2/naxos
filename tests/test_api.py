@@ -130,20 +130,44 @@ def test_runs_limit_validated():
 
 def test_schedules_list(monkeypatch):
     schedules = Mock()
-    schedules.list.return_value = [{"role": "ops", "cron": "0 9 * * *", "prompt": "p", "paused": False}]
+    schedules.list.return_value = [
+        {"id": "naxos-schedule-a1", "name": "n", "role": "ops", "cron": "0 9 * * *", "prompt": "p", "paused": False}
+    ]
     monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
 
     assert client.get("/api/schedules").json() == schedules.list.return_value
+
+
+def test_schedule_create(monkeypatch):
+    schedules = Mock()
+    schedules.create.return_value = "naxos-schedule-a1"
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    response = client.post(
+        "/api/schedules", json={"role": "ops", "name": "daily", "cron": "0 9 * * *", "prompt": "p", "paused": True}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "naxos-schedule-a1"
+    assert schedules.create.call_args.args == ("ops", "daily", "0 9 * * *", "p", True)
+
+
+def test_schedule_create_rejects_unknown_role():
+    body = {"role": "nope", "name": "n", "cron": "0 9 * * *", "prompt": "p"}
+
+    assert client.post("/api/schedules", json=body).status_code == 400
 
 
 def test_schedule_update(monkeypatch):
     schedules = Mock()
     monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
 
-    response = client.put("/api/schedules/ops", json={"cron": "*/30 * * * *", "prompt": "new", "paused": True})
+    response = client.put(
+        "/api/schedules/naxos-schedule-a1", json={"name": "n", "cron": "*/30 * * * *", "prompt": "new", "paused": True}
+    )
 
     assert response.status_code == 200
-    assert schedules.update.call_args.args == ("ops", "*/30 * * * *", "new", True)
+    assert schedules.update.call_args.args == ("naxos-schedule-a1", "n", "*/30 * * * *", "new", True)
 
 
 def test_schedule_update_maps_bad_cron_to_400(monkeypatch):
@@ -153,11 +177,37 @@ def test_schedule_update_maps_bad_cron_to_400(monkeypatch):
     schedules.update.side_effect = InvalidArgument("Invalid cron expression")
     monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
 
-    response = client.put("/api/schedules/ops", json={"cron": "not a cron", "prompt": "p"})
+    response = client.put("/api/schedules/naxos-schedule-a1", json={"name": "n", "cron": "not a cron", "prompt": "p"})
 
     assert response.status_code == 400
     assert "cron" in response.json()["detail"]
 
 
-def test_schedule_update_rejects_unknown_role():
-    assert client.put("/api/schedules/nope", json={"cron": "0 9 * * *", "prompt": "p"}).status_code == 400
+def test_schedule_update_rejects_foreign_job():
+    body = {"name": "n", "cron": "0 9 * * *", "prompt": "p"}
+
+    assert client.put("/api/schedules/some-other-job", json=body).status_code == 404
+
+
+def test_schedule_delete(monkeypatch):
+    schedules = Mock()
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    response = client.delete("/api/schedules/naxos-schedule-a1")
+
+    assert response.status_code == 200
+    assert schedules.delete.call_args.args == ("naxos-schedule-a1",)
+
+
+def test_schedule_delete_rejects_foreign_job():
+    assert client.delete("/api/schedules/some-other-job").status_code == 404
+
+
+def test_schedule_delete_maps_missing_to_404(monkeypatch):
+    from google.api_core.exceptions import NotFound
+
+    schedules = Mock()
+    schedules.delete.side_effect = NotFound("gone")
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    assert client.delete("/api/schedules/naxos-schedule-a1").status_code == 404
