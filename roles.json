@@ -4,9 +4,7 @@
     "skills": ["bigquery", "cloud-storage"],
     "permission_mode": "bypassPermissions",
     "max_turns": 20,
-    "notify": true,
-    "schedule": "0 * * * *",
-    "schedule_prompt": "過去1時間の audit.runs を確認し、実行数・合計コスト・エラーの有無を短く報告してください。エラーや異常に高コストな run があれば原因を調査して指摘してください。"
+    "notify": true
   },
   "analyst": {
     "servers": ["bq"],

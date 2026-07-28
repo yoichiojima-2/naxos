@@ -97,8 +97,8 @@ Later phases: Phase 2 = LB/IAP + shared UI + DLP + approval gate + P11 (after bu
 
 - Design docs and internal-facing text in Japanese; code, identifiers, and commit messages in English.
 - Keep code simple: standard documented patterns over clever abstractions; no comments unless they state a constraint the code can't express.
-- Infrastructure as code (Terraform) owns the topology: service accounts, IAM bindings, Scheduler jobs, BigQuery, Cloud SQL, Secret Manager secrets (containers, not values), budget alerts, DLP templates. Keep it boring: one root module, GCS state backend, no module abstraction.
-- gcloud/CI owns the day-to-day: image deploys (`gcloud run deploy` with `lifecycle { ignore_changes = [image] }` on the Terraform side), secret *values* (`gcloud secrets versions add` — never in state or git), ad-hoc ops.
+- Infrastructure as code (Terraform) owns the topology: service accounts, IAM bindings, Scheduler jobs (existence, target, IAM — seeded schedule/prompt under `ignore_changes`), BigQuery, Cloud SQL, Secret Manager secrets (containers, not values), budget alerts, DLP templates. Keep it boring: one root module, GCS state backend, no module abstraction.
+- gcloud/CI owns the day-to-day: image deploys (`gcloud run deploy` with `lifecycle { ignore_changes = [image] }` on the Terraform side), secret *values* (`gcloud secrets versions add` — never in state or git), schedule *values* (cron expression and scheduled prompt via `gcloud scheduler jobs update` — user-editable without an apply; the Phase 2 UI calls the same API), ad-hoc ops.
 - Adding a tenant = a tfvars entry (SA + IAM + Scheduler + config row), never a new app.
 
 ## Open issues (resolve explicitly, don't assume)

@@ -26,7 +26,7 @@ src/
 skills/      # out-of-the-box skills, seeded to gs://$BUCKET/skills
 terraform/   # all topology: SAs + IAM, jobs, scheduler, secrets, WIF (state in gs://$BUCKET/terraform)
 tests/       # unit tests (mocked GCP clients, no credentials needed): uv run pytest
-roles.json   # role -> servers, skills, notify, schedule
+roles.json   # role -> servers, skills, notify
 ws/          # agent workspace; skills sync in at startup (gitignored)
 ```
 
@@ -72,11 +72,26 @@ gcloud run jobs update naxos-runner-ops --region asia-northeast1 \
 
 ## Scheduled runs
 
-A role with `schedule` and `schedule_prompt` keys in `roles.json` gets
-a Cloud Scheduler job (`naxos-schedule-<role>`, managed in `terraform/`).
-ops runs hourly with a self-monitoring prompt: the platform checks its
-own `audit.runs` for errors and cost anomalies. Changing an unattended
-run is a config change plus `terraform apply`, on purpose.
+Terraform creates one Cloud Scheduler job per scheduled role
+(`naxos-schedule-<role>`, seeds in `terraform/main.tf`) and thereafter
+ignores its cron and prompt — like secret values and images, those are
+day-to-day values owned by gcloud, editable without an apply. ops runs
+hourly with a self-monitoring prompt: the platform checks its own
+`audit.runs` for errors and cost anomalies.
+
+```sh
+# change the cadence
+gcloud scheduler jobs update http naxos-schedule-ops --location asia-northeast1 \
+  --schedule="*/15 * * * *"
+
+# change the prompt (the request body carries it as a container-arg override)
+gcloud scheduler jobs update http naxos-schedule-ops --location asia-northeast1 \
+  --message-body="$(jq -n --arg p 'new prompt' \
+    '{overrides:{containerOverrides:[{args:[$p]}]}}')"
+
+# see the current values
+gcloud scheduler jobs describe naxos-schedule-ops --location asia-northeast1
+```
 
 ## Kill switch
 
@@ -117,8 +132,7 @@ gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
 
 `roles.json` maps a role to the MCP servers and skills its sessions get
 (`uv run python -m src.main --role analyst "..."`), plus per-role
-behavior: `notify` (Slack), `schedule`/`schedule_prompt` (Cloud
-Scheduler). This controls which
+behavior: `notify` (Slack). This controls which
 guarded tools are mounted — the hard data boundary comes from IAM,
 since built-in tools like Bash can reach anything the runtime
 credentials allow: each role has a service account (`sa-role-<name>`,

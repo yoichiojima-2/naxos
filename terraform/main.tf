@@ -32,7 +32,15 @@ variable "github_repo" {
 locals {
   role_config = jsondecode(file("${path.module}/../roles.json"))
   roles       = toset(keys(local.role_config))
-  schedules   = { for role, config in local.role_config : role => config if can(config.schedule) }
+
+  # creation-time seeds only: cron and prompt are day-to-day values, edited
+  # via `gcloud scheduler jobs update` and ignored by Terraform after creation
+  schedules = {
+    ops = {
+      schedule = "0 * * * *"
+      prompt   = "過去1時間の audit.runs を確認し、実行数・合計コスト・エラーの有無を短く報告してください。エラーや異常に高コストな run があれば原因を調査して指摘してください。"
+    }
+  }
 }
 
 variable "audit_dataset" {
@@ -247,12 +255,16 @@ resource "google_cloud_scheduler_job" "scheduled" {
     uri         = "https://run.googleapis.com/v2/projects/${var.project}/locations/${var.region}/jobs/${google_cloud_run_v2_job.runner[each.key].name}:run"
     headers     = { "Content-Type" = "application/json" }
     body = base64encode(jsonencode({
-      overrides = { containerOverrides = [{ args = [each.value.schedule_prompt] }] }
+      overrides = { containerOverrides = [{ args = [each.value.prompt] }] }
     }))
 
     oauth_token {
       service_account_email = google_service_account.scheduler.email
     }
+  }
+
+  lifecycle {
+    ignore_changes = [schedule, http_target[0].body]
   }
 }
 
