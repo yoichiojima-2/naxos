@@ -53,9 +53,23 @@ variable "admin" {
   default = "user:yoichiojima@gmail.com"
 }
 
+variable "billing_account" {
+  type    = string
+  default = "0131FB-CC98F2-DD8246"
+}
+
+variable "budget_jpy" {
+  type    = number
+  default = 100000
+}
+
 provider "google" {
   project = var.project
   region  = var.region
+
+  # billingbudgets has no default quota project under user ADC
+  user_project_override = true
+  billing_project       = var.project
 }
 
 resource "google_storage_bucket" "main" {
@@ -307,4 +321,31 @@ resource "google_secret_manager_secret_iam_member" "anthropic_api_key_accessor" 
   secret_id = google_secret_manager_secret.anthropic_api_key.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.role[each.key].email}"
+}
+
+resource "google_billing_budget" "monthly" {
+  billing_account = var.billing_account
+  display_name    = "naxos monthly"
+
+  budget_filter {
+    projects = ["projects/${var.project}"]
+  }
+
+  amount {
+    specified_amount {
+      units = var.budget_jpy
+    }
+  }
+
+  # 0.7 = the ¥70k operating target, 1.0 = the ¥100k hard cap
+  threshold_rules {
+    threshold_percent = 0.7
+  }
+  threshold_rules {
+    threshold_percent = 1.0
+  }
+  threshold_rules {
+    threshold_percent = 1.0
+    spend_basis       = "FORECASTED_SPEND"
+  }
 }
