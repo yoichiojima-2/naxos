@@ -9,8 +9,11 @@ the platform layer, where tenant config cannot bypass it.
 
 ## Current state
 
-Walking-skeleton playground: the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk)
-running with guarded GCP tools and filesystem skills.
+The Phase 1 walking skeleton is complete and running: Cloud Scheduler →
+Cloud Run Job → [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk)
+with guarded GCP tools → Slack notification, with the audit trail and
+kill switch built in from the start. The platform monitors itself
+hourly (dogfooding).
 
 ```
 src/
@@ -18,13 +21,13 @@ src/
   audit.py   # records every run to BigQuery audit.runs
   bq.py      # BigQuery tools: scan/row/timeout caps
   gcs.py     # Cloud Storage tools: read-only, size-capped reads
-  main.py    # CLI entrypoint
+  main.py    # entrypoint: kill-switch check, skills/session sync, run, audit, notify
+  slack.py   # webhook notification
 skills/      # out-of-the-box skills, seeded to gs://$BUCKET/skills
-terraform/   # service accounts + IAM (state in gs://$BUCKET/terraform)
+terraform/   # all topology: SAs + IAM, jobs, scheduler, secrets, WIF (state in gs://$BUCKET/terraform)
 tests/       # unit tests (mocked GCP clients, no credentials needed): uv run pytest
-roles.json   # role -> mounted MCP servers + synced skills
+roles.json   # role -> servers, skills, notify, schedule
 ws/          # agent workspace; skills sync in at startup (gitignored)
-notebook/    # experimentation playground
 ```
 
 Guardrails live in code and IAM, never in prompts: tools are restricted by
@@ -98,9 +101,10 @@ Without `SLACK_WEBHOOK_URL` set, notification is skipped.
 ## Skills
 
 `gs://$BUCKET/skills` is the live skill store: users add and edit skills
-there directly. `main.py` downloads it into `ws/.claude/skills/` at
-startup; on Cloud Run the bucket will be volume-mounted instead. The
-runtime only ever reads the bucket. Set `BUCKET` in `.env`.
+there directly. At startup `main.py` downloads the role's skills into
+`ws/.claude/skills/` — locally and on Cloud Run alike. The runtime
+reads the bucket and writes only under `sessions/` (enforced by IAM,
+not convention). Set `BUCKET` in `.env`.
 
 Out-of-the-box skills are versioned in `skills/` and seeded to the bucket
 with (no delete flag, so user-added skills survive):
@@ -112,7 +116,9 @@ gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
 ## Roles
 
 `roles.json` maps a role to the MCP servers and skills its sessions get
-(`uv run python -m src.main --role analyst "..."`). This controls which
+(`uv run python -m src.main --role analyst "..."`), plus per-role
+behavior: `notify` (Slack), `schedule`/`schedule_prompt` (Cloud
+Scheduler). This controls which
 guarded tools are mounted — the hard data boundary comes from IAM,
 since built-in tools like Bash can reach anything the runtime
 credentials allow: each role has a service account (`sa-role-<name>`,
