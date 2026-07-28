@@ -127,6 +127,58 @@ resource "google_storage_bucket_iam_member" "bucket_reader" {
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
 }
 
+resource "google_iam_workload_identity_pool" "github" {
+  workload_identity_pool_id = "github"
+  display_name              = "GitHub Actions"
+}
+
+resource "google_iam_workload_identity_pool_provider" "github" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub"
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+
+  attribute_mapping = {
+    "google.subject"       = "assertion.sub"
+    "attribute.repository" = "assertion.repository"
+  }
+
+  attribute_condition = "assertion.repository == \"yoichiojima-2/naxos\""
+}
+
+resource "google_service_account" "deployer" {
+  account_id   = "sa-deployer"
+  display_name = "GitHub Actions deployer"
+}
+
+resource "google_service_account_iam_member" "deployer_wif" {
+  service_account_id = google_service_account.deployer.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/yoichiojima-2/naxos"
+}
+
+resource "google_project_iam_member" "deployer_artifact_writer" {
+  project = var.project
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_project_iam_member" "deployer_run_developer" {
+  project = var.project
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_service_account_iam_member" "deployer_act_as_role" {
+  for_each           = var.roles
+  service_account_id = google_service_account.role[each.key].name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 resource "google_secret_manager_secret" "anthropic_api_key" {
   secret_id = "anthropic-api-key"
 
