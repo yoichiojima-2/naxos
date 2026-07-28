@@ -29,6 +29,11 @@ variable "roles" {
   default = ["ops", "analyst"]
 }
 
+variable "audit_dataset" {
+  type    = string
+  default = "audit"
+}
+
 provider "google" {
   project = var.project
   region  = var.region
@@ -56,7 +61,7 @@ resource "google_project_iam_member" "bigquery_job_user" {
 
 resource "google_bigquery_dataset_iam_member" "audit_writer" {
   for_each   = var.roles
-  dataset_id = "audit"
+  dataset_id = var.audit_dataset
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.role[each.key].email}"
 }

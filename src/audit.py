@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 
@@ -8,7 +9,7 @@ from src.bq import BigQuery
 
 logger = logging.getLogger(__name__)
 
-TABLE = "audit.runs"
+TABLE = os.environ.get("AUDIT_TABLE", "audit.runs")
 
 
 def log_run(prompt: str, run: AgentRun, started_at: datetime) -> str:

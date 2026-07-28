@@ -1,10 +1,14 @@
 {
   "ops": {
     "servers": ["bq", "gcs"],
-    "skills": ["bigquery", "cloud-storage"]
+    "skills": ["bigquery", "cloud-storage"],
+    "permission_mode": "bypassPermissions",
+    "max_turns": 20
   },
   "analyst": {
     "servers": ["bq"],
-    "skills": ["bigquery"]
+    "skills": ["bigquery"],
+    "permission_mode": "bypassPermissions",
+    "max_turns": 20
   }
 }

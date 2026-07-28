@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -7,6 +6,8 @@ from pathlib import Path
 
 from google.cloud import storage
 from google.cloud.storage import Client
+
+from src import mcp
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +85,7 @@ class CloudStorage:
         return count
 
     def mcp(self):
-        from claude_agent_sdk import create_sdk_mcp_server
-
-        return create_sdk_mcp_server(name="gcs", version="1.0.0", tools=self.tools())
+        return mcp.server("gcs", self.tools())
 
     def tools(self) -> list:
         """Read-only agent-facing tools for the Claude Agent SDK.
@@ -96,25 +95,23 @@ class CloudStorage:
         """
         from claude_agent_sdk import tool
 
-        def _result(text: str) -> dict:
-            return {"content": [{"type": "text", "text": text}]}
-
-        def _dumps(obj) -> str:
-            return json.dumps(obj, default=str, ensure_ascii=False)
-
         @tool(
             "list_gcs_objects",
             "List object paths in a Cloud Storage bucket. Listings are "
             "capped, so narrow down with a prefix when a bucket holds many "
             "objects, e.g. prefix='logs/2026-07-'. Bucket name goes without "
             "the gs:// scheme.",
-            {"bucket": str, "prefix": str},
+            {
+                "type": "object",
+                "properties": {"bucket": {"type": "string"}, "prefix": {"type": "string"}},
+                "required": ["bucket"],
+            },
         )
         async def list_gcs_objects(args):
             try:
-                return _result(_dumps(self.list_objects(args["bucket"], args.get("prefix", ""))))
+                return mcp.result(mcp.dumps(self.list_objects(args["bucket"], args.get("prefix", ""))))
             except Exception as e:
-                return _result(f"Failed: {e}")
+                return mcp.result(f"Failed: {e}")
 
         @tool(
             "get_gcs_object_info",
@@ -126,9 +123,9 @@ class CloudStorage:
         )
         async def get_gcs_object_info(args):
             try:
-                return _result(_dumps(self.get_object_info(args["bucket"], args["path"])))
+                return mcp.result(mcp.dumps(self.get_object_info(args["bucket"], args["path"])))
             except Exception as e:
-                return _result(f"Failed: {e}")
+                return mcp.result(f"Failed: {e}")
 
         @tool(
             "read_gcs_object",
@@ -140,8 +137,8 @@ class CloudStorage:
         )
         async def read_gcs_object(args):
             try:
-                return _result(self.read_text(args["bucket"], args["path"]))
+                return mcp.result(self.read_text(args["bucket"], args["path"]))
             except Exception as e:
-                return _result(f"Failed: {e}")
+                return mcp.result(f"Failed: {e}")
 
         return [list_gcs_objects, get_gcs_object_info, read_gcs_object]

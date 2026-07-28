@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -6,6 +5,8 @@ from functools import cached_property
 
 from google.cloud import bigquery
 from google.cloud.bigquery import Client
+
+from src import mcp
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,7 @@ class BigQuery:
         }
 
     def mcp(self):
-        from claude_agent_sdk import create_sdk_mcp_server
-
-        return create_sdk_mcp_server(name="bq", version="1.0.0", tools=self.tools())
+        return mcp.server("bq", self.tools())
 
     def tools(self) -> list:
         """Agent-facing tools for the Claude Agent SDK (in-process MCP).
@@ -80,12 +79,6 @@ class BigQuery:
         fixes the query on the next turn.
         """
         from claude_agent_sdk import tool
-
-        def _result(text: str) -> dict:
-            return {"content": [{"type": "text", "text": text}]}
-
-        def _dumps(obj) -> str:
-            return json.dumps(obj, default=str, ensure_ascii=False)
 
         @tool(
             "query_bigquery",
@@ -97,9 +90,9 @@ class BigQuery:
         )
         async def query_bigquery(args):
             try:
-                return _result(_dumps(self.query(args["sql"])))
+                return mcp.result(mcp.dumps(self.query(args["sql"])))
             except Exception as e:
-                return _result(f"Query failed: {e}")
+                return mcp.result(f"Query failed: {e}")
 
         @tool(
             "get_table_info",
@@ -111,9 +104,9 @@ class BigQuery:
         )
         async def get_table_info(args):
             try:
-                return _result(_dumps(self.get_table_info(args["table"])))
+                return mcp.result(mcp.dumps(self.get_table_info(args["table"])))
             except Exception as e:
-                return _result(f"Failed: {e}")
+                return mcp.result(f"Failed: {e}")
 
         @tool(
             "list_tables",
@@ -123,8 +116,8 @@ class BigQuery:
         )
         async def list_tables(args):
             try:
-                return _result(_dumps(self.list_tables(args["dataset"])))
+                return mcp.result(mcp.dumps(self.list_tables(args["dataset"])))
             except Exception as e:
-                return _result(f"Failed: {e}")
+                return mcp.result(f"Failed: {e}")
 
         return [query_bigquery, get_table_info, list_tables]

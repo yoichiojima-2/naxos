@@ -63,8 +63,8 @@ def build_options(role: str) -> ClaudeAgentOptions:
         setting_sources=["project"],
         mcp_servers=servers,
         thinking={"type": "adaptive", "display": "summarized"},
-        permission_mode="bypassPermissions",
-        max_turns=20,
+        permission_mode=config["permission_mode"],
+        max_turns=config["max_turns"],
     )
 
 
