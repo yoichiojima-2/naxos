@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
@@ -50,6 +51,43 @@ def test_run_requires_iap_when_audience_set(monkeypatch):
 
 def test_run_rejects_unknown_role():
     assert client.post("/api/run", json={"prompt": "x", "role": "nope"}).status_code == 400
+
+
+def test_run_stream_emits_events_then_result(monkeypatch):
+    async def fake_execute(prompt, role, resume=None, principal=None, fresh_ws=False, on_event=None, **kwargs):
+        on_event({"event": "thinking"})
+        on_event({"event": "tool", "name": "query_bigquery"})
+        return AgentRun(text="hi", session_id="s1", cost_usd=0.01, num_turns=1)
+
+    monkeypatch.setattr(api, "execute", fake_execute)
+
+    response = client.post("/api/run/stream", json={"prompt": "hello", "role": "analyst"})
+
+    assert response.status_code == 200
+    lines = [json.loads(line) for line in response.text.strip().splitlines()]
+    assert lines[0] == {"event": "thinking"}
+    assert lines[1] == {"event": "tool", "name": "query_bigquery"}
+    assert lines[2]["event"] == "result"
+    assert lines[2]["text"] == "hi"
+    assert lines[2]["session_id"] == "s1"
+
+
+def test_run_stream_reports_disabled_as_error_event(monkeypatch):
+    async def fake_execute(*args, **kwargs):
+        raise RoleDisabled("role ops is disabled")
+
+    monkeypatch.setattr(api, "execute", fake_execute)
+
+    response = client.post("/api/run/stream", json={"prompt": "x", "role": "ops"})
+
+    lines = [json.loads(line) for line in response.text.strip().splitlines()]
+    assert lines == [{"event": "error", "detail": "role ops is disabled"}]
+
+
+def test_run_stream_requires_iap_when_audience_set(monkeypatch):
+    monkeypatch.setattr(api, "IAP_AUDIENCE", "/projects/1/services/x")
+
+    assert client.post("/api/run/stream", json={"prompt": "x", "role": "ops"}).status_code == 401
 
 
 def test_run_conflict_when_disabled(monkeypatch):

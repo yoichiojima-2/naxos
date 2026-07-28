@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Message = { who: "you" | "agent"; text: string; meta?: string };
 
@@ -27,6 +29,7 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [runs, setRuns] = useState<Run[]>([]);
   const [me, setMe] = useState("");
+  const [status, setStatus] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,34 +63,62 @@ export default function Page() {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  function statusLabel(event: { event: string; name?: string }): string {
+    if (event.event === "tool") return `using ${event.name?.split("__").pop()}…`;
+    if (event.event === "text") return "writing…";
+    return "thinking…";
+  }
+
   async function send() {
     const prompt = input.trim();
     if (!prompt || busy) return;
     setInput("");
     setMessages((m) => [...m, { who: "you", text: prompt }]);
     setBusy(true);
+    setStatus("starting…");
     try {
-      const response = await fetch("/api/run", {
+      const response = await fetch("/api/run/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, role, resume: sessionId }),
       });
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         const detail = (await response.json()).detail ?? response.statusText;
         setMessages((m) => [...m, { who: "agent", text: `error: ${detail}` }]);
         return;
       }
-      const result = await response.json();
-      setSessionId(result.session_id);
-      const cost = result.cost_usd != null ? `$${result.cost_usd.toFixed(4)}` : "";
-      setMessages((m) => [
-        ...m,
-        { who: "agent", text: result.text, meta: `${cost} · ${result.num_turns} turns` },
-      ]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let final = "";
+      let meta = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line);
+          if (event.event === "result") {
+            setSessionId(event.session_id);
+            const cost = event.cost_usd != null ? `$${event.cost_usd.toFixed(4)}` : "";
+            final = event.text;
+            meta = `${cost} · ${event.num_turns} turns`;
+          } else if (event.event === "error") {
+            final = `error: ${event.detail}`;
+          } else {
+            setStatus(statusLabel(event));
+          }
+        }
+      }
+      setMessages((m) => [...m, { who: "agent", text: final, meta: meta || undefined }]);
     } catch (e) {
       setMessages((m) => [...m, { who: "agent", text: `error: ${e}` }]);
     } finally {
       setBusy(false);
+      setStatus("");
     }
   }
 
@@ -140,7 +171,13 @@ export default function Page() {
             {messages.length === 0 && <p className="empty">ask {role} anything</p>}
             {messages.map((message, i) => (
               <div key={i} className={`message ${message.who}`}>
-                <pre>{message.text}</pre>
+                {message.who === "agent" ? (
+                  <div className="md">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <pre>{message.text}</pre>
+                )}
                 {message.meta && <span className="meta">{message.meta}</span>}
               </div>
             ))}
@@ -149,6 +186,7 @@ export default function Page() {
                 <span />
                 <span />
                 <span />
+                <em className="status">{status}</em>
               </div>
             )}
             <div ref={bottom} />

@@ -63,6 +63,32 @@ def test_run_agent_collects_everything(monkeypatch):
     assert run.is_error is False
 
 
+def test_run_agent_emits_events(monkeypatch):
+    patch_query(
+        monkeypatch,
+        [
+            AssistantMessage(
+                content=[
+                    ThinkingBlock(thinking="hmm", signature=""),
+                    ToolUseBlock(id="t1", name="query_bigquery", input={}),
+                    TextBlock(text="done"),
+                ],
+                model="claude-x",
+            ),
+            result_message(),
+        ],
+    )
+    events = []
+
+    asyncio.run(run_agent("prompt", ClaudeAgentOptions(), on_event=events.append))
+
+    assert events == [
+        {"event": "thinking"},
+        {"event": "tool", "name": "query_bigquery"},
+        {"event": "text"},
+    ]
+
+
 def test_run_agent_falls_back_to_last_text(monkeypatch):
     patch_query(
         monkeypatch,

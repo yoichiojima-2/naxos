@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from claude_agent_sdk import (
@@ -29,10 +30,16 @@ class AgentRun:
     is_error: bool = False
 
 
-async def run_agent(prompt: str, options: ClaudeAgentOptions, echo: bool = False) -> AgentRun:
+async def run_agent(
+    prompt: str,
+    options: ClaudeAgentOptions,
+    echo: bool = False,
+    on_event: Callable[[dict], None] | None = None,
+) -> AgentRun:
     """Run one agent task to completion and return the collected result.
 
-    With echo=True, blocks are printed as they arrive.
+    With echo=True, blocks are printed as they arrive. on_event, if given,
+    is called with a small status dict per block as it arrives.
     """
     run = AgentRun()
     async for message in query(prompt=prompt, options=options):
@@ -40,14 +47,20 @@ async def run_agent(prompt: str, options: ClaudeAgentOptions, echo: bool = False
             for block in message.content:
                 if isinstance(block, ToolUseBlock):
                     run.tool_calls.append({"name": block.name, "input": block.input})
+                    if on_event:
+                        on_event({"event": "tool", "name": block.name})
                     if echo:
                         print(f"[tool] {block.name}: {block.input}")
                 elif isinstance(block, TextBlock):
                     run.texts.append(block.text)
+                    if on_event:
+                        on_event({"event": "text"})
                     if echo:
                         print(block.text)
                 elif isinstance(block, ThinkingBlock):
                     run.thinkings.append(block.thinking)
+                    if on_event:
+                        on_event({"event": "thinking"})
                     if echo and block.thinking:
                         print(f"[thinking] {block.thinking}")
         elif isinstance(message, ResultMessage):

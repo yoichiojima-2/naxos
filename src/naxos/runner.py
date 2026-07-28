@@ -93,6 +93,7 @@ async def execute(
     trigger: str = "interactive",
     echo: bool = False,
     fresh_ws: bool = False,
+    on_event=None,
 ) -> AgentRun:
     cs = CloudStorage()
 
@@ -107,7 +108,7 @@ async def execute(
 
     await asyncio.to_thread(prepare)
     started_at = datetime.now(UTC)
-    run = await run_agent(prompt, build_options(role, cs, resume), echo=echo)
+    run = await run_agent(prompt, build_options(role, cs, resume), echo=echo, on_event=on_event)
     if resume and run.session_id != resume:
         logger.error(f"resume failed: expected session {resume}, got {run.session_id}")
 
