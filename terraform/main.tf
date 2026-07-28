@@ -24,9 +24,13 @@ variable "region" {
   default = "asia-northeast1"
 }
 
-variable "roles" {
-  type    = set(string)
-  default = ["ops", "analyst"]
+variable "github_repo" {
+  type    = string
+  default = "yoichiojima-2/naxos"
+}
+
+locals {
+  roles = toset(keys(jsondecode(file("${path.module}/../roles.json"))))
 }
 
 variable "audit_dataset" {
@@ -50,7 +54,7 @@ resource "google_bigquery_dataset" "audit" {
 }
 
 resource "google_cloud_run_v2_job" "runner" {
-  for_each = var.roles
+  for_each = local.roles
   name     = "naxos-runner-${each.key}"
   location = var.region
 
@@ -61,7 +65,7 @@ resource "google_cloud_run_v2_job" "runner" {
       timeout         = "1800s"
 
       containers {
-        image = "asia-northeast1-docker.pkg.dev/naxos-503510/cloud-run-source-deploy/naxos-runner:latest"
+        image = "${var.region}-docker.pkg.dev/${var.project}/cloud-run-source-deploy/naxos-runner:latest"
 
         env {
           name  = "ROLE"
@@ -94,34 +98,34 @@ resource "google_cloud_run_v2_job" "runner" {
 }
 
 resource "google_service_account" "role" {
-  for_each     = var.roles
+  for_each     = local.roles
   account_id   = "sa-role-${each.key}"
   display_name = "naxos agent runner (${each.key})"
 }
 
 resource "google_project_iam_member" "aiplatform_user" {
-  for_each = var.roles
+  for_each = local.roles
   project  = var.project
   role     = "roles/aiplatform.user"
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
 }
 
 resource "google_project_iam_member" "bigquery_job_user" {
-  for_each = var.roles
+  for_each = local.roles
   project  = var.project
   role     = "roles/bigquery.jobUser"
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
 }
 
 resource "google_bigquery_dataset_iam_member" "audit_writer" {
-  for_each   = var.roles
+  for_each   = local.roles
   dataset_id = var.audit_dataset
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.role[each.key].email}"
 }
 
 resource "google_storage_bucket_iam_member" "bucket_reader" {
-  for_each = var.roles
+  for_each = local.roles
   bucket   = var.project
   role     = "roles/storage.objectViewer"
   member   = "serviceAccount:${google_service_account.role[each.key].email}"
@@ -146,7 +150,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.repository" = "assertion.repository"
   }
 
-  attribute_condition = "assertion.repository == \"yoichiojima-2/naxos\""
+  attribute_condition = "assertion.repository == \"${var.github_repo}\""
 }
 
 resource "google_service_account" "deployer" {
@@ -157,7 +161,7 @@ resource "google_service_account" "deployer" {
 resource "google_service_account_iam_member" "deployer_wif" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/yoichiojima-2/naxos"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
 }
 
 resource "google_project_iam_member" "deployer_artifact_writer" {
@@ -173,7 +177,7 @@ resource "google_project_iam_member" "deployer_run_developer" {
 }
 
 resource "google_service_account_iam_member" "deployer_act_as_role" {
-  for_each           = var.roles
+  for_each           = local.roles
   service_account_id = google_service_account.role[each.key].name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.deployer.email}"
@@ -188,7 +192,7 @@ resource "google_secret_manager_secret" "anthropic_api_key" {
 }
 
 resource "google_secret_manager_secret_iam_member" "anthropic_api_key_accessor" {
-  for_each  = var.roles
+  for_each  = local.roles
   secret_id = google_secret_manager_secret.anthropic_api_key.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.role[each.key].email}"
