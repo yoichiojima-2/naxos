@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -69,6 +69,9 @@ description: when should the agent reach for this skill?
 # my-skill
 `;
 
+const TABS = ["chat", "history", "schedules", "skills", "artifacts"] as const;
+type Tab = (typeof TABS)[number];
+
 async function detailOf(response: Response): Promise<string> {
   const text = await response.text();
   try {
@@ -79,7 +82,7 @@ async function detailOf(response: Response): Promise<string> {
 }
 
 export default function Page() {
-  const [tab, setTab] = useState<"chat" | "history" | "schedules" | "skills" | "artifacts">("chat");
+  const [tab, setTab] = useState<Tab>("chat");
   const [roles, setRoles] = useState<string[]>([]);
   const [role, setRole] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -118,38 +121,25 @@ export default function Page() {
       .catch(() => setMe(""));
   }, []);
 
-  async function loadRuns() {
+  async function fetchInto<T>(url: string, set: (items: T[]) => void) {
     try {
-      setRuns(await (await fetch("/api/runs")).json());
+      set(await (await fetch(url)).json());
     } catch {
-      setRuns([]);
+      set([]);
     }
   }
 
-  async function loadArtifacts() {
-    try {
-      setArtifacts(await (await fetch("/api/artifacts")).json());
-    } catch {
-      setArtifacts([]);
-    }
-  }
+  const loadRuns = () => fetchInto<Run>("/api/runs", setRuns);
+  const loadArtifacts = () => fetchInto<Artifact>("/api/artifacts", setArtifacts);
 
   async function loadSchedules() {
     setRanNow("");
-    try {
-      setSchedules(await (await fetch("/api/schedules")).json());
-    } catch {
-      setSchedules([]);
-    }
+    await fetchInto<Schedule>("/api/schedules", setSchedules);
   }
 
   async function loadSkills() {
     setConfirmSkillDelete("");
-    try {
-      setSkills(await (await fetch("/api/skills")).json());
-    } catch {
-      setSkills([]);
-    }
+    await fetchInto<Skill>("/api/skills", setSkills);
   }
 
   useEffect(() => {
@@ -233,7 +223,7 @@ export default function Page() {
           body: JSON.stringify({ prompt, role, resume: sessionId }),
         });
         if (!response.ok || !response.body) {
-          const detail = (await response.json()).detail ?? response.statusText;
+          const detail = await detailOf(response);
           setMessages((m) => [...m, { who: "agent", text: `error: ${detail}` }]);
           return;
         }
@@ -271,6 +261,11 @@ export default function Page() {
       setBusy(false);
       setStatus("");
     }
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    send();
   }
 
   function openSession(run: Run) {
@@ -314,12 +309,7 @@ export default function Page() {
         }),
       });
       if (!response.ok) {
-        const text = await response.text();
-        let detail = text || response.statusText;
-        try {
-          detail = JSON.parse(text).detail ?? detail;
-        } catch {}
-        setScheduleError(detail);
+        setScheduleError(await detailOf(response));
         return;
       }
       setForm(null);
@@ -340,7 +330,7 @@ export default function Page() {
     setScheduleError("");
     try {
       const response = await fetch(`/api/schedules/${schedule.id}`, { method: "DELETE" });
-      if (!response.ok) setScheduleError(await response.text());
+      if (!response.ok) setScheduleError(await detailOf(response));
       await loadSchedules();
     } catch (e) {
       setScheduleError(String(e));
@@ -352,7 +342,7 @@ export default function Page() {
     try {
       const response = await fetch(`/api/schedules/${schedule.id}/run`, { method: "POST" });
       if (!response.ok) {
-        setScheduleError(await response.text());
+        setScheduleError(await detailOf(response));
         return;
       }
       setRanNow(schedule.id);
@@ -465,21 +455,11 @@ export default function Page() {
           naxos
         </h1>
         <nav>
-          <button className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}>
-            chat
-          </button>
-          <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
-            history
-          </button>
-          <button className={tab === "schedules" ? "active" : ""} onClick={() => setTab("schedules")}>
-            schedules
-          </button>
-          <button className={tab === "skills" ? "active" : ""} onClick={() => setTab("skills")}>
-            skills
-          </button>
-          <button className={tab === "artifacts" ? "active" : ""} onClick={() => setTab("artifacts")}>
-            artifacts
-          </button>
+          {TABS.map((t) => (
+            <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+              {t}
+            </button>
+          ))}
         </nav>
         <div className="controls">
           {me && <span className="me">{me}</span>}
@@ -514,12 +494,7 @@ export default function Page() {
                 </button>
               ))}
             </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                send();
-              }}
-            >
+            <form onSubmit={submit}>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -579,12 +554,7 @@ export default function Page() {
               <button onClick={() => setProposal(null)}>dismiss</button>
             </div>
           )}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              send();
-            }}
-          >
+          <form onSubmit={submit}>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
