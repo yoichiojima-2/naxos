@@ -226,3 +226,4 @@ ws/*
 node_modules/
 frontend/out/
 frontend/.next/
+*.tsbuildinfo
