@@ -58,6 +58,7 @@ type SkillEditor = {
   content: string;
   isNew: boolean;
   nameLocked: boolean;
+  viewing: boolean;
 };
 
 const SKILL_TEMPLATE = `---
@@ -343,7 +344,7 @@ export default function Page() {
         return;
       }
       const data = await response.json();
-      setSkillEditor({ skill: name, path, content: data.content, isNew: false, nameLocked: true });
+      setSkillEditor({ skill: name, path, content: data.content, isNew: false, nameLocked: true, viewing: true });
     } catch (e) {
       setSkillError(String(e));
     }
@@ -363,7 +364,9 @@ export default function Page() {
         setSkillError(await detailOf(response));
         return;
       }
-      setSkillEditor(null);
+      setSkillEditor((e) =>
+        e ? { ...e, skill: e.skill.trim(), path: e.path.trim(), isNew: false, nameLocked: true, viewing: true } : e,
+      );
       await loadSkills();
     } catch (e) {
       setSkillError(String(e));
@@ -618,7 +621,14 @@ export default function Page() {
                 className="primary"
                 onClick={() => {
                   setSkillError("");
-                  setSkillEditor({ skill: "", path: "SKILL.md", content: SKILL_TEMPLATE, isNew: true, nameLocked: false });
+                  setSkillEditor({
+                    skill: "",
+                    path: "SKILL.md",
+                    content: SKILL_TEMPLATE,
+                    isNew: true,
+                    nameLocked: false,
+                    viewing: false,
+                  });
                 }}
               >
                 new skill
@@ -644,14 +654,33 @@ export default function Page() {
                         : "delete file"}
                     </button>
                   )}
-                  <button onClick={() => setSkillEditor(null)}>cancel</button>
-                  <button
-                    className="primary"
-                    onClick={saveSkillFile}
-                    disabled={skillSaving || !skillEditor.skill.trim() || !skillEditor.path.trim()}
-                  >
-                    {skillSaving ? "saving…" : "save"}
-                  </button>
+                  {skillEditor.viewing ? (
+                    <>
+                      <button onClick={() => setSkillEditor(null)}>close</button>
+                      <button className="primary" onClick={() => editSkill({ viewing: false })}>
+                        edit
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() =>
+                          skillEditor.isNew
+                            ? setSkillEditor(null)
+                            : openSkillFile(skillEditor.skill, skillEditor.path)
+                        }
+                      >
+                        cancel
+                      </button>
+                      <button
+                        className="primary"
+                        onClick={saveSkillFile}
+                        disabled={skillSaving || !skillEditor.skill.trim() || !skillEditor.path.trim()}
+                      >
+                        {skillSaving ? "saving…" : "save"}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               {skillEditor.isNew && (
@@ -670,12 +699,22 @@ export default function Page() {
                   />
                 </div>
               )}
-              <textarea
-                className="skill-content"
-                value={skillEditor.content}
-                onChange={(e) => editSkill({ content: e.target.value })}
-                rows={16}
-              />
+              {skillEditor.viewing ? (
+                skillEditor.path.endsWith(".md") ? (
+                  <div className="md skill-view">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{skillEditor.content}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <pre className="skill-view">{skillEditor.content}</pre>
+                )
+              ) : (
+                <textarea
+                  className="skill-content"
+                  value={skillEditor.content}
+                  onChange={(e) => editSkill({ content: e.target.value })}
+                  rows={16}
+                />
+              )}
             </div>
           )}
           {skills.length === 0 && !skillEditor && <p className="empty">no skills yet</p>}
@@ -693,7 +732,14 @@ export default function Page() {
                   <button
                     onClick={() => {
                       setSkillError("");
-                      setSkillEditor({ skill: skill.name, path: "", content: "", isNew: true, nameLocked: true });
+                      setSkillEditor({
+                        skill: skill.name,
+                        path: "",
+                        content: "",
+                        isNew: true,
+                        nameLocked: true,
+                        viewing: false,
+                      });
                     }}
                   >
                     add file

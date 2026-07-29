@@ -500,6 +500,19 @@ textarea.skill-content {
   line-height: 1.55;
 }
 
+.skill-view {
+  font-size: 0.9rem;
+  padding: 0.2rem 0.1rem;
+}
+
+pre.skill-view {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .refresh {
   margin-bottom: 0.9rem;
   font-size: 0.85rem;
