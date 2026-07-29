@@ -68,6 +68,11 @@ description: when should the agent reach for this skill?
 # my-skill
 `;
 
+function splitFrontmatter(content: string): { meta: string | null; body: string } {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?/);
+  return match ? { meta: match[1], body: content.slice(match[0].length) } : { meta: null, body: content };
+}
+
 async function detailOf(response: Response): Promise<string> {
   const text = await response.text();
   try {
@@ -98,6 +103,7 @@ export default function Page() {
   const [scheduleError, setScheduleError] = useState("");
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillEditor, setSkillEditor] = useState<SkillEditor | null>(null);
+  const [skillPreview, setSkillPreview] = useState<{ skill: string; path: string; content: string } | null>(null);
   const [skillSaving, setSkillSaving] = useState(false);
   const [skillError, setSkillError] = useState("");
   const [confirmSkillDelete, setConfirmSkillDelete] = useState("");
@@ -144,6 +150,7 @@ export default function Page() {
 
   async function loadSkills() {
     setConfirmSkillDelete("");
+    setSkillPreview(null);
     try {
       setSkills(await (await fetch("/api/skills")).json());
     } catch {
@@ -336,6 +343,7 @@ export default function Page() {
   async function openSkillFile(name: string, path: string) {
     setSkillError("");
     setConfirmSkillDelete("");
+    setSkillPreview(null);
     try {
       const response = await fetch(`/api/skills/${name}/files/${path}`);
       if (!response.ok) {
@@ -344,6 +352,26 @@ export default function Page() {
       }
       const data = await response.json();
       setSkillEditor({ skill: name, path, content: data.content, isNew: false, nameLocked: true });
+    } catch (e) {
+      setSkillError(String(e));
+    }
+  }
+
+  async function previewSkillFile(name: string, path: string) {
+    if (skillPreview?.skill === name && skillPreview.path === path) {
+      setSkillPreview(null);
+      return;
+    }
+    setSkillError("");
+    setConfirmSkillDelete("");
+    try {
+      const response = await fetch(`/api/skills/${name}/files/${path}`);
+      if (!response.ok) {
+        setSkillError(await detailOf(response));
+        return;
+      }
+      const data = await response.json();
+      setSkillPreview({ skill: name, path, content: data.content });
     } catch (e) {
       setSkillError(String(e));
     }
@@ -759,11 +787,36 @@ export default function Page() {
               <div className="skill-files">
                 {skill.files.length === 0 && <span className="hint">no files yet — add SKILL.md</span>}
                 {skill.files.map((file) => (
-                  <button key={file} onClick={() => openSkillFile(skill.name, file)}>
+                  <button
+                    key={file}
+                    className={
+                      skillPreview?.skill === skill.name && skillPreview.path === file ? "active" : ""
+                    }
+                    onClick={() => previewSkillFile(skill.name, file)}
+                  >
                     {file}
                   </button>
                 ))}
               </div>
+              {skillPreview?.skill === skill.name && (
+                <div className="skill-preview">
+                  <div className="skill-preview-head">
+                    <code>{skillPreview.path}</code>
+                    <button onClick={() => openSkillFile(skillPreview.skill, skillPreview.path)}>edit</button>
+                  </div>
+                  {(() => {
+                    const { meta, body } = splitFrontmatter(skillPreview.content);
+                    return (
+                      <>
+                        {meta && <pre className="frontmatter">{meta}</pre>}
+                        <div className="md">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           ))}
         </section>
