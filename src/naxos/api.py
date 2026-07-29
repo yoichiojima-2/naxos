@@ -27,6 +27,7 @@ app = FastAPI()
 
 IAP_AUDIENCE = os.environ.get("IAP_AUDIENCE")
 IAP_CERTS_URL = "https://www.gstatic.com/iap/verify/public_key-jwk"
+PING_INTERVAL = 15.0
 
 
 class RunRequest(BaseModel):
@@ -125,7 +126,15 @@ async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
             )
         )
         task.add_done_callback(lambda _: queue.put_nowait(None))
-        while (event := await queue.get()) is not None:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=PING_INTERVAL)
+            except TimeoutError:
+                # keep bytes flowing so idle mobile/NAT connections stay open
+                yield json.dumps({"event": "ping"}) + "\n"
+                continue
+            if event is None:
+                break
             yield json.dumps(wire(event)) + "\n"
         try:
             result = task.result()
