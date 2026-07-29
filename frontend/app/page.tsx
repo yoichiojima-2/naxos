@@ -415,6 +415,8 @@ export default function Page() {
     }
   }
 
+  const freshChat = messages.length === 0 && !busy;
+
   return (
     <main>
       <header>
@@ -443,19 +445,70 @@ export default function Page() {
         </nav>
         <div className="controls">
           {me && <span className="me">{me}</span>}
-          <select value={role} onChange={(e) => setRole(e.target.value)} disabled={sessionId != null}>
-            {roles.map((r) => (
-              <option key={r}>{r}</option>
-            ))}
-          </select>
-          <button onClick={newChat}>new chat</button>
+          {!(tab === "chat" && freshChat) && (
+            <>
+              <select value={role} onChange={(e) => setRole(e.target.value)} disabled={sessionId != null}>
+                {roles.map((r) => (
+                  <option key={r}>{r}</option>
+                ))}
+              </select>
+              <button onClick={newChat}>new chat</button>
+            </>
+          )}
         </div>
       </header>
 
-      {tab === "chat" && (
+      {tab === "chat" && freshChat && (
+        <section className="hero">
+          <div className="hero-card">
+            <p className="hero-kicker">new session</p>
+            <h2>what should {role || "the agent"} work on?</h2>
+            <div className="hero-roles" role="radiogroup" aria-label="role">
+              {roles.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={r === role ? "active" : ""}
+                  aria-pressed={r === role}
+                  onClick={() => setRole(r)}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                send();
+              }}
+            >
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                placeholder={`describe the task for ${role || "the agent"}…`}
+                rows={5}
+                autoFocus
+              />
+              <div className="hero-foot">
+                <span className="hint">enter to send · shift+enter for a new line</span>
+                <button type="submit" disabled={!input.trim()}>
+                  start
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+      )}
+
+      {tab === "chat" && !freshChat && (
         <section className="chat">
           <div className="messages">
-            {messages.length === 0 && <p className="empty">ask {role} anything</p>}
             {messages.map((message, i) => (
               <div key={i} className={`message ${message.who}`}>
                 {message.who === "agent" ? (
