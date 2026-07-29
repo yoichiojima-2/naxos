@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -111,44 +112,94 @@ async def run(body: RunRequest, request: Request) -> dict:
     return run_payload(result)
 
 
+class EventStream:
+    """Buffered event log for one run, so a dropped connection can re-attach
+    and replay from where it left off. Instance-local, like the keep-alive
+    clients — a lost instance means falling back to History."""
+
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+        self.done = False
+        self.wakeup = asyncio.Event()
+
+    def emit(self, event: dict) -> None:
+        self.events.append(event)
+        wake, self.wakeup = self.wakeup, asyncio.Event()
+        wake.set()
+
+    def finish(self, task: asyncio.Task) -> None:
+        try:
+            result = task.result()
+        except (RoleDisabled, FileNotFoundError) as e:
+            event = {"event": "error", "detail": str(e)}
+        except Exception as e:
+            logger.exception("run failed")
+            event = {"event": "error", "detail": str(e)}
+        else:
+            event = {"event": "result", **run_payload(result)}
+        self.done = True
+        self.emit(event)
+
+
+streams: dict[str, EventStream] = {}
+MAX_STREAMS = 8
+
+
+def evict_streams() -> None:
+    finished = [stream_id for stream_id, stream in streams.items() if stream.done]
+    while len(streams) > MAX_STREAMS and finished:
+        del streams[finished.pop(0)]
+
+
+async def follow(stream: EventStream, offset: int):
+    while True:
+        while offset < len(stream.events):
+            yield json.dumps(stream.events[offset]) + "\n"
+            offset += 1
+        if stream.done:
+            return
+        wakeup = stream.wakeup
+        if offset < len(stream.events):
+            continue
+        try:
+            await asyncio.wait_for(wakeup.wait(), timeout=PING_INTERVAL)
+        except TimeoutError:
+            # keep bytes flowing so idle mobile/NAT connections stay open
+            yield json.dumps({"event": "ping"}) + "\n"
+
+
 @app.post("/api/run/stream")
 async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
     principal = principal_of(request)
     if body.role not in ROLES:
         raise HTTPException(status_code=400, detail=f"unknown role: {body.role}")
-
-    async def events():
-        queue: asyncio.Queue[dict | None] = asyncio.Queue()
-        task = asyncio.create_task(
-            execute(
-                body.prompt,
-                body.role,
-                body.resume,
-                principal=principal,
-                fresh_ws=True,
-                on_event=queue.put_nowait,
-                keep_alive=True,
-            )
+    stream = EventStream()
+    stream_id = uuid.uuid4().hex
+    stream.emit({"event": "stream", "id": stream_id})
+    task = asyncio.create_task(
+        execute(
+            body.prompt,
+            body.role,
+            body.resume,
+            principal=principal,
+            fresh_ws=True,
+            on_event=lambda event: stream.emit(wire(event)),
+            keep_alive=True,
         )
-        task.add_done_callback(lambda _: queue.put_nowait(None))
-        while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=PING_INTERVAL)
-            except TimeoutError:
-                # keep bytes flowing so idle mobile/NAT connections stay open
-                yield json.dumps({"event": "ping"}) + "\n"
-                continue
-            if event is None:
-                break
-            yield json.dumps(wire(event)) + "\n"
-        try:
-            result = task.result()
-        except (RoleDisabled, FileNotFoundError) as e:
-            yield json.dumps({"event": "error", "detail": str(e)}) + "\n"
-            return
-        yield json.dumps({"event": "result", **run_payload(result)}) + "\n"
+    )
+    task.add_done_callback(stream.finish)
+    streams[stream_id] = stream
+    evict_streams()
+    return StreamingResponse(follow(stream, 0), media_type="application/x-ndjson")
 
-    return StreamingResponse(events(), media_type="application/x-ndjson")
+
+@app.get("/api/run/stream/{stream_id}")
+def reattach_stream(stream_id: str, request: Request, offset: int = Query(0, ge=0)) -> StreamingResponse:
+    principal_of(request)
+    stream = streams.get(stream_id)
+    if stream is None:
+        raise HTTPException(status_code=404, detail=f"unknown stream: {stream_id}")
+    return StreamingResponse(follow(stream, offset), media_type="application/x-ndjson")
 
 
 @app.get("/api/runs")

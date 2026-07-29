@@ -170,6 +170,52 @@ export default function Page() {
     return "thinking…";
   }
 
+  const LOST = "connection lost — the run continues on the server; reopen it from History once it finishes";
+
+  type StreamState = { streamId: string | null; offset: number; final: string; meta: string; done: boolean };
+
+  async function consume(response: Response, state: StreamState) {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.event === "ping") continue;
+        state.offset += 1;
+        if (event.event === "stream") {
+          state.streamId = event.id;
+        } else if (event.event === "result") {
+          setSessionId(event.session_id);
+          const cost = event.cost_usd != null ? `$${event.cost_usd.toFixed(4)}` : "";
+          state.final = event.text;
+          state.meta = `${cost} · ${event.num_turns} turns`;
+          state.done = true;
+        } else if (event.event === "error") {
+          state.final = `error: ${event.detail}`;
+          state.done = true;
+        } else {
+          if (event.event === "proposal" && event.kind === "schedule") {
+            setProposal({
+              name: event.name ?? "",
+              role: event.role,
+              cron: event.cron,
+              prompt: event.prompt,
+              paused: false,
+            });
+          }
+          setStatus(statusLabel(event));
+        }
+      }
+    }
+  }
+
   async function send() {
     const prompt = input.trim();
     if (!prompt || busy) return;
@@ -177,60 +223,49 @@ export default function Page() {
     setMessages((m) => [...m, { who: "you", text: prompt }]);
     setBusy(true);
     setStatus("starting…");
+    const state: StreamState = { streamId: null, offset: 0, final: "", meta: "", done: false };
     try {
-      const response = await fetch("/api/run/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, role, resume: sessionId }),
-      });
-      if (!response.ok || !response.body) {
-        const detail = (await response.json()).detail ?? response.statusText;
-        setMessages((m) => [...m, { who: "agent", text: `error: ${detail}` }]);
-        return;
+      try {
+        const response = await fetch("/api/run/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt, role, resume: sessionId }),
+        });
+        if (!response.ok || !response.body) {
+          const detail = (await response.json()).detail ?? response.statusText;
+          setMessages((m) => [...m, { who: "agent", text: `error: ${detail}` }]);
+          return;
+        }
+        await consume(response, state);
+      } catch (e) {
+        if (!(e instanceof TypeError) || !state.streamId) throw e;
       }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let final = "";
-      let meta = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = JSON.parse(line);
-          if (event.event === "ping") continue;
-          if (event.event === "result") {
-            setSessionId(event.session_id);
-            const cost = event.cost_usd != null ? `$${event.cost_usd.toFixed(4)}` : "";
-            final = event.text;
-            meta = `${cost} · ${event.num_turns} turns`;
-          } else if (event.event === "error") {
-            final = `error: ${event.detail}`;
-          } else {
-            if (event.event === "proposal" && event.kind === "schedule") {
-              setProposal({
-                name: event.name ?? "",
-                role: event.role,
-                cron: event.cron,
-                prompt: event.prompt,
-                paused: false,
-              });
-            }
-            setStatus(statusLabel(event));
+      // the connection drops easily on mobile (screen lock, backgrounding, NAT);
+      // the run keeps going server-side, so re-attach and replay from our offset
+      for (let attempt = 0; !state.done && state.streamId; attempt++) {
+        if (attempt >= 5) {
+          state.final = LOST;
+          break;
+        }
+        setStatus("reconnecting…");
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+        try {
+          const response = await fetch(`/api/run/stream/${state.streamId}?offset=${state.offset}`);
+          if (!response.ok || !response.body) {
+            state.final = LOST;
+            break;
           }
+          const before = state.offset;
+          await consume(response, state);
+          if (state.offset > before) attempt = -1;
+        } catch (e) {
+          if (!(e instanceof TypeError)) throw e;
         }
       }
-      setMessages((m) => [...m, { who: "agent", text: final, meta: meta || undefined }]);
+      if (!state.done && !state.final) state.final = LOST;
+      setMessages((m) => [...m, { who: "agent", text: state.final, meta: state.meta || undefined }]);
     } catch (e) {
-      const text =
-        e instanceof TypeError
-          ? "connection lost — the run continues on the server; reopen it from History once it finishes"
-          : `error: ${e}`;
-      setMessages((m) => [...m, { who: "agent", text }]);
+      setMessages((m) => [...m, { who: "agent", text: e instanceof TypeError ? LOST : `error: ${e}` }]);
     } finally {
       setBusy(false);
       setStatus("");
