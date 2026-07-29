@@ -69,6 +69,10 @@ class CloudStorage:
             text += f"\n...[truncated: showing {self.max_read_bytes} of {blob.size} bytes]"
         return text
 
+    def list_all(self, bucket: str, prefix: str = "") -> list[str]:
+        """Programmatic use only - deliberately not exposed in tools()."""
+        return [b.name for b in self.client.list_blobs(bucket, prefix=prefix)]
+
     def write_text(self, bucket: str, path: str, data: str) -> str:
         """Programmatic use only - deliberately not exposed in tools()."""
         self.client.bucket(bucket).blob(path).upload_from_string(data)

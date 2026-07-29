@@ -9,6 +9,33 @@ from naxos.gcs import CloudStorage
 logger = logging.getLogger(__name__)
 
 
+def browse(cs: CloudStorage, bucket: str) -> list[dict]:
+    """Group the store's objects back into the artifacts publish() wrote:
+    one entry per <role>/<date>-<title>/ prefix, newest first."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for name in cs.list_all(bucket):
+        role, _, rest = name.partition("/")
+        folder, _, file = rest.partition("/")
+        if not file:
+            continue
+        groups.setdefault((role, folder), []).append(file)
+    artifacts = []
+    for (role, folder), files in groups.items():
+        entry = "index.html" if "index.html" in files else files[0] if len(files) == 1 else ""
+        artifacts.append(
+            {
+                "role": role,
+                "date": folder[:10],
+                "title": folder[11:],
+                "url": f"https://storage.cloud.google.com/{bucket}/{role}/{folder}/{entry}".rstrip("/"),
+                "files": len(files),
+            }
+        )
+    artifacts.sort(key=lambda a: (a["title"], a["role"]))
+    artifacts.sort(key=lambda a: a["date"], reverse=True)
+    return artifacts
+
+
 @dataclass
 class Artifacts:
     role: str

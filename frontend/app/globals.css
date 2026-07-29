@@ -301,8 +301,18 @@ form button:disabled {
   text-align: center;
 }
 
-.history {
+.history,
+.artifacts {
   padding-top: 1rem;
+}
+
+.artifacts td.title {
+  color: var(--accent);
+}
+
+.artifacts .hint {
+  margin-top: 0.9rem;
+  text-align: center;
 }
 
 .proposal {

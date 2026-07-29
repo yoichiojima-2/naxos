@@ -128,6 +128,24 @@ def test_runs_limit_validated():
     assert client.get("/api/runs?limit=9999").status_code == 422
 
 
+def test_artifacts(monkeypatch):
+    storage = Mock()
+    storage.list_all.return_value = ["ops/2026-07-28-report/report.html"]
+    monkeypatch.setattr(api, "get_storage", Mock(return_value=storage))
+
+    response = client.get("/api/artifacts")
+
+    assert response.status_code == 200
+    assert [a["title"] for a in response.json()] == ["report"]
+    assert storage.list_all.call_args.args[0].endswith("-artifacts")
+
+
+def test_artifacts_require_iap_when_audience_set(monkeypatch):
+    monkeypatch.setattr(api, "IAP_AUDIENCE", "/projects/1/services/x")
+
+    assert client.get("/api/artifacts").status_code == 401
+
+
 def test_schedules_list(monkeypatch):
     schedules = Mock()
     schedules.list.return_value = [

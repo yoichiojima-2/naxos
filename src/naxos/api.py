@@ -14,7 +14,9 @@ from pydantic import BaseModel
 
 from naxos import audit
 from naxos.agent import AgentRun
-from naxos.config import ROLES, ROOT, configure_logging
+from naxos.artifacts import browse
+from naxos.config import BUCKET, ROLES, ROOT, configure_logging
+from naxos.gcs import CloudStorage
 from naxos.runner import RoleDisabled, execute
 from naxos.schedules import PREFIX, Schedules
 
@@ -138,6 +140,17 @@ async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
 @app.get("/api/runs")
 def runs(limit: int = Query(50, ge=1, le=200)) -> list[dict]:
     return audit.recent_runs(limit)
+
+
+@lru_cache(maxsize=1)
+def get_storage() -> CloudStorage:
+    return CloudStorage()
+
+
+@app.get("/api/artifacts")
+def artifacts(request: Request) -> list[dict]:
+    principal_of(request)
+    return browse(get_storage(), f"{BUCKET}-artifacts")
 
 
 @lru_cache(maxsize=1)

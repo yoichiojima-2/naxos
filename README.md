@@ -177,7 +177,10 @@ uploads a workspace file or directory to
 `storage.cloud.google.com` URL: anyone with viewer IAM opens it in a
 browser and HTML renders directly, relative assets included. Runner
 service accounts hold `objectCreator` only, so published artifacts are
-immutable, and every publish is a tool call in the audit trail.
+immutable, and every publish is a tool call in the audit trail. The UI's
+artifacts tab lists the store (`/api/artifacts` groups objects back into
+`<role>/<date>-<title>/` entries, newest first) and opens each artifact
+at its `storage.cloud.google.com` URL.
 
 ## Skills
 
