@@ -9,7 +9,7 @@ from naxos.agent import AgentRun, collect, run_agent
 from naxos.artifacts import Artifacts
 from naxos.audit import log_run
 from naxos.bq import BigQuery
-from naxos.config import BUCKET, ROLES, SESSION_DIR, WS
+from naxos.config import ARTIFACTS_BUCKET, BUCKET, ROLES, SESSION_DIR, WS
 from naxos.gcs import CloudStorage
 from naxos.schedules import proposals_mcp
 
@@ -37,6 +37,10 @@ def is_disabled(cs: CloudStorage, role: str) -> bool:
     return cs.exists(BUCKET, f"disabled/{role}")
 
 
+def session_bucket(role: str) -> str:
+    return f"{BUCKET}-sessions-{role}"
+
+
 def clear_ws() -> None:
     WS.mkdir(exist_ok=True)
     for path in WS.iterdir():
@@ -54,7 +58,7 @@ def sync_skills(cs: CloudStorage, skills: list[str]) -> None:
 
 
 def restore_session(cs: CloudStorage, role: str, session_id: str) -> None:
-    bucket = f"{BUCKET}-sessions-{role}"
+    bucket = session_bucket(role)
     target = SESSION_DIR / f"{session_id}.jsonl"
     if not target.exists():
         cs.download_file(bucket, f"{session_id}/transcript.jsonl", target)
@@ -65,7 +69,7 @@ def restore_session(cs: CloudStorage, role: str, session_id: str) -> None:
 
 
 def save_session(cs: CloudStorage, role: str, session_id: str) -> None:
-    bucket = f"{BUCKET}-sessions-{role}"
+    bucket = session_bucket(role)
     source = SESSION_DIR / f"{session_id}.jsonl"
     if source.exists():
         cs.upload_file(bucket, f"{session_id}/transcript.jsonl", source)
@@ -87,7 +91,7 @@ def build_options(role: str, cs: CloudStorage, resume: str | None = None) -> Cla
     if "gcs" in config["servers"]:
         servers["gcs"] = cs.mcp()
     if "artifacts" in config["servers"]:
-        servers["artifacts"] = Artifacts(role, f"{BUCKET}-artifacts", WS, cs).mcp()
+        servers["artifacts"] = Artifacts(role, ARTIFACTS_BUCKET, WS, cs).mcp()
     if "schedules" in config["servers"]:
         servers["schedules"] = proposals_mcp()
     return ClaudeAgentOptions(

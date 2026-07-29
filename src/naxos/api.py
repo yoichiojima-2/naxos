@@ -4,9 +4,10 @@ import logging
 import os
 import uuid
 from functools import lru_cache
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from google.api_core.exceptions import InvalidArgument, NotFound
 from google.auth.transport import requests as google_requests
@@ -16,7 +17,7 @@ from pydantic import BaseModel
 from naxos import audit
 from naxos.agent import AgentRun
 from naxos.artifacts import browse
-from naxos.config import BUCKET, ROLES, ROOT, configure_logging
+from naxos.config import ARTIFACTS_BUCKET, ROLES, ROOT, configure_logging
 from naxos.gcs import CloudStorage
 from naxos.runner import RoleDisabled, execute
 from naxos.schedules import PREFIX, Schedules
@@ -30,6 +31,23 @@ app = FastAPI()
 IAP_AUDIENCE = os.environ.get("IAP_AUDIENCE")
 IAP_CERTS_URL = "https://www.gstatic.com/iap/verify/public_key-jwk"
 PING_INTERVAL = 15.0
+
+
+def error_handler(status: int):
+    async def handle(request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=status, content={"detail": str(exc)})
+
+    return handle
+
+
+for exc_type, status in {
+    ValueError: 400,
+    InvalidArgument: 400,
+    FileNotFoundError: 404,
+    NotFound: 404,
+    RoleDisabled: 409,
+}.items():
+    app.add_exception_handler(exc_type, error_handler(status))
 
 
 class RunRequest(BaseModel):
@@ -67,9 +85,18 @@ def principal_of(request: Request) -> str:
     return claims["email"]
 
 
+Principal = Annotated[str, Depends(principal_of)]
+authed = [Depends(principal_of)]
+
+
+def check_role(role: str) -> None:
+    if role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"unknown role: {role}")
+
+
 @app.get("/api/me")
-def me(request: Request) -> dict:
-    return {"email": principal_of(request)}
+def me(principal: Principal) -> dict:
+    return {"email": principal}
 
 
 @app.get("/api/roles")
@@ -99,16 +126,9 @@ def run_payload(result: AgentRun) -> dict:
 
 
 @app.post("/api/run")
-async def run(body: RunRequest, request: Request) -> dict:
-    principal = principal_of(request)
-    if body.role not in ROLES:
-        raise HTTPException(status_code=400, detail=f"unknown role: {body.role}")
-    try:
-        result = await execute(body.prompt, body.role, body.resume, principal=principal, fresh_ws=True, keep_alive=True)
-    except RoleDisabled as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+async def run(body: RunRequest, principal: Principal) -> dict:
+    check_role(body.role)
+    result = await execute(body.prompt, body.role, body.resume, principal=principal, fresh_ws=True, keep_alive=True)
     return run_payload(result)
 
 
@@ -169,10 +189,8 @@ async def follow(stream: EventStream, offset: int):
 
 
 @app.post("/api/run/stream")
-async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
-    principal = principal_of(request)
-    if body.role not in ROLES:
-        raise HTTPException(status_code=400, detail=f"unknown role: {body.role}")
+async def run_stream(body: RunRequest, principal: Principal) -> StreamingResponse:
+    check_role(body.role)
     stream = EventStream()
     stream_id = uuid.uuid4().hex
     stream.emit({"event": "stream", "id": stream_id})
@@ -193,9 +211,8 @@ async def run_stream(body: RunRequest, request: Request) -> StreamingResponse:
     return StreamingResponse(follow(stream, 0), media_type="application/x-ndjson")
 
 
-@app.get("/api/run/stream/{stream_id}")
-def reattach_stream(stream_id: str, request: Request, offset: int = Query(0, ge=0)) -> StreamingResponse:
-    principal_of(request)
+@app.get("/api/run/stream/{stream_id}", dependencies=authed)
+def reattach_stream(stream_id: str, offset: int = Query(0, ge=0)) -> StreamingResponse:
     stream = streams.get(stream_id)
     if stream is None:
         raise HTTPException(status_code=404, detail=f"unknown stream: {stream_id}")
@@ -212,19 +229,14 @@ def get_storage() -> CloudStorage:
     return CloudStorage()
 
 
-@app.get("/api/artifacts")
-def artifacts(request: Request) -> list[dict]:
-    principal_of(request)
-    return browse(get_storage(), f"{BUCKET}-artifacts")
+@app.get("/api/artifacts", dependencies=authed)
+def artifacts() -> list[dict]:
+    return browse(get_storage(), ARTIFACTS_BUCKET)
 
 
-@app.get("/artifacts/{path:path}")
-def artifact_file(path: str, request: Request) -> Response:
-    principal_of(request)
-    try:
-        data, content_type = get_storage().read_bytes(f"{BUCKET}-artifacts", path)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"artifact not found: {path}") from None
+@app.get("/artifacts/{path:path}", dependencies=authed)
+def artifact_file(path: str) -> Response:
+    data, content_type = get_storage().read_bytes(ARTIFACTS_BUCKET, path)
     # published artifacts are immutable, so long-lived caching is safe
     return Response(
         content=data,
@@ -238,56 +250,33 @@ def get_skills() -> Skills:
     return Skills(get_storage())
 
 
-@app.get("/api/skills")
-def skills(request: Request) -> list[dict]:
-    principal_of(request)
+@app.get("/api/skills", dependencies=authed)
+def skills() -> list[dict]:
     return get_skills().list()
 
 
-@app.get("/api/skills/{name}/files/{path:path}")
-def skill_file(name: str, path: str, request: Request) -> dict:
-    principal_of(request)
-    try:
-        return {"content": get_skills().read(name, path)}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+@app.get("/api/skills/{name}/files/{path:path}", dependencies=authed)
+def skill_file(name: str, path: str) -> dict:
+    return {"content": get_skills().read(name, path)}
 
 
 @app.put("/api/skills/{name}/files/{path:path}")
-def save_skill_file(name: str, path: str, body: SkillFile, request: Request) -> dict:
-    principal = principal_of(request)
-    try:
-        get_skills().write(name, path, body.content)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+def save_skill_file(name: str, path: str, body: SkillFile, principal: Principal) -> dict:
+    get_skills().write(name, path, body.content)
     logger.info(f"skill file {name}/{path} saved by {principal}")
     return {"name": name, "path": path}
 
 
 @app.delete("/api/skills/{name}/files/{path:path}")
-def delete_skill_file(name: str, path: str, request: Request) -> dict:
-    principal = principal_of(request)
-    try:
-        get_skills().delete_file(name, path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+def delete_skill_file(name: str, path: str, principal: Principal) -> dict:
+    get_skills().delete_file(name, path)
     logger.info(f"skill file {name}/{path} deleted by {principal}")
     return {"name": name, "path": path}
 
 
 @app.delete("/api/skills/{name}")
-def delete_skill(name: str, request: Request) -> dict:
-    principal = principal_of(request)
-    try:
-        get_skills().delete(name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+def delete_skill(name: str, principal: Principal) -> dict:
+    get_skills().delete(name)
     logger.info(f"skill {name} deleted by {principal}")
     return {"name": name}
 
@@ -297,21 +286,15 @@ def get_schedules() -> Schedules:
     return Schedules()
 
 
-@app.get("/api/schedules")
-def schedules(request: Request) -> list[dict]:
-    principal_of(request)
+@app.get("/api/schedules", dependencies=authed)
+def schedules() -> list[dict]:
     return get_schedules().list()
 
 
 @app.post("/api/schedules")
-def create_schedule(body: ScheduleCreate, request: Request) -> dict:
-    principal = principal_of(request)
-    if body.role not in ROLES:
-        raise HTTPException(status_code=400, detail=f"unknown role: {body.role}")
-    try:
-        job_id = get_schedules().create(body.role, body.name, body.cron, body.prompt, body.paused)
-    except InvalidArgument as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
+def create_schedule(body: ScheduleCreate, principal: Principal) -> dict:
+    check_role(body.role)
+    job_id = get_schedules().create(body.role, body.name, body.cron, body.prompt, body.paused)
     logger.info(f"schedule {job_id} created by {principal}")
     return {"id": job_id, **body.model_dump()}
 
@@ -322,39 +305,25 @@ def check_known_schedule(job_id: str) -> None:
 
 
 @app.put("/api/schedules/{job_id}")
-def update_schedule(job_id: str, body: ScheduleUpdate, request: Request) -> dict:
-    principal = principal_of(request)
+def update_schedule(job_id: str, body: ScheduleUpdate, principal: Principal) -> dict:
     check_known_schedule(job_id)
-    try:
-        get_schedules().update(job_id, body.name, body.cron, body.prompt, body.paused)
-    except InvalidArgument as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
-    except NotFound as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+    get_schedules().update(job_id, body.name, body.cron, body.prompt, body.paused)
     logger.info(f"schedule {job_id} updated by {principal}")
     return {"id": job_id, **body.model_dump()}
 
 
 @app.post("/api/schedules/{job_id}/run")
-def run_schedule(job_id: str, request: Request) -> dict:
-    principal = principal_of(request)
+def run_schedule(job_id: str, principal: Principal) -> dict:
     check_known_schedule(job_id)
-    try:
-        get_schedules().run(job_id)
-    except NotFound as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+    get_schedules().run(job_id)
     logger.info(f"schedule {job_id} triggered by {principal}")
     return {"id": job_id}
 
 
 @app.delete("/api/schedules/{job_id}")
-def delete_schedule(job_id: str, request: Request) -> dict:
-    principal = principal_of(request)
+def delete_schedule(job_id: str, principal: Principal) -> dict:
     check_known_schedule(job_id)
-    try:
-        get_schedules().delete(job_id)
-    except NotFound as e:
-        raise HTTPException(status_code=404, detail=str(e)) from None
+    get_schedules().delete(job_id)
     logger.info(f"schedule {job_id} deleted by {principal}")
     return {"id": job_id}
 
