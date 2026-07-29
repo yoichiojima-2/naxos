@@ -12,6 +12,7 @@ WS = ROOT / "ws"
 SESSION_DIR = Path.home() / ".claude" / "projects" / str(WS).replace("/", "-")
 ROLES = json.loads((ROOT / "roles.json").read_text())
 BUCKET = os.environ["BUCKET"]
+ARTIFACTS_BUCKET = f"{BUCKET}-artifacts"
 
 
 def configure_logging() -> None:
