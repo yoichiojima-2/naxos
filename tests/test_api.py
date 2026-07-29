@@ -72,12 +72,55 @@ def test_run_stream_emits_events_then_result(monkeypatch):
 
     assert response.status_code == 200
     lines = [json.loads(line) for line in response.text.strip().splitlines()]
-    assert lines[0] == {"event": "thinking"}
-    assert lines[1] == {"event": "tool", "name": "query_bigquery"}
-    assert lines[2] == {"event": "proposal", "kind": "schedule", "role": "ops", "cron": "0 9 * * *", "prompt": "check"}
-    assert lines[3]["event"] == "result"
-    assert lines[3]["text"] == "hi"
-    assert lines[3]["session_id"] == "s1"
+    assert lines[0]["event"] == "stream"
+    assert lines[0]["id"]
+    assert lines[1] == {"event": "thinking"}
+    assert lines[2] == {"event": "tool", "name": "query_bigquery"}
+    assert lines[3] == {"event": "proposal", "kind": "schedule", "role": "ops", "cron": "0 9 * * *", "prompt": "check"}
+    assert lines[4]["event"] == "result"
+    assert lines[4]["text"] == "hi"
+    assert lines[4]["session_id"] == "s1"
+
+
+def test_run_stream_reattach_replays_from_offset(monkeypatch):
+    async def fake_execute(prompt, role, resume=None, principal=None, fresh_ws=False, on_event=None, **kwargs):
+        on_event({"event": "thinking"})
+        return AgentRun(text="hi", session_id="s1", cost_usd=0.01, num_turns=1)
+
+    monkeypatch.setattr(api, "execute", fake_execute)
+
+    first = client.post("/api/run/stream", json={"prompt": "hello", "role": "analyst"})
+    stream_id = json.loads(first.text.splitlines()[0])["id"]
+
+    second = client.get(f"/api/run/stream/{stream_id}?offset=1")
+
+    assert second.status_code == 200
+    replay = [json.loads(line) for line in second.text.strip().splitlines()]
+    assert replay[0] == {"event": "thinking"}
+    assert replay[-1]["event"] == "result"
+    assert replay[-1]["text"] == "hi"
+
+
+def test_run_stream_reattach_unknown_is_404():
+    assert client.get("/api/run/stream/nope").status_code == 404
+
+
+def test_run_stream_reattach_requires_iap_when_audience_set(monkeypatch):
+    monkeypatch.setattr(api, "IAP_AUDIENCE", "/projects/1/services/x")
+
+    assert client.get("/api/run/stream/nope").status_code == 401
+
+
+def test_run_stream_reports_unexpected_failure_as_error_event(monkeypatch):
+    async def fake_execute(*args, **kwargs):
+        raise RuntimeError("sdk exploded")
+
+    monkeypatch.setattr(api, "execute", fake_execute)
+
+    response = client.post("/api/run/stream", json={"prompt": "x", "role": "ops"})
+
+    lines = [json.loads(line) for line in response.text.strip().splitlines()]
+    assert lines[-1] == {"event": "error", "detail": "sdk exploded"}
 
 
 def test_run_stream_pings_while_idle(monkeypatch):
@@ -106,7 +149,7 @@ def test_run_stream_reports_disabled_as_error_event(monkeypatch):
     response = client.post("/api/run/stream", json={"prompt": "x", "role": "ops"})
 
     lines = [json.loads(line) for line in response.text.strip().splitlines()]
-    assert lines == [{"event": "error", "detail": "role ops is disabled"}]
+    assert lines[-1] == {"event": "error", "detail": "role ops is disabled"}
 
 
 def test_run_stream_requires_iap_when_audience_set(monkeypatch):
