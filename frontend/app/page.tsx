@@ -156,6 +156,7 @@ export default function Page() {
         for (const line of lines) {
           if (!line.trim()) continue;
           const event = JSON.parse(line);
+          if (event.event === "ping") continue;
           if (event.event === "result") {
             setSessionId(event.session_id);
             const cost = event.cost_usd != null ? `$${event.cost_usd.toFixed(4)}` : "";
@@ -179,7 +180,11 @@ export default function Page() {
       }
       setMessages((m) => [...m, { who: "agent", text: final, meta: meta || undefined }]);
     } catch (e) {
-      setMessages((m) => [...m, { who: "agent", text: `error: ${e}` }]);
+      const text =
+        e instanceof TypeError
+          ? "connection lost — the run continues on the server; reopen it from History once it finishes"
+          : `error: ${e}`;
+      setMessages((m) => [...m, { who: "agent", text }]);
     } finally {
       setBusy(false);
       setStatus("");

@@ -80,6 +80,23 @@ def test_run_stream_emits_events_then_result(monkeypatch):
     assert lines[3]["session_id"] == "s1"
 
 
+def test_run_stream_pings_while_idle(monkeypatch):
+    import asyncio
+
+    async def fake_execute(prompt, role, resume=None, principal=None, fresh_ws=False, on_event=None, **kwargs):
+        await asyncio.sleep(0.05)
+        return AgentRun(text="hi", session_id="s1", cost_usd=0.01, num_turns=1)
+
+    monkeypatch.setattr(api, "execute", fake_execute)
+    monkeypatch.setattr(api, "PING_INTERVAL", 0.01)
+
+    response = client.post("/api/run/stream", json={"prompt": "hello", "role": "analyst"})
+
+    lines = [json.loads(line) for line in response.text.strip().splitlines()]
+    assert {"event": "ping"} in lines
+    assert lines[-1]["event"] == "result"
+
+
 def test_run_stream_reports_disabled_as_error_event(monkeypatch):
     async def fake_execute(*args, **kwargs):
         raise RoleDisabled("role ops is disabled")
