@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths-ignore: ["**.md", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE"]
 
 env:
   PROJECT: naxos-503510
@@ -27,6 +29,7 @@ jobs:
       - run: uv run --no-sync pytest
 
   deploy:
+    if: github.event_name == 'push'
     needs: [lint, test]
     runs-on: ubuntu-latest
     permissions:
