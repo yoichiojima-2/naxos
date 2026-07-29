@@ -388,8 +388,9 @@ button.primary:disabled {
 
 .schedule-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.5rem 0.7rem;
 }
 
 .schedule-head label {
@@ -408,6 +409,7 @@ button.primary:disabled {
 
 .schedule-actions button {
   font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .schedule-actions button:disabled {
@@ -550,6 +552,10 @@ td.prompt {
 }
 
 @media (max-width: 560px) {
+  nav button {
+    padding: 0.35rem 0.7rem;
+  }
+
   .controls {
     margin-left: 0;
     width: 100%;
