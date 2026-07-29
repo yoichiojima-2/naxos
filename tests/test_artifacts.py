@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from naxos.artifacts import Artifacts
+from naxos.artifacts import Artifacts, browse
 
 
 def make_artifacts(tmp_path) -> tuple[Artifacts, Mock]:
@@ -57,3 +57,50 @@ def test_publish_missing_path(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         artifacts.publish("nope.html", "x")
+
+
+def test_browse_groups_objects_into_artifacts():
+    cs = Mock()
+    cs.list_all.return_value = [
+        "ops/2026-07-20-cost-report/report.html",
+        "analyst/2026-07-28-q3-review/index.html",
+        "analyst/2026-07-28-q3-review/assets/style.css",
+        "ops/2026-07-28-raw-dump/a.csv",
+        "ops/2026-07-28-raw-dump/b.csv",
+    ]
+
+    result = browse(cs, "artifacts-bucket")
+
+    assert cs.list_all.call_args.args == ("artifacts-bucket",)
+    assert result == [
+        {
+            "role": "analyst",
+            "date": "2026-07-28",
+            "title": "q3-review",
+            "url": "https://storage.cloud.google.com/artifacts-bucket/analyst/2026-07-28-q3-review/index.html",
+            "files": 2,
+        },
+        {
+            "role": "ops",
+            "date": "2026-07-28",
+            "title": "raw-dump",
+            "url": "https://storage.cloud.google.com/artifacts-bucket/ops/2026-07-28-raw-dump",
+            "files": 2,
+        },
+        {
+            "role": "ops",
+            "date": "2026-07-20",
+            "title": "cost-report",
+            "url": "https://storage.cloud.google.com/artifacts-bucket/ops/2026-07-20-cost-report/report.html",
+            "files": 1,
+        },
+    ]
+
+
+def test_browse_skips_stray_top_level_objects():
+    cs = Mock()
+    cs.list_all.return_value = ["README.txt", "ops/2026-07-28-report/report.html"]
+
+    result = browse(cs, "artifacts-bucket")
+
+    assert [a["title"] for a in result] == ["report"]

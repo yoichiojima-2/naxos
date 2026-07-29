@@ -19,6 +19,14 @@ type Run = {
   is_error: boolean;
 };
 
+type Artifact = {
+  role: string;
+  date: string;
+  title: string;
+  url: string;
+  files: number;
+};
+
 type Schedule = {
   id: string;
   name: string;
@@ -39,7 +47,7 @@ type ScheduleForm = {
 };
 
 export default function Page() {
-  const [tab, setTab] = useState<"chat" | "history" | "schedules">("chat");
+  const [tab, setTab] = useState<"chat" | "history" | "schedules" | "artifacts">("chat");
   const [roles, setRoles] = useState<string[]>([]);
   const [role, setRole] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -47,6 +55,7 @@ export default function Page() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [me, setMe] = useState("");
   const [status, setStatus] = useState("");
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -80,6 +89,14 @@ export default function Page() {
     }
   }
 
+  async function loadArtifacts() {
+    try {
+      setArtifacts(await (await fetch("/api/artifacts")).json());
+    } catch {
+      setArtifacts([]);
+    }
+  }
+
   async function loadSchedules() {
     setRanNow("");
     try {
@@ -92,6 +109,7 @@ export default function Page() {
   useEffect(() => {
     if (tab === "history" && runs.length === 0) loadRuns();
     if (tab === "schedules") loadSchedules();
+    if (tab === "artifacts") loadArtifacts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -278,6 +296,9 @@ export default function Page() {
           </button>
           <button className={tab === "schedules" ? "active" : ""} onClick={() => setTab("schedules")}>
             schedules
+          </button>
+          <button className={tab === "artifacts" ? "active" : ""} onClick={() => setTab("artifacts")}>
+            artifacts
           </button>
         </nav>
         <div className="controls">
@@ -481,6 +502,42 @@ export default function Page() {
               </tbody>
             </table>
           </div>
+        </section>
+      )}
+
+      {tab === "artifacts" && (
+        <section className="artifacts">
+          <button className="refresh" onClick={loadArtifacts}>
+            refresh
+          </button>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>published</th>
+                  <th>title</th>
+                  <th>role</th>
+                  <th>files</th>
+                </tr>
+              </thead>
+              <tbody>
+                {artifacts.length === 0 && (
+                  <tr className="empty-row">
+                    <td colSpan={4}>no artifacts yet — ask an agent to publish one</td>
+                  </tr>
+                )}
+                {artifacts.map((artifact) => (
+                  <tr key={artifact.url} onClick={() => window.open(artifact.url, "_blank", "noopener")}>
+                    <td>{artifact.date}</td>
+                    <td className="title">{artifact.title}</td>
+                    <td>{artifact.role}</td>
+                    <td>{artifact.files}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="hint">artifacts open in a new tab (Google sign-in required); published artifacts are immutable</p>
         </section>
       )}
     </main>

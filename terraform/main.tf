@@ -420,6 +420,13 @@ resource "google_storage_bucket_iam_member" "ui_artifact_creator" {
   member = "serviceAccount:${google_service_account.ui.email}"
 }
 
+# viewer for the UI's artifacts browser tab; creator+viewer keeps immutability
+resource "google_storage_bucket_iam_member" "ui_artifact_viewer" {
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.ui.email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "ui_anthropic_api_key_accessor" {
   secret_id = google_secret_manager_secret.anthropic_api_key.id
   role      = "roles/secretmanager.secretAccessor"
