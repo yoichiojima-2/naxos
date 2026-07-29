@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv()
 
 ROOT = Path(__file__).parents[2]
 WS = ROOT / "ws"
