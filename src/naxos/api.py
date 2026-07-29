@@ -183,6 +183,18 @@ def update_schedule(job_id: str, body: ScheduleUpdate, request: Request) -> dict
     return {"id": job_id, **body.model_dump()}
 
 
+@app.post("/api/schedules/{job_id}/run")
+def run_schedule(job_id: str, request: Request) -> dict:
+    principal = principal_of(request)
+    check_known_schedule(job_id)
+    try:
+        get_schedules().run(job_id)
+    except NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+    logger.info(f"schedule {job_id} triggered by {principal}")
+    return {"id": job_id}
+
+
 @app.delete("/api/schedules/{job_id}")
 def delete_schedule(job_id: str, request: Request) -> dict:
     principal = principal_of(request)

@@ -54,6 +54,7 @@ export default function Page() {
   const [form, setForm] = useState<ScheduleForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState("");
+  const [ranNow, setRanNow] = useState("");
   const [scheduleError, setScheduleError] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -80,6 +81,7 @@ export default function Page() {
   }
 
   async function loadSchedules() {
+    setRanNow("");
     try {
       setSchedules(await (await fetch("/api/schedules")).json());
     } catch {
@@ -235,6 +237,20 @@ export default function Page() {
       const response = await fetch(`/api/schedules/${schedule.id}`, { method: "DELETE" });
       if (!response.ok) setScheduleError(await response.text());
       await loadSchedules();
+    } catch (e) {
+      setScheduleError(String(e));
+    }
+  }
+
+  async function runSchedule(schedule: Schedule) {
+    setScheduleError("");
+    try {
+      const response = await fetch(`/api/schedules/${schedule.id}/run`, { method: "POST" });
+      if (!response.ok) {
+        setScheduleError(await response.text());
+        return;
+      }
+      setRanNow(schedule.id);
     } catch (e) {
       setScheduleError(String(e));
     }
@@ -399,6 +415,13 @@ export default function Page() {
                   {schedule.paused ? "paused" : "active"}
                 </span>
                 <div className="schedule-actions">
+                  <button
+                    onClick={() => runSchedule(schedule)}
+                    disabled={schedule.paused || ranNow === schedule.id}
+                    title={schedule.paused ? "paused tasks can't be run — resume it first" : undefined}
+                  >
+                    {ranNow === schedule.id ? "started — see history" : "run now"}
+                  </button>
                   <button onClick={() => deleteSchedule(schedule)}>
                     {confirmDelete === schedule.id ? "confirm delete?" : "delete"}
                   </button>

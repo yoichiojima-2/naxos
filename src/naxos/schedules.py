@@ -89,6 +89,10 @@ class Schedules:
             self.client.pause_job(name=job_name) if paused else self.client.resume_job(name=job_name)
         logger.info(f"schedule updated: {job_id} cron={cron!r} paused={paused}")
 
+    def run(self, job_id: str) -> None:
+        self.client.run_job(name=f"{self.parent}/jobs/{job_id}")
+        logger.info(f"schedule triggered: {job_id}")
+
     def delete(self, job_id: str) -> None:
         self.client.delete_job(name=f"{self.parent}/jobs/{job_id}")
         logger.info(f"schedule deleted: {job_id}")

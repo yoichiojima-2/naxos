@@ -123,8 +123,10 @@ deletes them (any number per role, each with a name, cron in
 Asia/Tokyo, and prompt), and gcloud works on them the same way.
 Terraform owns only the surrounding IAM — the scheduler service account,
 its invoker grant on the runner jobs, and the UI's custom
-`naxosSchedulerEditor` role, which deliberately excludes `jobs.run` so
-the UI can never trigger a run directly.
+`naxosSchedulerEditor` role. Each task has a run-now button (active
+tasks only — Cloud Scheduler can't force-run a paused job); a manual
+run takes the same path as a cron firing, so the kill switch and audit
+log apply unchanged.
 
 In chat, the agent can draft a task via the `propose_schedule` tool —
 the tool writes nothing; the UI catches the call in the event stream and

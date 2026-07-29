@@ -189,6 +189,30 @@ def test_schedule_update_rejects_foreign_job():
     assert client.put("/api/schedules/some-other-job", json=body).status_code == 404
 
 
+def test_schedule_run(monkeypatch):
+    schedules = Mock()
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    response = client.post("/api/schedules/naxos-schedule-a1/run")
+
+    assert response.status_code == 200
+    assert schedules.run.call_args.args == ("naxos-schedule-a1",)
+
+
+def test_schedule_run_rejects_foreign_job():
+    assert client.post("/api/schedules/some-other-job/run").status_code == 404
+
+
+def test_schedule_run_maps_paused_to_404(monkeypatch):
+    from google.api_core.exceptions import NotFound
+
+    schedules = Mock()
+    schedules.run.side_effect = NotFound("Job not found.")
+    monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))
+
+    assert client.post("/api/schedules/naxos-schedule-a1/run").status_code == 404
+
+
 def test_schedule_delete(monkeypatch):
     schedules = Mock()
     monkeypatch.setattr(api, "get_schedules", Mock(return_value=schedules))

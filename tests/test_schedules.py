@@ -124,6 +124,14 @@ def test_update_resumes_on_transition():
     client.pause_job.assert_not_called()
 
 
+def test_run():
+    client = Mock()
+
+    Schedules(client=client, project="p").run("naxos-schedule-abc123")
+
+    client.run_job.assert_called_once_with(name="projects/p/locations/asia-northeast1/jobs/naxos-schedule-abc123")
+
+
 def test_delete():
     client = Mock()
 

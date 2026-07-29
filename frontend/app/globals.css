@@ -400,6 +400,11 @@ button.primary:disabled {
   font-size: 0.85rem;
 }
 
+.schedule-actions button:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
 .chip {
   font-size: 0.7rem;
   text-transform: uppercase;

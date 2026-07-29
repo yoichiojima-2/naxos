@@ -358,7 +358,8 @@ resource "google_project_iam_member" "ui_bigquery_job_user" {
 }
 
 # scheduled tasks (naxos-schedule-*) are user data owned by the UI/gcloud,
-# not Terraform; the IAM boundary still excludes jobs.run on purpose
+# not Terraform; jobs.run backs the UI's run-now button — the run still goes
+# through the same runner path (kill switch, audit) as a cron firing
 resource "google_project_iam_custom_role" "scheduler_editor" {
   role_id     = "naxosSchedulerEditor"
   title       = "naxos scheduler task editor"
@@ -370,6 +371,7 @@ resource "google_project_iam_custom_role" "scheduler_editor" {
     "cloudscheduler.jobs.delete",
     "cloudscheduler.jobs.pause",
     "cloudscheduler.jobs.enable",
+    "cloudscheduler.jobs.run",
     "cloudscheduler.locations.get",
     "cloudscheduler.locations.list",
   ]
