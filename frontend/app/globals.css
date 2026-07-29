@@ -334,24 +334,26 @@ form button:disabled {
   font-family: var(--font-mono), monospace;
 }
 
-.schedules {
+.schedules,
+.skills {
   padding-top: 1rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.schedules .empty {
+.schedules .empty,
+.skills .empty {
   margin-top: 2rem;
 }
 
-.schedules-head {
+.section-head {
   display: flex;
   align-items: center;
   gap: 1rem;
 }
 
-.schedules-head .hint {
+.section-head .hint {
   flex: 1;
 }
 
@@ -465,10 +467,37 @@ button.primary:disabled {
   flex: 0 1 160px;
 }
 
+.schedule-fields .path {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.85rem;
+}
+
 .schedule textarea {
   font-size: 0.9rem;
   cursor: text;
   resize: vertical;
+}
+
+.skill-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.skill-files button {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+}
+
+.skill-files button:hover {
+  border-color: var(--accent);
+}
+
+textarea.skill-content {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
 }
 
 .refresh {

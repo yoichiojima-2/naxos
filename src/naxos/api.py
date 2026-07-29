@@ -19,6 +19,7 @@ from naxos.config import BUCKET, ROLES, ROOT, configure_logging
 from naxos.gcs import CloudStorage
 from naxos.runner import RoleDisabled, execute
 from naxos.schedules import PREFIX, Schedules
+from naxos.skills import Skills
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,10 @@ class ScheduleUpdate(BaseModel):
 
 class ScheduleCreate(ScheduleUpdate):
     role: str
+
+
+class SkillFile(BaseModel):
+    content: str
 
 
 def principal_of(request: Request) -> str:
@@ -175,6 +180,65 @@ def artifact_file(path: str, request: Request) -> Response:
         media_type=content_type or "application/octet-stream",
         headers={"Cache-Control": "private, max-age=86400, immutable"},
     )
+
+
+@lru_cache(maxsize=1)
+def get_skills() -> Skills:
+    return Skills(get_storage())
+
+
+@app.get("/api/skills")
+def skills(request: Request) -> list[dict]:
+    principal_of(request)
+    return get_skills().list()
+
+
+@app.get("/api/skills/{name}/files/{path:path}")
+def skill_file(name: str, path: str, request: Request) -> dict:
+    principal_of(request)
+    try:
+        return {"content": get_skills().read(name, path)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+
+
+@app.put("/api/skills/{name}/files/{path:path}")
+def save_skill_file(name: str, path: str, body: SkillFile, request: Request) -> dict:
+    principal = principal_of(request)
+    try:
+        get_skills().write(name, path, body.content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    logger.info(f"skill file {name}/{path} saved by {principal}")
+    return {"name": name, "path": path}
+
+
+@app.delete("/api/skills/{name}/files/{path:path}")
+def delete_skill_file(name: str, path: str, request: Request) -> dict:
+    principal = principal_of(request)
+    try:
+        get_skills().delete_file(name, path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+    logger.info(f"skill file {name}/{path} deleted by {principal}")
+    return {"name": name, "path": path}
+
+
+@app.delete("/api/skills/{name}")
+def delete_skill(name: str, request: Request) -> dict:
+    principal = principal_of(request)
+    try:
+        get_skills().delete(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+    logger.info(f"skill {name} deleted by {principal}")
+    return {"name": name}
 
 
 @lru_cache(maxsize=1)

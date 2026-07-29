@@ -46,8 +46,39 @@ type ScheduleForm = {
   paused: boolean;
 };
 
+type Skill = {
+  name: string;
+  files: string[];
+  roles: string[];
+};
+
+type SkillEditor = {
+  skill: string;
+  path: string;
+  content: string;
+  isNew: boolean;
+  nameLocked: boolean;
+};
+
+const SKILL_TEMPLATE = `---
+name: my-skill
+description: when should the agent reach for this skill?
+---
+
+# my-skill
+`;
+
+async function detailOf(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text).detail ?? (text || response.statusText);
+  } catch {
+    return text || response.statusText;
+  }
+}
+
 export default function Page() {
-  const [tab, setTab] = useState<"chat" | "history" | "schedules" | "artifacts">("chat");
+  const [tab, setTab] = useState<"chat" | "history" | "schedules" | "skills" | "artifacts">("chat");
   const [roles, setRoles] = useState<string[]>([]);
   const [role, setRole] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -65,6 +96,11 @@ export default function Page() {
   const [confirmDelete, setConfirmDelete] = useState("");
   const [ranNow, setRanNow] = useState("");
   const [scheduleError, setScheduleError] = useState("");
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skillEditor, setSkillEditor] = useState<SkillEditor | null>(null);
+  const [skillSaving, setSkillSaving] = useState(false);
+  const [skillError, setSkillError] = useState("");
+  const [confirmSkillDelete, setConfirmSkillDelete] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -106,9 +142,19 @@ export default function Page() {
     }
   }
 
+  async function loadSkills() {
+    setConfirmSkillDelete("");
+    try {
+      setSkills(await (await fetch("/api/skills")).json());
+    } catch {
+      setSkills([]);
+    }
+  }
+
   useEffect(() => {
     if (tab === "history" && runs.length === 0) loadRuns();
     if (tab === "schedules") loadSchedules();
+    if (tab === "skills") loadSkills();
     if (tab === "artifacts") loadArtifacts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
@@ -283,6 +329,92 @@ export default function Page() {
     setForm((f) => (f ? { ...f, ...patch } : f));
   }
 
+  function editSkill(patch: Partial<SkillEditor>) {
+    setSkillEditor((e) => (e ? { ...e, ...patch } : e));
+  }
+
+  async function openSkillFile(name: string, path: string) {
+    setSkillError("");
+    setConfirmSkillDelete("");
+    try {
+      const response = await fetch(`/api/skills/${name}/files/${path}`);
+      if (!response.ok) {
+        setSkillError(await detailOf(response));
+        return;
+      }
+      const data = await response.json();
+      setSkillEditor({ skill: name, path, content: data.content, isNew: false, nameLocked: true });
+    } catch (e) {
+      setSkillError(String(e));
+    }
+  }
+
+  async function saveSkillFile() {
+    if (!skillEditor) return;
+    setSkillSaving(true);
+    setSkillError("");
+    try {
+      const response = await fetch(`/api/skills/${skillEditor.skill.trim()}/files/${skillEditor.path.trim()}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: skillEditor.content }),
+      });
+      if (!response.ok) {
+        setSkillError(await detailOf(response));
+        return;
+      }
+      setSkillEditor(null);
+      await loadSkills();
+    } catch (e) {
+      setSkillError(String(e));
+    } finally {
+      setSkillSaving(false);
+    }
+  }
+
+  async function deleteSkillFile() {
+    if (!skillEditor || skillEditor.isNew) return;
+    const key = `file:${skillEditor.skill}/${skillEditor.path}`;
+    if (confirmSkillDelete !== key) {
+      setConfirmSkillDelete(key);
+      return;
+    }
+    setConfirmSkillDelete("");
+    setSkillError("");
+    try {
+      const response = await fetch(`/api/skills/${skillEditor.skill}/files/${skillEditor.path}`, { method: "DELETE" });
+      if (!response.ok) {
+        setSkillError(await detailOf(response));
+        return;
+      }
+      setSkillEditor(null);
+      await loadSkills();
+    } catch (e) {
+      setSkillError(String(e));
+    }
+  }
+
+  async function deleteSkill(skill: Skill) {
+    const key = `skill:${skill.name}`;
+    if (confirmSkillDelete !== key) {
+      setConfirmSkillDelete(key);
+      return;
+    }
+    setConfirmSkillDelete("");
+    setSkillError("");
+    try {
+      const response = await fetch(`/api/skills/${skill.name}`, { method: "DELETE" });
+      if (!response.ok) {
+        setSkillError(await detailOf(response));
+        return;
+      }
+      if (skillEditor?.skill === skill.name) setSkillEditor(null);
+      await loadSkills();
+    } catch (e) {
+      setSkillError(String(e));
+    }
+  }
+
   return (
     <main>
       <header>
@@ -301,6 +433,9 @@ export default function Page() {
           </button>
           <button className={tab === "schedules" ? "active" : ""} onClick={() => setTab("schedules")}>
             schedules
+          </button>
+          <button className={tab === "skills" ? "active" : ""} onClick={() => setTab("skills")}>
+            skills
           </button>
           <button className={tab === "artifacts" ? "active" : ""} onClick={() => setTab("artifacts")}>
             artifacts
@@ -375,7 +510,7 @@ export default function Page() {
 
       {tab === "schedules" && (
         <section className="schedules">
-          <div className="schedules-head">
+          <div className="section-head">
             <p className="hint">
               scheduled tasks run the role unattended (cron in Asia/Tokyo). you can also ask the agent in chat to
               propose one.
@@ -466,6 +601,116 @@ export default function Page() {
                 {schedule.next_run && <span> · next run {new Date(schedule.next_run).toLocaleString()}</span>}
               </p>
               <p className="schedule-prompt">{schedule.prompt}</p>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {tab === "skills" && (
+        <section className="skills">
+          <div className="section-head">
+            <p className="hint">
+              skills are shared know-how synced into the agent workspace at run start — edits apply from the next run.
+              which roles load a skill is set in roles.json.
+            </p>
+            {!skillEditor && (
+              <button
+                className="primary"
+                onClick={() => {
+                  setSkillError("");
+                  setSkillEditor({ skill: "", path: "SKILL.md", content: SKILL_TEMPLATE, isNew: true, nameLocked: false });
+                }}
+              >
+                new skill
+              </button>
+            )}
+          </div>
+          {skillError && <p className="schedule-error">{skillError}</p>}
+          {skillEditor && (
+            <div className="schedule form">
+              <div className="schedule-head">
+                <strong>
+                  {skillEditor.isNew
+                    ? skillEditor.nameLocked
+                      ? `new file in ${skillEditor.skill}`
+                      : "new skill"
+                    : `${skillEditor.skill}/${skillEditor.path}`}
+                </strong>
+                <div className="schedule-actions">
+                  {!skillEditor.isNew && (
+                    <button onClick={deleteSkillFile}>
+                      {confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}`
+                        ? "confirm delete?"
+                        : "delete file"}
+                    </button>
+                  )}
+                  <button onClick={() => setSkillEditor(null)}>cancel</button>
+                  <button
+                    className="primary"
+                    onClick={saveSkillFile}
+                    disabled={skillSaving || !skillEditor.skill.trim() || !skillEditor.path.trim()}
+                  >
+                    {skillSaving ? "saving…" : "save"}
+                  </button>
+                </div>
+              </div>
+              {skillEditor.isNew && (
+                <div className="schedule-fields">
+                  <input
+                    value={skillEditor.skill}
+                    onChange={(e) => editSkill({ skill: e.target.value })}
+                    placeholder="skill name (e.g. incident-triage)"
+                    disabled={skillEditor.nameLocked}
+                  />
+                  <input
+                    className="path"
+                    value={skillEditor.path}
+                    onChange={(e) => editSkill({ path: e.target.value })}
+                    placeholder="SKILL.md"
+                  />
+                </div>
+              )}
+              <textarea
+                className="skill-content"
+                value={skillEditor.content}
+                onChange={(e) => editSkill({ content: e.target.value })}
+                rows={16}
+              />
+            </div>
+          )}
+          {skills.length === 0 && !skillEditor && <p className="empty">no skills yet</p>}
+          {skills.map((skill) => (
+            <div key={skill.name} className="schedule">
+              <div className="schedule-head">
+                <strong>{skill.name}</strong>
+                {skill.roles.map((r) => (
+                  <span key={r} className="chip">
+                    {r}
+                  </span>
+                ))}
+                {skill.roles.length === 0 && <span className="chip">no roles</span>}
+                <div className="schedule-actions">
+                  <button
+                    onClick={() => {
+                      setSkillError("");
+                      setSkillEditor({ skill: skill.name, path: "", content: "", isNew: true, nameLocked: true });
+                    }}
+                  >
+                    add file
+                  </button>
+                  <button onClick={() => deleteSkill(skill)}>
+                    {confirmSkillDelete === `skill:${skill.name}` ? "confirm delete?" : "delete"}
+                  </button>
+                </div>
+              </div>
+              <div className="skill-files">
+                {skill.files.length === 0 && <span className="hint">no files yet — add SKILL.md</span>}
+                {skill.files.map((file) => (
+                  <button key={file} onClick={() => openSkillFile(skill.name, file)}>
+                    {file}
+                  </button>
+                ))}
+              </div>
             </div>
           ))}
         </section>

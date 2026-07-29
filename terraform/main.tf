@@ -414,6 +414,19 @@ resource "google_storage_bucket_iam_member" "ui_bucket_reader" {
   }
 }
 
+# backs the UI's skills editor tab; scoped so the UI can never touch
+# state, kill-switch markers, or anything else in the main bucket
+resource "google_storage_bucket_iam_member" "ui_skills_editor" {
+  bucket = var.project
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.ui.email}"
+
+  condition {
+    title      = "skills-only"
+    expression = "resource.name.startsWith(\"projects/_/buckets/${var.project}/objects/skills/\")"
+  }
+}
+
 resource "google_storage_bucket_iam_member" "ui_session_user" {
   for_each = local.roles
   bucket   = google_storage_bucket.sessions[each.key].name

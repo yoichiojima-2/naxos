@@ -85,6 +85,13 @@ class CloudStorage:
         self.client.bucket(bucket).blob(path).upload_from_string(data)
         return f"gs://{bucket}/{path}"
 
+    def delete_object(self, bucket: str, path: str) -> None:
+        """Programmatic use only - deliberately not exposed in tools()."""
+        try:
+            self.client.bucket(bucket).blob(path).delete()
+        except NotFound:
+            raise FileNotFoundError(f"gs://{bucket}/{path} not found") from None
+
     def upload_file(self, bucket: str, path: str, source: Path | str) -> str:
         """Programmatic use only - deliberately not exposed in tools()."""
         self.client.bucket(bucket).blob(path).upload_from_filename(str(source))

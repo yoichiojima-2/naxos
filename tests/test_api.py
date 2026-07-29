@@ -190,6 +190,97 @@ def test_artifact_file_requires_iap_when_audience_set(monkeypatch):
     assert client.get("/artifacts/ops/report.html").status_code == 401
 
 
+def test_skills_list(monkeypatch):
+    skills = Mock()
+    skills.list.return_value = [{"name": "bigquery", "files": ["SKILL.md"], "roles": ["analyst", "ops"]}]
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    assert client.get("/api/skills").json() == skills.list.return_value
+
+
+def test_skills_require_iap_when_audience_set(monkeypatch):
+    monkeypatch.setattr(api, "IAP_AUDIENCE", "/projects/1/services/x")
+
+    assert client.get("/api/skills").status_code == 401
+
+
+def test_skill_file_read(monkeypatch):
+    skills = Mock()
+    skills.read.return_value = "# doc"
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    response = client.get("/api/skills/bigquery/files/references/tables.md")
+
+    assert response.json() == {"content": "# doc"}
+    assert skills.read.call_args.args == ("bigquery", "references/tables.md")
+
+
+def test_skill_file_read_missing_is_404(monkeypatch):
+    skills = Mock()
+    skills.read.side_effect = FileNotFoundError("not found")
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    assert client.get("/api/skills/bigquery/files/nope.md").status_code == 404
+
+
+def test_skill_file_save(monkeypatch):
+    skills = Mock()
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    response = client.put("/api/skills/bigquery/files/SKILL.md", json={"content": "# new"})
+
+    assert response.status_code == 200
+    assert skills.write.call_args.args == ("bigquery", "SKILL.md", "# new")
+
+
+def test_skill_file_save_maps_invalid_to_400(monkeypatch):
+    from naxos.skills import Skills
+
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=Skills(Mock(), bucket="b")))
+
+    response = client.put("/api/skills/Bad_Name/files/SKILL.md", json={"content": "x"})
+
+    assert response.status_code == 400
+    assert "invalid skill name" in response.json()["detail"]
+
+
+def test_skill_file_delete(monkeypatch):
+    skills = Mock()
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    response = client.delete("/api/skills/bigquery/files/notes.md")
+
+    assert response.status_code == 200
+    assert skills.delete_file.call_args.args == ("bigquery", "notes.md")
+
+
+def test_skill_file_delete_missing_is_404(monkeypatch):
+    skills = Mock()
+    skills.delete_file.side_effect = FileNotFoundError("gone")
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    assert client.delete("/api/skills/bigquery/files/nope.md").status_code == 404
+
+
+def test_skill_delete(monkeypatch):
+    skills = Mock()
+    skills.delete.return_value = 2
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    response = client.delete("/api/skills/custom")
+
+    assert response.status_code == 200
+    assert skills.delete.call_args.args == ("custom",)
+
+
+def test_skill_delete_missing_is_404(monkeypatch):
+    skills = Mock()
+    skills.delete.side_effect = FileNotFoundError("skill not found: ghost")
+    monkeypatch.setattr(api, "get_skills", Mock(return_value=skills))
+
+    assert client.delete("/api/skills/ghost").status_code == 404
+
+
 def test_schedules_list(monkeypatch):
     schedules = Mock()
     schedules.list.return_value = [

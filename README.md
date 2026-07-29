@@ -185,7 +185,10 @@ at its `storage.cloud.google.com` URL.
 ## Skills
 
 `gs://$BUCKET/skills` is the live skill store: users add and edit skills
-there directly. At startup the runtime downloads the role's skills into
+there directly, or through the UI's skills tab (`/api/skills` lists,
+reads, saves, and deletes files under the prefix — edits apply from the
+next run, since skills sync at run start; the UI's write access is
+IAM-scoped to `skills/` only). At startup the runtime downloads the role's skills into
 `ws/.claude/skills/` — locally and on Cloud Run alike. The main bucket
 is read-only for the runtime (enforced by IAM, not convention); the
 only thing it writes is session transcripts, which live in per-role
