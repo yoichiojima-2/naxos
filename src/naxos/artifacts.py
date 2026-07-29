@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,6 +8,15 @@ from naxos import mcp
 from naxos.gcs import CloudStorage
 
 logger = logging.getLogger(__name__)
+
+
+def share_url(bucket: str, path: str) -> str:
+    """Serve through the IAP-protected UI when its URL is known; the direct
+    GCS link needs per-user bucket IAM and 403s for everyone else."""
+    ui = os.environ.get("UI_URL", "").rstrip("/")
+    if ui:
+        return f"{ui}/artifacts/{path}"
+    return f"https://storage.cloud.google.com/{bucket}/{path}"
 
 
 def browse(cs: CloudStorage, bucket: str) -> list[dict]:
@@ -27,7 +37,7 @@ def browse(cs: CloudStorage, bucket: str) -> list[dict]:
                 "role": role,
                 "date": folder[:10],
                 "title": folder[11:],
-                "url": f"https://storage.cloud.google.com/{bucket}/{role}/{folder}/{entry}".rstrip("/"),
+                "url": f"/artifacts/{role}/{folder}/{entry}".rstrip("/"),
                 "files": len(files),
             }
         )
@@ -58,7 +68,7 @@ class Artifacts:
                 if file.is_file():
                     self.cs.upload_file(self.bucket, f"{prefix}/{file.relative_to(source)}", file)
             entry = "index.html" if (source / "index.html").exists() else ""
-        url = f"https://storage.cloud.google.com/{self.bucket}/{prefix}/{entry}".rstrip("/")
+        url = share_url(self.bucket, f"{prefix}/{entry}".rstrip("/"))
         logger.info(f"published artifact: {url}")
         return url
 

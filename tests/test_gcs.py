@@ -67,6 +67,23 @@ def test_read_text_missing_object():
         cs.read_text("bucket", "missing.txt")
 
 
+def test_read_bytes():
+    cs = make_cs()
+    blob = Mock(content_type="text/html")
+    blob.download_as_bytes.return_value = b"<h1>hi</h1>"
+    cs.client.bucket.return_value.get_blob.return_value = blob
+
+    assert cs.read_bytes("bucket", "a.html") == (b"<h1>hi</h1>", "text/html")
+
+
+def test_read_bytes_missing_object():
+    cs = make_cs()
+    cs.client.bucket.return_value.get_blob.return_value = None
+
+    with pytest.raises(FileNotFoundError):
+        cs.read_bytes("bucket", "missing.html")
+
+
 def test_get_object_info():
     cs = make_cs()
     blob = Mock(
