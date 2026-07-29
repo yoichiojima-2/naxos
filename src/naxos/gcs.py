@@ -69,6 +69,13 @@ class CloudStorage:
             text += f"\n...[truncated: showing {self.max_read_bytes} of {blob.size} bytes]"
         return text
 
+    def read_bytes(self, bucket: str, path: str) -> tuple[bytes, str | None]:
+        """Programmatic use only - deliberately not exposed in tools()."""
+        blob = self.client.bucket(bucket).get_blob(path)
+        if blob is None:
+            raise FileNotFoundError(f"gs://{bucket}/{path} not found")
+        return blob.download_as_bytes(), blob.content_type
+
     def list_all(self, bucket: str, prefix: str = "") -> list[str]:
         """Programmatic use only - deliberately not exposed in tools()."""
         return [b.name for b in self.client.list_blobs(bucket, prefix=prefix)]

@@ -26,6 +26,17 @@ def test_publish_file(tmp_path):
     assert url == f"https://storage.cloud.google.com/artifacts-bucket/ops/{date}-cost-report/report.html"
 
 
+def test_publish_links_through_ui_when_url_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("UI_URL", "https://naxos-ui-1.asia-northeast1.run.app/")
+    artifacts, _ = make_artifacts(tmp_path)
+    (tmp_path / "report.html").write_text("<h1>report</h1>")
+    date = datetime.now(UTC).date().isoformat()
+
+    url = artifacts.publish("report.html", "cost-report")
+
+    assert url == f"https://naxos-ui-1.asia-northeast1.run.app/artifacts/ops/{date}-cost-report/report.html"
+
+
 def test_publish_directory_points_at_index(tmp_path):
     artifacts, cs = make_artifacts(tmp_path)
     deck = tmp_path / "deck"
@@ -77,21 +88,21 @@ def test_browse_groups_objects_into_artifacts():
             "role": "analyst",
             "date": "2026-07-28",
             "title": "q3-review",
-            "url": "https://storage.cloud.google.com/artifacts-bucket/analyst/2026-07-28-q3-review/index.html",
+            "url": "/artifacts/analyst/2026-07-28-q3-review/index.html",
             "files": 2,
         },
         {
             "role": "ops",
             "date": "2026-07-28",
             "title": "raw-dump",
-            "url": "https://storage.cloud.google.com/artifacts-bucket/ops/2026-07-28-raw-dump",
+            "url": "/artifacts/ops/2026-07-28-raw-dump",
             "files": 2,
         },
         {
             "role": "ops",
             "date": "2026-07-20",
             "title": "cost-report",
-            "url": "https://storage.cloud.google.com/artifacts-bucket/ops/2026-07-20-cost-report/report.html",
+            "url": "/artifacts/ops/2026-07-20-cost-report/report.html",
             "files": 1,
         },
     ]

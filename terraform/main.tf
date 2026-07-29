@@ -32,6 +32,9 @@ variable "github_repo" {
 locals {
   role_config = jsondecode(file("${path.module}/../roles.json"))
   roles       = toset(keys(local.role_config))
+  # deterministic form of the service URL: computable before the service
+  # exists, and usable inside the UI service's own env without a self-cycle
+  ui_url = "https://naxos-ui-${data.google_project.main.number}.${var.region}.run.app"
 }
 
 variable "audit_dataset" {
@@ -99,6 +102,10 @@ resource "google_cloud_run_v2_job" "runner" {
         env {
           name  = "LOG_LEVEL"
           value = "INFO"
+        }
+        env {
+          name  = "UI_URL"
+          value = local.ui_url
         }
         env {
           name = "ANTHROPIC_API_KEY"
@@ -476,6 +483,10 @@ resource "google_cloud_run_v2_service" "ui" {
       env {
         name  = "IAP_AUDIENCE"
         value = "/projects/${data.google_project.main.number}/locations/${var.region}/services/naxos-ui"
+      }
+      env {
+        name  = "UI_URL"
+        value = local.ui_url
       }
       env {
         name = "ANTHROPIC_API_KEY"

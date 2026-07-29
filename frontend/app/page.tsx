@@ -537,7 +537,7 @@ export default function Page() {
               </tbody>
             </table>
           </div>
-          <p className="hint">artifacts open in a new tab (Google sign-in required); published artifacts are immutable</p>
+          <p className="hint">artifacts open in a new tab; published artifacts are immutable</p>
         </section>
       )}
     </main>

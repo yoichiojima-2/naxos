@@ -146,6 +146,33 @@ def test_artifacts_require_iap_when_audience_set(monkeypatch):
     assert client.get("/api/artifacts").status_code == 401
 
 
+def test_artifact_file(monkeypatch):
+    storage = Mock()
+    storage.read_bytes.return_value = (b"<h1>hi</h1>", "text/html")
+    monkeypatch.setattr(api, "get_storage", Mock(return_value=storage))
+
+    response = client.get("/artifacts/ops/2026-07-28-report/report.html")
+
+    assert response.status_code == 200
+    assert response.content == b"<h1>hi</h1>"
+    assert response.headers["content-type"].startswith("text/html")
+    assert storage.read_bytes.call_args.args == ("test-bucket-artifacts", "ops/2026-07-28-report/report.html")
+
+
+def test_artifact_file_missing_is_404(monkeypatch):
+    storage = Mock()
+    storage.read_bytes.side_effect = FileNotFoundError("not found")
+    monkeypatch.setattr(api, "get_storage", Mock(return_value=storage))
+
+    assert client.get("/artifacts/ops/nope.html").status_code == 404
+
+
+def test_artifact_file_requires_iap_when_audience_set(monkeypatch):
+    monkeypatch.setattr(api, "IAP_AUDIENCE", "/projects/1/services/x")
+
+    assert client.get("/artifacts/ops/report.html").status_code == 401
+
+
 def test_schedules_list(monkeypatch):
     schedules = Mock()
     schedules.list.return_value = [

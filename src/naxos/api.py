@@ -4,7 +4,7 @@ import logging
 import os
 from functools import lru_cache
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from google.api_core.exceptions import InvalidArgument, NotFound
@@ -151,6 +151,21 @@ def get_storage() -> CloudStorage:
 def artifacts(request: Request) -> list[dict]:
     principal_of(request)
     return browse(get_storage(), f"{BUCKET}-artifacts")
+
+
+@app.get("/artifacts/{path:path}")
+def artifact_file(path: str, request: Request) -> Response:
+    principal_of(request)
+    try:
+        data, content_type = get_storage().read_bytes(f"{BUCKET}-artifacts", path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"artifact not found: {path}") from None
+    # published artifacts are immutable, so long-lived caching is safe
+    return Response(
+        content=data,
+        media_type=content_type or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=86400, immutable"},
+    )
 
 
 @lru_cache(maxsize=1)
