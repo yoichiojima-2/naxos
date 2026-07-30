@@ -77,14 +77,15 @@ resource "google_bigquery_dataset" "audit" {
 
 # fictional-company sample data for agents to analyze; tables are loaded
 # out of band by scripts/seed.py, same split as audit.runs
-resource "google_bigquery_dataset" "soramame" {
-  dataset_id = "soramame"
-  location   = var.region
+resource "google_bigquery_dataset" "lumen" {
+  dataset_id                 = "lumen"
+  location                   = var.region
+  delete_contents_on_destroy = true
 }
 
-resource "google_bigquery_dataset_iam_member" "soramame_reader" {
+resource "google_bigquery_dataset_iam_member" "lumen_reader" {
   for_each   = local.roles
-  dataset_id = google_bigquery_dataset.soramame.dataset_id
+  dataset_id = google_bigquery_dataset.lumen.dataset_id
   role       = "roles/bigquery.dataViewer"
   member     = "serviceAccount:${google_service_account.role[each.key].email}"
 }
