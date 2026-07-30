@@ -84,6 +84,36 @@ function SkillDoc({ content }: { content: string }) {
   );
 }
 
+const ICONS = {
+  plus: "M5 12h14 M12 5v14",
+  trash: "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6 M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2 M10 11v6 M14 11v6",
+  pencil: "M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z",
+  play: "m6 3 14 9-14 9V3z",
+  refresh: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16 M3 21v-5h5",
+  x: "M18 6 6 18 M6 6l12 12",
+  arrowUp: "m5 12 7-7 7 7 M12 19V5",
+  file: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z M14 2v4a2 2 0 0 0 2 2h4",
+  filePlus: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z M14 2v4a2 2 0 0 0 2 2h4 M9 15h6 M12 12v6",
+} as const;
+
+function Icon({ name, size = 14 }: { name: keyof typeof ICONS; size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
+
 const TABS = ["chat", "history", "schedules", "skills", "artifacts"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -494,7 +524,10 @@ export default function Page() {
                   <option key={r}>{r}</option>
                 ))}
               </select>
-              <button onClick={newChat}>new chat</button>
+              <button onClick={newChat}>
+                <Icon name="plus" />
+                new chat
+              </button>
             </>
           )}
         </div>
@@ -575,7 +608,10 @@ export default function Page() {
                 <code>{proposal.cron}</code>
               </span>
               <button onClick={reviewProposal}>review &amp; save</button>
-              <button onClick={() => setProposal(null)}>dismiss</button>
+              <button onClick={() => setProposal(null)}>
+                <Icon name="x" />
+                dismiss
+              </button>
             </div>
           )}
           <form onSubmit={submit}>
@@ -585,8 +621,8 @@ export default function Page() {
               placeholder={sessionId ? "continue this session…" : "new session…"}
               disabled={busy}
             />
-            <button type="submit" disabled={busy}>
-              send
+            <button type="submit" className="send" disabled={busy} aria-label="send">
+              <Icon name="arrowUp" size={16} />
             </button>
           </form>
           {sessionId && <p className="session">session {sessionId}</p>}
@@ -605,6 +641,7 @@ export default function Page() {
                 className="primary"
                 onClick={() => setForm({ name: "", role, cron: "0 9 * * *", prompt: "", paused: true })}
               >
+                <Icon name="plus" />
                 new task
               </button>
             )}
@@ -666,9 +703,14 @@ export default function Page() {
                     disabled={schedule.paused || ranNow === schedule.id}
                     title={schedule.paused ? "paused tasks can't be run — resume it first" : undefined}
                   >
+                    <Icon name="play" />
                     {ranNow === schedule.id ? "started — see history" : "run now"}
                   </button>
-                  <button onClick={() => deleteSchedule(schedule)}>
+                  <button
+                    className={confirmDelete === schedule.id ? "danger" : ""}
+                    onClick={() => deleteSchedule(schedule)}
+                  >
+                    <Icon name="trash" />
                     {confirmDelete === schedule.id ? "confirm delete?" : "delete"}
                   </button>
                   <button
@@ -677,6 +719,7 @@ export default function Page() {
                       setConfirmDelete("");
                     }}
                   >
+                    <Icon name="pencil" />
                     edit
                   </button>
                 </div>
@@ -713,6 +756,7 @@ export default function Page() {
                   });
                 }}
               >
+                <Icon name="plus" />
                 new skill
               </button>
             )}
@@ -736,7 +780,13 @@ export default function Page() {
                   </strong>
                   <div className="schedule-actions">
                     {!skillEditor.isNew && (
-                      <button onClick={deleteSkillFile}>
+                      <button
+                        className={
+                          confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}` ? "danger" : ""
+                        }
+                        onClick={deleteSkillFile}
+                      >
+                        <Icon name="trash" />
                         {confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}`
                           ? "confirm delete?"
                           : "delete file"}
@@ -744,8 +794,12 @@ export default function Page() {
                     )}
                     {skillEditor.viewing ? (
                       <>
-                        <button onClick={() => setSkillEditor(null)}>close</button>
+                        <button onClick={() => setSkillEditor(null)}>
+                          <Icon name="x" />
+                          close
+                        </button>
                         <button className="primary" onClick={() => editSkill({ viewing: false })}>
+                          <Icon name="pencil" />
                           edit
                         </button>
                       </>
@@ -830,9 +884,14 @@ export default function Page() {
                       });
                     }}
                   >
+                    <Icon name="filePlus" />
                     add file
                   </button>
-                  <button onClick={() => deleteSkill(skill)}>
+                  <button
+                    className={confirmSkillDelete === `skill:${skill.name}` ? "danger" : ""}
+                    onClick={() => deleteSkill(skill)}
+                  >
+                    <Icon name="trash" />
                     {confirmSkillDelete === `skill:${skill.name}` ? "confirm delete?" : "delete"}
                   </button>
                 </div>
@@ -841,6 +900,7 @@ export default function Page() {
                 {skill.files.length === 0 && <span className="hint">no files yet — add SKILL.md</span>}
                 {skill.files.map((file) => (
                   <button key={file} onClick={() => openSkillFile(skill.name, file)}>
+                    <Icon name="file" size={12} />
                     {file}
                   </button>
                 ))}
@@ -853,6 +913,7 @@ export default function Page() {
       {tab === "history" && (
         <section className="history">
           <button className="refresh" onClick={loadRuns}>
+            <Icon name="refresh" size={12} />
             refresh
           </button>
           <div className="table-wrap">
@@ -892,6 +953,7 @@ export default function Page() {
       {tab === "artifacts" && (
         <section className="artifacts">
           <button className="refresh" onClick={loadArtifacts}>
+            <Icon name="refresh" size={12} />
             refresh
           </button>
           <div className="table-wrap">

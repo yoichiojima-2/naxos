@@ -73,6 +73,22 @@ textarea {
   outline-offset: 2px;
 }
 
+button:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+button svg {
+  flex-shrink: 0;
+}
+
+button.danger {
+  color: var(--error);
+  border-color: var(--error);
+}
+
 nav {
   display: flex;
   gap: 2px;
@@ -417,6 +433,10 @@ form button {
 form button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+form button.send {
+  padding: 0.65rem;
 }
 
 .session {
