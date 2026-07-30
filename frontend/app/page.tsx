@@ -781,12 +781,12 @@ export default function Page() {
                   <div className="schedule-actions">
                     {!skillEditor.isNew && (
                       <button
-                        className={
+                        className={`compact ${
                           confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}` ? "danger" : ""
-                        }
+                        }`}
                         onClick={deleteSkillFile}
                       >
-                        <Icon name="trash" />
+                        <Icon name="trash" size={12} />
                         {confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}`
                           ? "confirm delete?"
                           : "delete file"}
@@ -888,10 +888,10 @@ export default function Page() {
                     add file
                   </button>
                   <button
-                    className={confirmSkillDelete === `skill:${skill.name}` ? "danger" : ""}
+                    className={`compact ${confirmSkillDelete === `skill:${skill.name}` ? "danger" : ""}`}
                     onClick={() => deleteSkill(skill)}
                   >
-                    <Icon name="trash" />
+                    <Icon name="trash" size={12} />
                     {confirmSkillDelete === `skill:${skill.name}` ? "confirm delete?" : "delete"}
                   </button>
                 </div>
