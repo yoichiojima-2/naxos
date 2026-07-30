@@ -613,6 +613,24 @@ button.primary:disabled {
   resize: vertical;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(28, 32, 38, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3rem 1.25rem;
+}
+
+.modal {
+  width: 100%;
+  max-width: 760px;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+}
+
 .skill-files {
   display: flex;
   flex-wrap: wrap;

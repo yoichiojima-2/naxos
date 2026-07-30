@@ -169,6 +169,15 @@ export default function Page() {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  useEffect(() => {
+    if (!skillEditor?.viewing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSkillEditor(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [skillEditor?.viewing]);
+
   function statusLabel(event: { event: string; name?: string }): string {
     if (event.event === "tool") return `using ${event.name?.split("__").pop()}…`;
     if (event.event === "proposal") return "proposing a schedule…";
@@ -708,84 +717,92 @@ export default function Page() {
               </button>
             )}
           </div>
-          {skillError && <p className="schedule-error">{skillError}</p>}
+          {skillError && !skillEditor && <p className="schedule-error">{skillError}</p>}
           {skillEditor && (
-            <div className="schedule form">
-              <div className="schedule-head">
-                <strong className={skillEditor.isNew ? undefined : "file-path"}>
-                  {skillEditor.isNew
-                    ? skillEditor.nameLocked
-                      ? `new file in ${skillEditor.skill}`
-                      : "new skill"
-                    : `${skillEditor.skill}/${skillEditor.path}`}
-                </strong>
-                <div className="schedule-actions">
-                  {!skillEditor.isNew && (
-                    <button onClick={deleteSkillFile}>
-                      {confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}`
-                        ? "confirm delete?"
-                        : "delete file"}
-                    </button>
-                  )}
-                  {skillEditor.viewing ? (
-                    <>
-                      <button onClick={() => setSkillEditor(null)}>close</button>
-                      <button className="primary" onClick={() => editSkill({ viewing: false })}>
-                        edit
+            <div
+              className="modal-backdrop"
+              onClick={() => {
+                if (skillEditor.viewing) setSkillEditor(null);
+              }}
+            >
+              <div className="modal schedule form" onClick={(e) => e.stopPropagation()}>
+                <div className="schedule-head">
+                  <strong className={skillEditor.isNew ? undefined : "file-path"}>
+                    {skillEditor.isNew
+                      ? skillEditor.nameLocked
+                        ? `new file in ${skillEditor.skill}`
+                        : "new skill"
+                      : `${skillEditor.skill}/${skillEditor.path}`}
+                  </strong>
+                  <div className="schedule-actions">
+                    {!skillEditor.isNew && (
+                      <button onClick={deleteSkillFile}>
+                        {confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}`
+                          ? "confirm delete?"
+                          : "delete file"}
                       </button>
-                    </>
+                    )}
+                    {skillEditor.viewing ? (
+                      <>
+                        <button onClick={() => setSkillEditor(null)}>close</button>
+                        <button className="primary" onClick={() => editSkill({ viewing: false })}>
+                          edit
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() =>
+                            skillEditor.isNew
+                              ? setSkillEditor(null)
+                              : openSkillFile(skillEditor.skill, skillEditor.path)
+                          }
+                        >
+                          cancel
+                        </button>
+                        <button
+                          className="primary"
+                          onClick={saveSkillFile}
+                          disabled={skillSaving || !skillEditor.skill.trim() || !skillEditor.path.trim()}
+                        >
+                          {skillSaving ? "saving…" : "save"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {skillError && <p className="schedule-error">{skillError}</p>}
+                {skillEditor.isNew && (
+                  <div className="schedule-fields">
+                    <input
+                      value={skillEditor.skill}
+                      onChange={(e) => editSkill({ skill: e.target.value })}
+                      placeholder="skill name (e.g. incident-triage)"
+                      disabled={skillEditor.nameLocked}
+                    />
+                    <input
+                      className="path"
+                      value={skillEditor.path}
+                      onChange={(e) => editSkill({ path: e.target.value })}
+                      placeholder="SKILL.md"
+                    />
+                  </div>
+                )}
+                {skillEditor.viewing ? (
+                  skillEditor.path.endsWith(".md") ? (
+                    <SkillDoc content={skillEditor.content} />
                   ) : (
-                    <>
-                      <button
-                        onClick={() =>
-                          skillEditor.isNew
-                            ? setSkillEditor(null)
-                            : openSkillFile(skillEditor.skill, skillEditor.path)
-                        }
-                      >
-                        cancel
-                      </button>
-                      <button
-                        className="primary"
-                        onClick={saveSkillFile}
-                        disabled={skillSaving || !skillEditor.skill.trim() || !skillEditor.path.trim()}
-                      >
-                        {skillSaving ? "saving…" : "save"}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-              {skillEditor.isNew && (
-                <div className="schedule-fields">
-                  <input
-                    value={skillEditor.skill}
-                    onChange={(e) => editSkill({ skill: e.target.value })}
-                    placeholder="skill name (e.g. incident-triage)"
-                    disabled={skillEditor.nameLocked}
-                  />
-                  <input
-                    className="path"
-                    value={skillEditor.path}
-                    onChange={(e) => editSkill({ path: e.target.value })}
-                    placeholder="SKILL.md"
-                  />
-                </div>
-              )}
-              {skillEditor.viewing ? (
-                skillEditor.path.endsWith(".md") ? (
-                  <SkillDoc content={skillEditor.content} />
+                    <pre className="skill-view">{skillEditor.content}</pre>
+                  )
                 ) : (
-                  <pre className="skill-view">{skillEditor.content}</pre>
-                )
-              ) : (
-                <textarea
-                  className="skill-content"
-                  value={skillEditor.content}
-                  onChange={(e) => editSkill({ content: e.target.value })}
-                  rows={16}
-                />
-              )}
+                  <textarea
+                    className="skill-content"
+                    value={skillEditor.content}
+                    onChange={(e) => editSkill({ content: e.target.value })}
+                    rows={16}
+                  />
+                )}
+              </div>
             </div>
           )}
           {skills.length === 0 && !skillEditor && <p className="empty">no skills yet</p>}
