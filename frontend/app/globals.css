@@ -569,6 +569,11 @@ button.primary:disabled {
   white-space: nowrap;
 }
 
+.schedule-actions button.compact {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+}
+
 .schedule-actions button:disabled {
   color: var(--dim);
   cursor: default;
