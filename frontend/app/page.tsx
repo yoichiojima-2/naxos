@@ -142,7 +142,7 @@ export default function Page() {
   const [proposal, setProposal] = useState<ScheduleForm | null>(null);
   const [form, setForm] = useState<ScheduleForm | null>(null);
   const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState("");
+  const [scheduleDelete, setScheduleDelete] = useState<Schedule | null>(null);
   const [ranNow, setRanNow] = useState("");
   const [scheduleError, setScheduleError] = useState("");
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -180,6 +180,7 @@ export default function Page() {
 
   async function loadSchedules() {
     setRanNow("");
+    setScheduleDelete(null);
     await fetchInto<Schedule>("/api/schedules", setSchedules);
   }
 
@@ -201,15 +202,16 @@ export default function Page() {
   }, [messages, busy]);
 
   useEffect(() => {
-    if (!skillEditor?.viewing && !skillDelete) return;
+    if (!skillEditor?.viewing && !skillDelete && !scheduleDelete) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (skillDelete) setSkillDelete(null);
+      else if (scheduleDelete) setScheduleDelete(null);
       else setSkillEditor(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [skillEditor?.viewing, skillDelete]);
+  }, [skillEditor?.viewing, skillDelete, scheduleDelete]);
 
   function statusLabel(event: { event: string; name?: string }): string {
     if (event.event === "tool") return `using ${event.name?.split("__").pop()}…`;
@@ -378,12 +380,10 @@ export default function Page() {
     }
   }
 
-  async function deleteSchedule(schedule: Schedule) {
-    if (confirmDelete !== schedule.id) {
-      setConfirmDelete(schedule.id);
-      return;
-    }
-    setConfirmDelete("");
+  async function performScheduleDelete() {
+    if (!scheduleDelete) return;
+    const schedule = scheduleDelete;
+    setScheduleDelete(null);
     setScheduleError("");
     try {
       const response = await fetch(`/api/schedules/${schedule.id}`, { method: "DELETE" });
@@ -667,6 +667,21 @@ export default function Page() {
               />
             </div>
           )}
+          {scheduleDelete && (
+            <div className="modal-backdrop" onClick={() => setScheduleDelete(null)}>
+              <div className="modal schedule confirm-delete" onClick={(e) => e.stopPropagation()}>
+                <strong>delete schedule {scheduleDelete.name}?</strong>
+                <p className="hint">the scheduled task and its cron settings are removed — there is no undo.</p>
+                <div className="schedule-actions">
+                  <button onClick={() => setScheduleDelete(null)}>cancel</button>
+                  <button className="danger" onClick={performScheduleDelete}>
+                    <Icon name="trash" />
+                    delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {schedules.length === 0 && !form && <p className="empty">no scheduled tasks yet</p>}
           {schedules.map((schedule) => (
             <div key={schedule.id} className="schedule">
@@ -685,17 +700,14 @@ export default function Page() {
                     <Icon name="play" />
                     {ranNow === schedule.id ? "started — see history" : "run now"}
                   </button>
-                  <button
-                    className={confirmDelete === schedule.id ? "danger" : ""}
-                    onClick={() => deleteSchedule(schedule)}
-                  >
-                    <Icon name="trash" />
-                    {confirmDelete === schedule.id ? "confirm delete?" : "delete"}
+                  <button className="compact" onClick={() => setScheduleDelete(schedule)}>
+                    <Icon name="trash" size={12} />
+                    delete
                   </button>
                   <button
                     onClick={() => {
                       setForm({ ...schedule });
-                      setConfirmDelete("");
+                      setScheduleDelete(null);
                     }}
                   >
                     <Icon name="pencil" />
