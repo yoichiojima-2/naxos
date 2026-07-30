@@ -89,6 +89,12 @@ button.danger {
   border-color: var(--error);
 }
 
+button.danger:disabled {
+  color: var(--dim);
+  border-color: var(--line);
+  cursor: default;
+}
+
 nav {
   display: flex;
   gap: 2px;
@@ -654,6 +660,15 @@ button.primary:disabled {
   max-width: 760px;
   max-height: calc(100vh - 6rem);
   overflow-y: auto;
+}
+
+.modal.confirm-delete {
+  max-width: 420px;
+  margin-top: 10vh;
+}
+
+.modal.confirm-delete .hint {
+  margin: 0;
 }
 
 .skill-files {

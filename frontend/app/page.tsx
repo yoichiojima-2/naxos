@@ -149,7 +149,8 @@ export default function Page() {
   const [skillEditor, setSkillEditor] = useState<SkillEditor | null>(null);
   const [skillSaving, setSkillSaving] = useState(false);
   const [skillError, setSkillError] = useState("");
-  const [confirmSkillDelete, setConfirmSkillDelete] = useState("");
+  const [skillDelete, setSkillDelete] = useState<{ skill: string; path?: string } | null>(null);
+  const [deleteTyped, setDeleteTyped] = useState("");
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -183,7 +184,7 @@ export default function Page() {
   }
 
   async function loadSkills() {
-    setConfirmSkillDelete("");
+    setSkillDelete(null);
     await fetchInto<Skill>("/api/skills", setSkills);
   }
 
@@ -200,13 +201,15 @@ export default function Page() {
   }, [messages, busy]);
 
   useEffect(() => {
-    if (!skillEditor?.viewing) return;
+    if (!skillEditor?.viewing && !skillDelete) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSkillEditor(null);
+      if (e.key !== "Escape") return;
+      if (skillDelete) setSkillDelete(null);
+      else setSkillEditor(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [skillEditor?.viewing]);
+  }, [skillEditor?.viewing, skillDelete]);
 
   function statusLabel(event: { event: string; name?: string }): string {
     if (event.event === "tool") return `using ${event.name?.split("__").pop()}…`;
@@ -415,7 +418,7 @@ export default function Page() {
 
   async function openSkillFile(name: string, path: string) {
     setSkillError("");
-    setConfirmSkillDelete("");
+    setSkillDelete(null);
     try {
       const response = await fetch(`/api/skills/${name}/files/${path}`);
       if (!response.ok) {
@@ -454,43 +457,19 @@ export default function Page() {
     }
   }
 
-  async function deleteSkillFile() {
-    if (!skillEditor || skillEditor.isNew) return;
-    const key = `file:${skillEditor.skill}/${skillEditor.path}`;
-    if (confirmSkillDelete !== key) {
-      setConfirmSkillDelete(key);
-      return;
-    }
-    setConfirmSkillDelete("");
+  async function performSkillDelete() {
+    if (!skillDelete) return;
+    const { skill, path } = skillDelete;
+    setSkillDelete(null);
     setSkillError("");
     try {
-      const response = await fetch(`/api/skills/${skillEditor.skill}/files/${skillEditor.path}`, { method: "DELETE" });
+      const url = path ? `/api/skills/${skill}/files/${path}` : `/api/skills/${skill}`;
+      const response = await fetch(url, { method: "DELETE" });
       if (!response.ok) {
         setSkillError(await detailOf(response));
         return;
       }
-      setSkillEditor(null);
-      await loadSkills();
-    } catch (e) {
-      setSkillError(String(e));
-    }
-  }
-
-  async function deleteSkill(skill: Skill) {
-    const key = `skill:${skill.name}`;
-    if (confirmSkillDelete !== key) {
-      setConfirmSkillDelete(key);
-      return;
-    }
-    setConfirmSkillDelete("");
-    setSkillError("");
-    try {
-      const response = await fetch(`/api/skills/${skill.name}`, { method: "DELETE" });
-      if (!response.ok) {
-        setSkillError(await detailOf(response));
-        return;
-      }
-      if (skillEditor?.skill === skill.name) setSkillEditor(null);
+      if (path || skillEditor?.skill === skill) setSkillEditor(null);
       await loadSkills();
     } catch (e) {
       setSkillError(String(e));
@@ -781,15 +760,14 @@ export default function Page() {
                   <div className="schedule-actions">
                     {!skillEditor.isNew && (
                       <button
-                        className={`compact ${
-                          confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}` ? "danger" : ""
-                        }`}
-                        onClick={deleteSkillFile}
+                        className="compact"
+                        onClick={() => {
+                          setDeleteTyped("");
+                          setSkillDelete({ skill: skillEditor.skill, path: skillEditor.path });
+                        }}
                       >
                         <Icon name="trash" size={12} />
-                        {confirmSkillDelete === `file:${skillEditor.skill}/${skillEditor.path}`
-                          ? "confirm delete?"
-                          : "delete file"}
+                        delete file
                       </button>
                     )}
                     {skillEditor.viewing ? (
@@ -859,6 +837,44 @@ export default function Page() {
               </div>
             </div>
           )}
+          {skillDelete && (
+            <div className="modal-backdrop" onClick={() => setSkillDelete(null)}>
+              <div className="modal schedule confirm-delete" onClick={(e) => e.stopPropagation()}>
+                <strong>
+                  {skillDelete.path
+                    ? `delete ${skillDelete.skill}/${skillDelete.path}?`
+                    : `delete skill ${skillDelete.skill}?`}
+                </strong>
+                <p className="hint">
+                  {skillDelete.path
+                    ? "the file is removed from the skill — there is no undo."
+                    : `every file in this skill is removed — there is no undo. type "${skillDelete.skill}" to confirm.`}
+                </p>
+                {!skillDelete.path && (
+                  <input
+                    value={deleteTyped}
+                    onChange={(e) => setDeleteTyped(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && deleteTyped === skillDelete.skill) performSkillDelete();
+                    }}
+                    placeholder={skillDelete.skill}
+                    autoFocus
+                  />
+                )}
+                <div className="schedule-actions">
+                  <button onClick={() => setSkillDelete(null)}>cancel</button>
+                  <button
+                    className="danger"
+                    disabled={!skillDelete.path && deleteTyped !== skillDelete.skill}
+                    onClick={performSkillDelete}
+                  >
+                    <Icon name="trash" />
+                    delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {skills.length === 0 && !skillEditor && <p className="empty">no skills yet</p>}
           {skills.map((skill) => (
             <div key={skill.name} className="schedule">
@@ -888,11 +904,14 @@ export default function Page() {
                     add file
                   </button>
                   <button
-                    className={`compact ${confirmSkillDelete === `skill:${skill.name}` ? "danger" : ""}`}
-                    onClick={() => deleteSkill(skill)}
+                    className="compact"
+                    onClick={() => {
+                      setDeleteTyped("");
+                      setSkillDelete({ skill: skill.name });
+                    }}
                   >
                     <Icon name="trash" size={12} />
-                    {confirmSkillDelete === `skill:${skill.name}` ? "confirm delete?" : "delete"}
+                    delete
                   </button>
                 </div>
               </div>
