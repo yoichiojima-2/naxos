@@ -202,6 +202,22 @@ with (no delete flag, so user-added skills survive):
 gcloud storage rsync --recursive skills "gs://$BUCKET/skills"
 ```
 
+## Sample data
+
+The `soramame` BigQuery dataset holds the business data of ソラマメ株式会社
+(Soramame Inc.), a fictional D2C e-commerce company, so agents have
+something realistic to analyze. The company profile and data dictionary
+live in `skills/company/SKILL.md` (attached to every role); the dataset
+and role read access are managed in `terraform/`, and the tables are
+generated and loaded out of band — the same split as `audit.runs` — with:
+
+```sh
+uv run python scripts/seed.py
+```
+
+Re-running replaces the tables (`bq load --replace`); generation is
+seeded, so output is stable for a given run date.
+
 ## Roles
 
 `roles.json` maps a role to the MCP servers and skills its sessions get

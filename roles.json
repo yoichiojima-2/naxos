@@ -8,7 +8,8 @@
     ],
     "skills": [
       "bigquery",
-      "cloud-storage"
+      "cloud-storage",
+      "company"
     ],
     "permission_mode": "bypassPermissions",
     "max_turns": 20,
@@ -21,7 +22,8 @@
       "schedules"
     ],
     "skills": [
-      "bigquery"
+      "bigquery",
+      "company"
     ],
     "permission_mode": "bypassPermissions",
     "max_turns": 20,
