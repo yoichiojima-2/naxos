@@ -41,7 +41,7 @@ header {
   padding: 0.75rem 0 1.25rem;
 }
 
-h1 {
+header h1 {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -50,7 +50,7 @@ h1 {
   letter-spacing: 0.14em;
 }
 
-h1 svg {
+header h1 svg {
   stroke: var(--accent);
 }
 
@@ -271,6 +271,37 @@ nav button.active {
 .md h3 {
   font-size: 1rem;
   font-weight: 600;
+  line-height: 1.35;
+}
+
+.md h1 {
+  font-size: 1.15rem;
+}
+
+.md h2 {
+  font-size: 1.05rem;
+}
+
+.md * + h1,
+.md * + h2,
+.md * + h3 {
+  margin-top: 1.3rem;
+}
+
+.md hr {
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+.md pre.frontmatter {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--dim);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .md ul,
@@ -490,6 +521,15 @@ button.primary:disabled {
   gap: 0.5rem 0.7rem;
 }
 
+.schedule-head strong {
+  overflow-wrap: anywhere;
+}
+
+.schedule-head .file-path {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.85rem;
+}
+
 .schedule-head label {
   display: flex;
   align-items: center;
@@ -704,6 +744,20 @@ td.prompt {
 
   .message.you {
     max-width: 90%;
+  }
+
+  .schedule-head {
+    row-gap: 0.7rem;
+  }
+
+  .schedule-actions {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  .schedule-actions button {
+    flex: 1;
   }
 }
 

@@ -69,6 +69,21 @@ description: when should the agent reach for this skill?
 # my-skill
 `;
 
+function splitFrontmatter(content: string): { frontmatter: string | null; body: string } {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  return match ? { frontmatter: match[1], body: content.slice(match[0].length) } : { frontmatter: null, body: content };
+}
+
+function SkillDoc({ content }: { content: string }) {
+  const { frontmatter, body } = splitFrontmatter(content);
+  return (
+    <div className="md skill-view">
+      {frontmatter && <pre className="frontmatter">{frontmatter}</pre>}
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+    </div>
+  );
+}
+
 const TABS = ["chat", "history", "schedules", "skills", "artifacts"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -697,7 +712,7 @@ export default function Page() {
           {skillEditor && (
             <div className="schedule form">
               <div className="schedule-head">
-                <strong>
+                <strong className={skillEditor.isNew ? undefined : "file-path"}>
                   {skillEditor.isNew
                     ? skillEditor.nameLocked
                       ? `new file in ${skillEditor.skill}`
@@ -759,9 +774,7 @@ export default function Page() {
               )}
               {skillEditor.viewing ? (
                 skillEditor.path.endsWith(".md") ? (
-                  <div className="md skill-view">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{skillEditor.content}</ReactMarkdown>
-                  </div>
+                  <SkillDoc content={skillEditor.content} />
                 ) : (
                   <pre className="skill-view">{skillEditor.content}</pre>
                 )
