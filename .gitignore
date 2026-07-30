@@ -223,6 +223,7 @@ ws/*
 # Terraform
 .terraform/
 *.tfstate*
+*.tfvars
 node_modules/
 frontend/out/
 frontend/.next/

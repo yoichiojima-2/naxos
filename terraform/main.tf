@@ -43,13 +43,11 @@ variable "audit_dataset" {
 }
 
 variable "admin" {
-  type    = string
-  default = "user:yoichiojima@gmail.com"
+  type = string
 }
 
 variable "billing_account" {
-  type    = string
-  default = "0131FB-CC98F2-DD8246"
+  type = string
 }
 
 variable "budget_jpy" {
