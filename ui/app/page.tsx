@@ -28,6 +28,8 @@ export default function Page() {
   const [tab, setTab] = useState<Tab>("sessions");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const [theme, setTheme] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [agentResult, envResult] = await Promise.all([
@@ -40,17 +42,63 @@ export default function Page() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  useEffect(() => {
+    const fromHash = () => {
+      const h = window.location.hash.slice(1) as Tab;
+      if ((TABS as readonly string[]).includes(h)) setTab(h);
+    };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
+
+  useEffect(() => {
+    const onError = (e: Event) => setToast((e as CustomEvent<string>).detail);
+    window.addEventListener("api-error", onError);
+    return () => window.removeEventListener("api-error", onError);
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    setTheme(document.documentElement.dataset.theme ?? null);
+  }, []);
+
+  function switchTab(t: Tab) {
+    setTab(t);
+    window.location.hash = t;
+  }
+
+  function toggleTheme() {
+    const effective =
+      theme ??
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = effective === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("theme", next);
+    setTheme(next);
+  }
+
   return (
     <main>
       <header className="top">
         <h1><span>naxos</span> managed agents</h1>
-        <nav className="tabs">
-          {TABS.map((t) => (
-            <button key={t} className={t === tab ? "active" : ""} onClick={() => setTab(t)}>
-              {t}
-            </button>
-          ))}
-        </nav>
+        <div className="row">
+          <nav className="tabs">
+            {TABS.map((t) => (
+              <button key={t} className={t === tab ? "active" : ""} onClick={() => switchTab(t)}>
+                {t}
+              </button>
+            ))}
+          </nav>
+          <button className="ghost theme" onClick={toggleTheme} aria-label="toggle dark mode">
+            ☾
+          </button>
+        </div>
       </header>
       <div className="tab-info">
         <span>{tab}</span>
@@ -61,6 +109,11 @@ export default function Page() {
       {tab === "deployments" && <Deployments agents={agents} />}
       {tab === "vaults" && <Vaults />}
       {tab === "memory" && <MemoryStores />}
+      {toast && (
+        <div className="toast" role="alert" onClick={() => setToast(null)}>
+          {toast}
+        </div>
+      )}
     </main>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { agentName, api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 
 const BADGE: Record<string, string> = {
   idle: "idle",
@@ -11,7 +11,7 @@ const BADGE: Record<string, string> = {
 };
 
 export default function Sessions({ agents }: { agents: Agent[] }) {
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessions, setSessions] = useState<Session[] | null>(null);
   const [open, setOpen] = useState<Session | null>(null);
   const [agentId, setAgentId] = useState("");
 
@@ -58,14 +58,21 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>title</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
+            <tr><th>title</th><th>agent</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
           </thead>
           <tbody>
-            {sessions.map((s) => {
+            {sessions === null && (
+              <tr><td className="empty" colSpan={6}>loading…</td></tr>
+            )}
+            {sessions?.length === 0 && (
+              <tr><td className="empty" colSpan={6}>no sessions yet — pick an agent above and start one.</td></tr>
+            )}
+            {(sessions ?? []).map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
               return (
                 <tr key={s.id} className="click" onClick={() => setOpen(s)}>
                   <td>{s.title ?? s.id}</td>
+                  <td className="muted">{agentName(agents, s.agent_id)}</td>
                   <td>
                     <span className={`badge ${needsAction ? "requires_action" : BADGE[s.status]}`}>
                       {needsAction ? "needs approval" : s.status}
@@ -91,6 +98,18 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
   const [status, setStatus] = useState(session.status);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const source = useRef<EventSource | null>(null);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const followed = useRef(false);
+
+  useEffect(() => {
+    if (!events.length) return;
+    const nearBottom =
+      window.innerHeight + window.scrollY >= document.body.offsetHeight - 240;
+    if (!followed.current || nearBottom) {
+      endRef.current?.scrollIntoView({ block: "end" });
+      followed.current = true;
+    }
+  }, [events.length]);
 
   async function loadFiles() {
     if (files) { setFiles(null); return; }
@@ -158,7 +177,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
         </div>
       </div>
       {files && (
-        <div className="panel" style={{ background: "var(--panel2)", marginBottom: 12 }}>
+        <div className="panel" style={{ marginBottom: 12 }}>
           {files.length === 0 && <span className="muted">workspace is empty</span>}
           {files.map((f) => (
             <div className="row between" key={f.path}>
@@ -197,10 +216,12 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
           placeholder="Message the agent…"
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
+          onFocus={(e) => e.target.scrollIntoView({ block: "center" })}
           disabled={status === "terminated"}
         />
         <button className="primary" onClick={send} disabled={status === "terminated"}>Send</button>
       </div>
+      <div ref={endRef} />
     </div>
   );
 }
