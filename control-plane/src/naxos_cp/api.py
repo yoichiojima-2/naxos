@@ -1,10 +1,13 @@
 import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from naxos_shared.events import (
     Decision,
     EventIn,
@@ -38,6 +41,9 @@ def create_app() -> FastAPI:
     app.include_router(deployments.router)
     app.include_router(vaults.router)
     app.include_router(memory.router)
+    ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
+    if ui_dir.is_dir():
+        app.mount("/", StaticFiles(directory=ui_dir, html=True))
     return app
 
 
