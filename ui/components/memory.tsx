@@ -93,6 +93,18 @@ export default function MemoryStores() {
                   <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
                     <td className="mono">{memory.path}</td>
                     <td className="muted" style={{ textAlign: "right" }}>{memory.size} B</td>
+                    <td style={{ textAlign: "right", width: 1 }}>
+                      <button
+                        className="danger"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await api(`/v1/memory_stores/${store.id}/memories/${memory.id}`, { method: "DELETE" });
+                          refresh();
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
