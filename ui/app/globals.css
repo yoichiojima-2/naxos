@@ -1,22 +1,22 @@
 :root {
-  --bg: #faf9f5;
-  --panel: #ffffff;
-  --panel2: #f4f2ea;
-  --border: #e8e6dc;
-  --text: #141413;
-  --muted: #73716a;
-  --faint: #b0aea5;
+  --bg: #141413;
+  --panel: #1f1e1b;
+  --panel2: #292823;
+  --border: #38362f;
+  --text: #faf9f5;
+  --muted: #b0aea5;
+  --faint: #73716a;
   --accent: #d97757;
-  --accent-soft: #f8e8e1;
-  --ink: #141413;
-  --ok: #788c5d;
-  --ok-soft: #eef0e7;
-  --warn: #9a6b2f;
-  --warn-soft: #f7efdc;
-  --danger: #b3554d;
-  --danger-soft: #f7e7e5;
+  --accent-soft: #3a2820;
+  --contrast: #faf9f5;
+  --ok: #9db27c;
+  --ok-soft: #272b1f;
+  --warn: #d3a05a;
+  --warn-soft: #33291a;
+  --danger: #d97b70;
+  --danger-soft: #382220;
   --info: #6a9bcc;
-  --info-soft: #e9f0f7;
+  --info-soft: #202b36;
   --sans: "Poppins", -apple-system, "Segoe UI", Arial, sans-serif;
   --serif: "Lora", Georgia, serif;
   --mono: "SF Mono", ui-monospace, Menlo, monospace;
@@ -24,7 +24,7 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { background: var(--bg); }
+html { background: var(--bg); color-scheme: dark; }
 
 body {
   background: var(--bg);
@@ -51,7 +51,7 @@ nav.tabs button {
   transition: color 0.15s, background 0.15s;
 }
 nav.tabs button:hover { color: var(--text); }
-nav.tabs button.active { background: var(--ink); color: var(--bg); }
+nav.tabs button.active { background: var(--contrast); color: var(--bg); }
 
 .panel {
   background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
@@ -69,17 +69,16 @@ button.primary, button.ghost, button.danger {
   border-radius: 999px; padding: 7px 16px; cursor: pointer; font-size: 13px;
   font-family: var(--sans); font-weight: 500;
   border: 1px solid var(--border); background: var(--panel); color: var(--text);
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-button.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-button.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+button.primary { background: var(--contrast); border-color: var(--contrast); color: var(--bg); }
+button.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 button.ghost:hover:not(:disabled) { border-color: var(--faint); }
 button.danger { color: var(--danger); border-color: var(--danger); background: none; }
 button.danger:hover:not(:disabled) { background: var(--danger-soft); }
 button:disabled { opacity: 0.45; cursor: default; }
 
 input, textarea, select {
-  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 8px 12px; font-size: 13px; width: 100%;
   font-family: var(--sans);
 }
