@@ -56,6 +56,6 @@ Single GCP project, `asia-northeast1`. Components:
 
 ## Open issues
 
-- R1: SDK resume-through-pending-tool_use semantics (spike; fallback documented in docs/design.md §4)
-- R2: Claude model availability on Vertex in asia-northeast1 vs global endpoint (data residency)
+- R1 **resolved** (2026-08-10 spike, docs/design.md §4.1): resume replays the pending tool call, so the pause/release/resume design holds. Two corrections it forced: confirmations are keyed on `sha256(tool_name + canonical input)` because `tool_use_id` changes across resume, and the permission gate is a **`PreToolUse` hook** — `can_use_tool` is shadowed by `allowed_tools` entries and by the CLI's read-only auto-approval, so it cannot gate every call.
+- R2 **open, needs a decision**: Claude on Vertex resolves only on the **`global`** endpoint — not `asia-northeast1` (nor `us-east5`) — and this project's Vertex quota for it is currently zero (live `rawPredict` → 429 `RESOURCE_EXHAUSTED`). So (1) using Vertex means accepting `global` inference rather than regional residency, and (2) a quota-increase request gates removing the Anthropic API-key exception. Do not connect real internal data until this is settled.
 - Deferred: outcomes, multiagent, webhooks, memory versioning

@@ -67,15 +67,22 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 
 **Interrupt.** `user.interrupt` is inserted as an event and surfaced immediately on the control channel; the sandbox calls `client.interrupt()`. Jumps the queue, per CMA.
 
-**Permission pause (`always_ask`).** Inside the SDK `can_use_tool` hook:
+**Permission pause (`always_ask`).** The gate is a **`PreToolUse` hook**, not `can_use_tool` — see §4.1 for why. On every tool call:
 
 1. Check the kill switch (`agents.disabled`; 15s cache + control-channel push).
 2. Match the tool against the agent version's permission policy. `always_allow` → allow, record the decision in audit.
-3. `always_ask` → look up `tool_confirmations` by `(session_id, tool_use_id)`. Stored decision → return it (this is what makes resume work).
+3. `always_ask` → look up `tool_confirmations` by `(session_id, call_hash)` where `call_hash = sha256(tool_name + canonical_json(input))`. Stored decision → return it. **The key is the call hash, not `tool_use_id`** — the SDK assigns a fresh `tool_use_id` when a pending call is replayed after resume (measured; §4.1).
 4. No decision → insert a pending row, emit `session.status_idle(stop_reason=requires_action)`, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, **checkpoint and exit** — a blocked container costs nothing.
-5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox; SDK resume re-invokes `can_use_tool` for the pending tool_use, and step 3 answers instantly.
+5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.
 
-Step 5 depends on the SDK re-asking permission for a pending tool_use after `resume` — spiked before anything else (risk R1). Fallback if it does not replay: on deny, resume and inject a synthetic denied tool_result; on allow, resume with a system reminder to re-issue the call.
+### 4.1 Spike results (2026-08-10, `claude-agent-sdk` 0.2.134)
+
+Three measured findings, all load-bearing:
+
+- **Resume replays the pending tool call — R1 is resolved.** Killing the process inside the permission callback (mid-decision) and then resuming with `resume=<session_id>` plus a continuation prompt made the model re-issue the *same tool with the same input*, and the callback fired again. The pause/release/resume design works as specified.
+- **`tool_use_id` is not stable across resume.** The replayed call carried a new `toolu_…` id. Confirmation records must therefore be keyed on a canonical hash of `(tool_name, input)`, not on `tool_use_id`. (`tool_use_id` is still recorded for audit.)
+- **`can_use_tool` is not a complete gate; use a `PreToolUse` hook.** Two shadowing behaviors: any whole-tool entry in `allowed_tools` auto-approves before the callback runs (the SDK warns about this explicitly), and under the default permission mode the CLI auto-approves calls it judges read-only — a read-only `echo` never reached the callback while a file-writing `bash` did. A permission policy that claims "every `always_ask` call is gated" cannot be built on `can_use_tool`; the `PreToolUse` hook fires for every call and is the correct mechanism.
+- **Resume needs a nudge.** A resumed session does not continue on its own; the sandbox sends a synthetic continuation user message after restoring. This is internal and is not persisted as a `user.message` event.
 
 **Budget.** The harness checks `cost_usd + accrued >= budget_usd` before dispatching each queued user event and after each model response; on breach it interrupts, emits `session.status_idle(stop_reason=budget_reached)`, checkpoints, exits. Deviation from CMA: this is a post-response check (the SDK has no pre-request hook), so worst-case overshoot is one model call. `PATCH /v1/sessions/{id}` raises the budget; the next event resumes the session.
 
@@ -120,7 +127,9 @@ session_events (id bigserial, session_id, seq, UNIQUE (session_id, seq),
         created_at)
         -- seq assigned under SELECT … FOR UPDATE on the session row
 
-tool_confirmations (id, session_id, tool_use_id, UNIQUE (session_id, tool_use_id),
+tool_confirmations (id, session_id,
+        call_hash, UNIQUE (session_id, call_hash),  -- sha256(tool_name + canonical_json(input))
+        tool_use_id,                                -- audit only; not stable across resume
         tool_name, input jsonb,
         status CHECK IN ('pending','allowed','denied','expired'),
         requested_at, expires_at, decided_by, decided_at)
@@ -273,7 +282,11 @@ Each phase ends deployed and demoable.
 
 ## 13. Risks and open items
 
-- **R1** — SDK resume-through-pending-tool_use: spiked first; fallback documented in §4.
-- **R2** — Claude on Vertex in asia-northeast1 (or the global endpoint): resolved during the spike; data-residency implications surfaced explicitly, never silently decided. The Anthropic API-key exception stays until Vertex works.
+- **R1 — resolved.** Resume does replay the pending tool call; see §4.1. The design stands, with confirmations keyed on the call hash and the gate implemented as a `PreToolUse` hook.
+- **R2 — open, and it now has a hard finding.** Claude models are **not available in `asia-northeast1`** on Vertex: `getPublisherModel` returns "not found" for `claude-sonnet-5` / `claude-opus-5` in both `asia-northeast1` and `us-east5`, and resolves only on the **`global`** endpoint. A live `rawPredict` against `global` then returned **429 `RESOURCE_EXHAUSTED`** — the project's `global_online_prediction_requests_per_base_model` quota for `anthropic-claude-sonnet` is zero, so a quota-increase request is required before Vertex can serve any traffic.
+
+  Two decisions this forces, both for the owner (per the hard constraint against silently deciding region questions):
+  1. **Data residency**: using Vertex at all means using the `global` endpoint — inference is not pinned to `asia-northeast1`. Accept, or keep model traffic off Vertex until a regional endpoint exists.
+  2. **Unblocking**: file the Vertex quota-increase request now, since it gates the removal of the Anthropic API-key exception. Until then the key exception stays, and no real internal data may be connected.
 - Egress proxy covers MCP + declared HTTP targets only; arbitrary bash egress is credential-less (documented limitation).
 - Memory versioning, outcomes, multiagent, webhooks: deferred; schema leaves room.
