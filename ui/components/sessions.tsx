@@ -216,7 +216,13 @@ function Event({
   }
 
   return (
-    <div className={`event ${kind === "user" ? "user" : kind === "agent" ? "agent" : "system"}`}>
+    <div
+      className={[
+        "event",
+        kind === "user" ? "user" : kind === "agent" ? "agent" : "system",
+        event.type === "agent.message" ? "prose" : "",
+      ].join(" ").trim()}
+    >
       <span className="muted">{event.type}{event.principal ? ` · ${event.principal}` : ""}</span>
       {body && <pre>{body}</pre>}
     </div>
