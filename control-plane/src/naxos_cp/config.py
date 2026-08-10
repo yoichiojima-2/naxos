@@ -5,6 +5,7 @@ REGION = os.environ.get("REGION", "asia-northeast1")
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/naxos")
 
 IAP_AUDIENCE = os.environ.get("IAP_AUDIENCE", "")
+ENFORCE_CALLER_AUTH = os.environ.get("ENFORCE_CALLER_AUTH", "") == "1"
 DEV_PRINCIPAL = os.environ.get("DEV_PRINCIPAL", "local-dev")
 
 AUDIT_DATASET = os.environ.get("AUDIT_DATASET", "audit")

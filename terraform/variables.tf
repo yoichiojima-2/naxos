@@ -9,7 +9,8 @@ variable "region" {
 
 variable "billing_account" {
   type        = string
-  description = "Billing account id for the budget alert."
+  description = "Billing account id for the budget alert. Empty skips the budget."
+  default     = ""
 }
 
 variable "budget_jpy" {
@@ -18,21 +19,19 @@ variable "budget_jpy" {
 }
 
 variable "db_tier" {
-  type    = string
-  default = "db-g1-small"
+  type        = string
+  description = "db-f1-micro is enough for the working group; db-g1-small when latency matters."
+  default     = "db-f1-micro"
 }
 
 variable "github_repository" {
   type        = string
-  description = "owner/repo allowed to deploy via Workload Identity Federation."
-}
-
-variable "iap_support_email" {
-  type = string
+  description = "owner/repo allowed to deploy via WIF. Empty skips the CI identity."
+  default     = ""
 }
 
 variable "iap_members" {
   type        = list(string)
-  description = "Google group(s) allowed through IAP, e.g. group:naxos@example.com."
+  description = "Google group(s) allowed through IAP, e.g. group:naxos@example.com. Empty leaves the API IAM-only."
   default     = []
 }

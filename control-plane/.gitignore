@@ -1,0 +1,4 @@
+
+# Counteract global ignores that would swallow tracked project files
+!*.sql
+!.python-version

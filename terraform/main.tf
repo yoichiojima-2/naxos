@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
   backend "gcs" {
     bucket = "naxos-503510"
@@ -17,6 +21,10 @@ provider "google" {
   region  = var.region
 }
 
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
 locals {
   environments = jsondecode(file("${path.module}/environments.json"))
   services = [
@@ -26,12 +34,11 @@ locals {
     "bigquery.googleapis.com",
     "cloudscheduler.googleapis.com",
     "aiplatform.googleapis.com",
-    "iap.googleapis.com",
     "iamcredentials.googleapis.com",
-    "compute.googleapis.com",
-    "servicenetworking.googleapis.com",
-    "vpcaccess.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
   ]
+  placeholder_image = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
 resource "google_project_service" "enabled" {
@@ -41,36 +48,35 @@ resource "google_project_service" "enabled" {
   disable_on_destroy         = false
 }
 
-# --- network (private IP for Cloud SQL, Direct VPC egress from Cloud Run) ----
+# --- images -----------------------------------------------------------------
 
-resource "google_compute_network" "vpc" {
-  name                    = "naxos-vpc"
-  auto_create_subnetworks = false
-  depends_on              = [google_project_service.enabled]
-}
+resource "google_artifact_registry_repository" "images" {
+  repository_id = "naxos"
+  format        = "DOCKER"
+  location      = var.region
 
-resource "google_compute_subnetwork" "run" {
-  name          = "naxos-run"
-  ip_cidr_range = "10.20.0.0/20"
-  region        = var.region
-  network       = google_compute_network.vpc.id
-}
+  cleanup_policies {
+    id     = "keep-recent"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 5
+    }
+  }
+  cleanup_policies {
+    id     = "drop-old"
+    action = "DELETE"
+    condition {
+      older_than = "2592000s"
+    }
+  }
 
-resource "google_compute_global_address" "private_ip" {
-  name          = "naxos-private-ip"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
-  prefix_length = 16
-  network       = google_compute_network.vpc.id
-}
-
-resource "google_service_networking_connection" "private_vpc" {
-  network                 = google_compute_network.vpc.id
-  service                 = "servicenetworking.googleapis.com"
-  reserved_peering_ranges = [google_compute_global_address.private_ip.name]
+  depends_on = [google_project_service.enabled]
 }
 
 # --- state ------------------------------------------------------------------
+# Public IP + the Cloud Run Cloud SQL connector: no VPC, no NAT, no connector
+# fees. Access control is IAM (cloudsql.client) + the db password; there are
+# no authorized networks, so nothing can reach the instance directly.
 
 resource "google_sql_database_instance" "state" {
   name                = "naxos-state"
@@ -80,14 +86,14 @@ resource "google_sql_database_instance" "state" {
 
   settings {
     tier              = var.db_tier
+    edition           = "ENTERPRISE"
     availability_type = "ZONAL"
+    disk_type         = "PD_HDD"
     disk_size         = 10
-    disk_autoresize   = true
+    disk_autoresize   = false
 
     ip_configuration {
-      ipv4_enabled                                  = false
-      private_network                               = google_compute_network.vpc.id
-      enable_private_path_for_google_cloud_services = true
+      ipv4_enabled = true
     }
 
     backup_configuration {
@@ -95,7 +101,7 @@ resource "google_sql_database_instance" "state" {
     }
   }
 
-  depends_on = [google_service_networking_connection.private_vpc]
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_sql_database" "naxos" {
@@ -103,10 +109,31 @@ resource "google_sql_database" "naxos" {
   instance = google_sql_database_instance.state.name
 }
 
+resource "random_password" "db" {
+  length  = 32
+  special = false
+}
+
 resource "google_sql_user" "api" {
-  name     = "naxos-api"
+  name     = "naxos"
   instance = google_sql_database_instance.state.name
-  type     = "CLOUD_IAM_SERVICE_ACCOUNT"
+  password = random_password.db.result
+}
+
+resource "google_secret_manager_secret" "database_url" {
+  secret_id = "database-url"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_secret_manager_secret_version" "database_url" {
+  secret = google_secret_manager_secret.database_url.id
+  secret_data = join("", [
+    "postgresql://${google_sql_user.api.name}:${random_password.db.result}",
+    "@/naxos?host=/cloudsql/${google_sql_database_instance.state.connection_name}",
+  ])
 }
 
 # --- audit ------------------------------------------------------------------
@@ -114,6 +141,7 @@ resource "google_sql_user" "api" {
 resource "google_bigquery_dataset" "audit" {
   dataset_id = "audit"
   location   = var.region
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_bigquery_table" "runs" {
@@ -186,40 +214,39 @@ resource "google_service_account" "scheduler" {
   display_name = "naxos scheduler"
 }
 
-resource "google_service_account" "deployer" {
-  account_id   = "sa-deployer"
-  display_name = "naxos CI deployer"
-}
-
 resource "google_service_account" "environment" {
   for_each     = local.environments
   account_id   = "sa-env-${each.key}"
   display_name = "naxos sandbox: ${each.key}"
 }
 
-# Control plane: state, audit, and the right to start sandbox jobs.
 resource "google_project_iam_member" "api" {
   for_each = toset([
     "roles/cloudsql.client",
-    "roles/cloudsql.instanceUser",
     "roles/bigquery.dataEditor",
     "roles/bigquery.jobUser",
-    "roles/run.invoker",
+    "roles/run.developer",
     "roles/cloudscheduler.admin",
-    "roles/iam.serviceAccountUser",
   ])
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.api.email}"
 }
 
-resource "google_project_iam_member" "api_run_developer" {
-  project = var.project_id
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${google_service_account.api.email}"
+# jobs.run on the sandbox jobs requires actAs on their runtime SAs.
+resource "google_service_account_iam_member" "api_actas_environment" {
+  for_each           = local.environments
+  service_account_id = google_service_account.environment[each.key].name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.api.email}"
 }
 
-# Sandboxes reach Vertex and nothing else at project level.
+resource "google_service_account_iam_member" "api_actas_scheduler" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.api.email}"
+}
+
 resource "google_project_iam_member" "environment_vertex" {
   for_each = local.environments
   project  = var.project_id
@@ -267,6 +294,7 @@ resource "google_secret_manager_secret" "anthropic_api_key" {
   replication {
     auto {}
   }
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_secret_manager_secret_iam_member" "anthropic_key_env" {
@@ -276,12 +304,16 @@ resource "google_secret_manager_secret_iam_member" "anthropic_key_env" {
   member    = "serviceAccount:${google_service_account.environment[each.key].email}"
 }
 
-# --- control plane services -------------------------------------------------
-
-locals {
-  db_url            = "postgresql://${google_sql_user.api.name}@/naxos?host=/cloudsql/${google_sql_database_instance.state.connection_name}"
-  placeholder_image = "us-docker.pkg.dev/cloudrun/container/hello"
+resource "google_secret_manager_secret_iam_member" "database_url_api" {
+  secret_id = google_secret_manager_secret.database_url.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.api.email}"
 }
+
+# --- control plane services -------------------------------------------------
+# Both services authenticate callers with Cloud Run IAM; "internal" is not
+# VPC-gated (that would force NAT for sandbox egress). OIDC + invoker bindings
+# carry the boundary instead.
 
 resource "google_cloud_run_v2_service" "api" {
   name     = "naxos-api"
@@ -293,14 +325,7 @@ resource "google_cloud_run_v2_service" "api" {
     timeout         = "3600s"
     scaling {
       min_instance_count = 0
-      max_instance_count = 3
-    }
-    vpc_access {
-      network_interfaces {
-        network    = google_compute_network.vpc.id
-        subnetwork = google_compute_subnetwork.run.id
-      }
-      egress = "PRIVATE_RANGES_ONLY"
+      max_instance_count = 2
     }
     volumes {
       name = "cloudsql"
@@ -311,13 +336,24 @@ resource "google_cloud_run_v2_service" "api" {
     containers {
       image = local.placeholder_image
       args  = ["api"]
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
       volume_mounts {
         name       = "cloudsql"
         mount_path = "/cloudsql"
       }
       env {
-        name  = "DATABASE_URL"
-        value = local.db_url
+        name = "DATABASE_URL"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.database_url.secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "GCLOUD_PROJECT_ID"
@@ -338,26 +374,21 @@ resource "google_cloud_run_v2_service" "api" {
       launch_stage,
     ]
   }
+
+  depends_on = [google_secret_manager_secret_version.database_url]
 }
 
 resource "google_cloud_run_v2_service" "internal" {
   name     = "naxos-internal"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress  = "INGRESS_TRAFFIC_ALL"
 
   template {
     service_account = google_service_account.api.email
-    timeout         = "3600s"
+    timeout         = "300s"
     scaling {
       min_instance_count = 0
-      max_instance_count = 5
-    }
-    vpc_access {
-      network_interfaces {
-        network    = google_compute_network.vpc.id
-        subnetwork = google_compute_subnetwork.run.id
-      }
-      egress = "PRIVATE_RANGES_ONLY"
+      max_instance_count = 3
     }
     volumes {
       name = "cloudsql"
@@ -368,13 +399,24 @@ resource "google_cloud_run_v2_service" "internal" {
     containers {
       image = local.placeholder_image
       args  = ["internal"]
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
       volume_mounts {
         name       = "cloudsql"
         mount_path = "/cloudsql"
       }
       env {
-        name  = "DATABASE_URL"
-        value = local.db_url
+        name = "DATABASE_URL"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.database_url.secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "GCLOUD_PROJECT_ID"
@@ -383,6 +425,10 @@ resource "google_cloud_run_v2_service" "internal" {
       env {
         name  = "REGION"
         value = var.region
+      }
+      env {
+        name  = "ENFORCE_CALLER_AUTH"
+        value = "1"
       }
     }
   }
@@ -395,9 +441,10 @@ resource "google_cloud_run_v2_service" "internal" {
       launch_stage,
     ]
   }
+
+  depends_on = [google_secret_manager_secret_version.database_url]
 }
 
-# Sandboxes and the scheduler are the only callers of the internal surface.
 resource "google_cloud_run_v2_service_iam_member" "internal_env_invoker" {
   for_each = local.environments
   name     = google_cloud_run_v2_service.internal.name
@@ -411,18 +458,6 @@ resource "google_cloud_run_v2_service_iam_member" "internal_scheduler_invoker" {
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
-}
-
-resource "google_cloud_run_v2_service_iam_member" "api_iap" {
-  count    = length(var.iap_members) > 0 ? 1 : 0
-  name     = google_cloud_run_v2_service.api.name
-  location = var.region
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-iap.iam.gserviceaccount.com"
-}
-
-data "google_project" "this" {
-  project_id = var.project_id
 }
 
 resource "google_iap_web_cloud_run_service_iam_member" "members" {
@@ -447,13 +482,6 @@ resource "google_cloud_run_v2_job" "sandbox" {
       service_account = google_service_account.environment[each.key].email
       max_retries     = 0
       timeout         = "3600s"
-      vpc_access {
-        network_interfaces {
-          network    = google_compute_network.vpc.id
-          subnetwork = google_compute_subnetwork.run.id
-        }
-        egress = "ALL_TRAFFIC"
-      }
       containers {
         image = local.placeholder_image
         resources {
@@ -521,16 +549,26 @@ resource "google_cloud_scheduler_job" "reconcile" {
       audience              = google_cloud_run_v2_service.internal.uri
     }
   }
+
+  depends_on = [google_project_service.enabled]
 }
 
-# --- CI deploy identity -----------------------------------------------------
+# --- CI deploy identity (optional) ------------------------------------------
+
+resource "google_service_account" "deployer" {
+  count        = var.github_repository != "" ? 1 : 0
+  account_id   = "sa-deployer"
+  display_name = "naxos CI deployer"
+}
 
 resource "google_iam_workload_identity_pool" "github" {
+  count                     = var.github_repository != "" ? 1 : 0
   workload_identity_pool_id = "naxos-github"
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {
-  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  count                              = var.github_repository != "" ? 1 : 0
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github[0].workload_identity_pool_id
   workload_identity_pool_provider_id = "github"
   attribute_condition                = "assertion.repository == \"${var.github_repository}\""
   attribute_mapping = {
@@ -543,25 +581,27 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 }
 
 resource "google_service_account_iam_member" "deployer_wif" {
-  service_account_id = google_service_account.deployer.name
+  count              = var.github_repository != "" ? 1 : 0
+  service_account_id = google_service_account.deployer[0].name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repository}"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github[0].name}/attribute.repository/${var.github_repository}"
 }
 
 resource "google_project_iam_member" "deployer" {
-  for_each = toset([
+  for_each = var.github_repository != "" ? toset([
     "roles/run.developer",
     "roles/artifactregistry.writer",
     "roles/iam.serviceAccountUser",
-  ])
+  ]) : toset([])
   project = var.project_id
   role    = each.value
-  member  = "serviceAccount:${google_service_account.deployer.email}"
+  member  = "serviceAccount:${google_service_account.deployer[0].email}"
 }
 
-# --- budget -----------------------------------------------------------------
+# --- budget (optional) ------------------------------------------------------
 
 resource "google_billing_budget" "monthly" {
+  count           = var.billing_account != "" ? 1 : 0
   billing_account = var.billing_account
   display_name    = "naxos monthly"
 
@@ -582,4 +622,16 @@ resource "google_billing_budget" "monthly" {
   threshold_rules {
     threshold_percent = 1.0
   }
+}
+
+output "api_url" {
+  value = google_cloud_run_v2_service.api.uri
+}
+
+output "internal_url" {
+  value = google_cloud_run_v2_service.internal.uri
+}
+
+output "artifact_repo" {
+  value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
 }

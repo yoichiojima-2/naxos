@@ -35,7 +35,7 @@ def caller_service_account(request: Request) -> str:
     Cloud Run IAM has already rejected unauthenticated callers; this reads the
     identity so the caller can be matched against the session's environment.
     """
-    if not config.IAP_AUDIENCE:
+    if not config.ENFORCE_CALLER_AUTH:
         return request.headers.get("x-naxos-dev-sa", config.DEV_PRINCIPAL)
     token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not token:

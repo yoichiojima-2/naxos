@@ -48,7 +48,7 @@ async def _authorize(conn, session_id: str, caller: str) -> Any:
     )
     if row is None:
         raise HTTPException(404, "session not found")
-    if config.IAP_AUDIENCE and row["service_account_email"] != caller:
+    if config.ENFORCE_CALLER_AUTH and row["service_account_email"] != caller:
         raise HTTPException(403, "caller is not the session's environment service account")
     return row
 
