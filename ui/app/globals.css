@@ -55,34 +55,42 @@
   src: url("/fonts/IBMPlexMono-500.woff2") format("woff2");
 }
 :root {
-  --bg: #eef2f6;
-  --panel: #ffffff;
-  --panel2: #e1e9f1;
-  --border: #cfdbe7;
-  --ink: #1e3448;
-  --text: #1e3448;
-  --muted: #5a7186;
-  --faint: #8ba0b3;
-  --accent: #1f5f9e;
-  --accent-soft: #dce9f6;
-  --contrast: #1e3448;
-  --ok: #2c7a4b;
-  --ok-soft: #dff0e4;
-  --warn: #a86a1f;
-  --warn-soft: #f6ecd9;
-  --danger: #b3402f;
-  --danger-soft: #f7e3de;
-  --info: #1f5f9e;
-  --info-soft: #dce9f6;
+  color-scheme: light dark;
+  --bg: light-dark(#eef2f6, #0f1923);
+  --panel: light-dark(#ffffff, #182634);
+  --panel2: light-dark(#e1e9f1, #223447);
+  --border: light-dark(#cfdbe7, #33495e);
+  --ink: light-dark(#1e3448, #e2ecf5);
+  --text: light-dark(#1e3448, #e2ecf5);
+  --muted: light-dark(#5a7186, #94aabd);
+  --faint: light-dark(#8ba0b3, #6d8499);
+  --accent: light-dark(#1f5f9e, #64a4d8);
+  --accent-strong: light-dark(#1a4f85, #7db5e2);
+  --accent-soft: light-dark(#dce9f6, #1c3a57);
+  --on-accent: light-dark(#ffffff, #0f1923);
+  --contrast: light-dark(#1e3448, #e2ecf5);
+  --ok: light-dark(#2c7a4b, #6fc394);
+  --ok-soft: light-dark(#dff0e4, #17372a);
+  --warn: light-dark(#a86a1f, #dba659);
+  --warn-soft: light-dark(#f6ecd9, #3c2e14);
+  --danger: light-dark(#b3402f, #e0806c);
+  --danger-soft: light-dark(#f7e3de, #46201a);
+  --info: light-dark(#1f5f9e, #64a4d8);
+  --info-soft: light-dark(#dce9f6, #1c3a57);
+  --shadow-1: light-dark(rgba(30, 52, 72, 0.05), rgba(0, 0, 0, 0.25));
+  --shadow-2: light-dark(rgba(30, 52, 72, 0.07), rgba(0, 0, 0, 0.35));
+  --shadow-strong: light-dark(rgba(30, 52, 72, 0.25), rgba(0, 0, 0, 0.55));
   --sans: "Figtree", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --display: "Fraunces", Georgia, serif;
   --serif: var(--display);
   --mono: "IBM Plex Mono", "SF Mono", ui-monospace, Menlo, monospace;
 }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { background: var(--bg); color-scheme: light; }
+html { background: var(--bg); }
 
 body {
   background: var(--bg);
@@ -116,8 +124,10 @@ nav.tabs button {
 nav.tabs button:hover { color: var(--ink); }
 nav.tabs button.active {
   background: var(--panel); color: var(--accent); font-weight: 600;
-  box-shadow: 0 1px 5px rgba(30, 52, 72, 0.14);
+  box-shadow: 0 1px 5px var(--shadow-2);
 }
+
+button.theme { padding: 8px 13px; font-size: 17px; line-height: 1; }
 
 .tab-info {
   display: flex; flex-direction: column; gap: 3px;
@@ -133,7 +143,7 @@ nav.tabs button.active {
 .panel {
   background: var(--panel); border: none; border-radius: 22px;
   padding: 28px; margin-bottom: 22px;
-  box-shadow: 0 2px 6px rgba(30, 52, 72, 0.05), 0 14px 36px rgba(30, 52, 72, 0.07);
+  box-shadow: 0 2px 6px var(--shadow-1), 0 14px 36px var(--shadow-2);
 }
 .panel .panel {
   background: var(--panel2); border-radius: 16px; box-shadow: none; padding: 22px;
@@ -152,9 +162,9 @@ nav.tabs button.active {
 
 .toast {
   position: fixed; bottom: calc(28px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
-  background: var(--danger); color: #fff; padding: 12px 24px;
+  background: var(--danger); color: var(--on-accent); padding: 12px 24px;
   border-radius: 999px; font-size: 15px; font-weight: 500; cursor: pointer;
-  box-shadow: 0 6px 24px rgba(30, 52, 72, 0.25); z-index: 10;
+  box-shadow: 0 6px 24px var(--shadow-strong); z-index: 10;
   max-width: min(90vw, 640px);
 }
 
@@ -173,11 +183,11 @@ button.primary, button.ghost, button.danger {
   border: none; background: var(--accent-soft); color: var(--accent);
   transition: background 0.18s, color 0.18s, opacity 0.18s;
 }
-button.primary { background: var(--accent); color: #fff; }
-button.primary:hover:not(:disabled) { background: #1a4f85; }
+button.primary { background: var(--accent); color: var(--on-accent); }
+button.primary:hover:not(:disabled) { background: var(--accent-strong); }
 button.ghost:hover:not(:disabled) { background: var(--panel2); }
 button.danger { color: var(--danger); background: var(--danger-soft); }
-button.danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
+button.danger:hover:not(:disabled) { background: var(--danger); color: var(--on-accent); }
 button:disabled { opacity: 0.4; cursor: default; }
 
 input, textarea, select {

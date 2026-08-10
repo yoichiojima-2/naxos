@@ -29,6 +29,7 @@ export default function Page() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [theme, setTheme] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [agentResult, envResult] = await Promise.all([
@@ -63,22 +64,41 @@ export default function Page() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    setTheme(document.documentElement.dataset.theme ?? null);
+  }, []);
+
   function switchTab(t: Tab) {
     setTab(t);
     window.location.hash = t;
+  }
+
+  function toggleTheme() {
+    const effective =
+      theme ??
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = effective === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("theme", next);
+    setTheme(next);
   }
 
   return (
     <main>
       <header className="top">
         <h1><span>naxos</span> managed agents</h1>
-        <nav className="tabs">
-          {TABS.map((t) => (
-            <button key={t} className={t === tab ? "active" : ""} onClick={() => switchTab(t)}>
-              {t}
-            </button>
-          ))}
-        </nav>
+        <div className="row">
+          <nav className="tabs">
+            {TABS.map((t) => (
+              <button key={t} className={t === tab ? "active" : ""} onClick={() => switchTab(t)}>
+                {t}
+              </button>
+            ))}
+          </nav>
+          <button className="ghost theme" onClick={toggleTheme} aria-label="toggle dark mode">
+            ☾
+          </button>
+        </div>
       </header>
       <div className="tab-info">
         <span>{tab}</span>
