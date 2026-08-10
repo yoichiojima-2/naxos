@@ -8,6 +8,7 @@ REPO="$REGION-docker.pkg.dev/$PROJECT/naxos"
 TAG=${TAG:-$(git rev-parse --short HEAD)}
 
 gcloud builds submit --project "$PROJECT" --config cloudbuild.yaml \
+  --gcs-source-staging-dir "gs://$PROJECT-build-staging/source" \
   --substitutions "_REPO=$REPO,_TAG=$TAG" .
 
 gcloud run services update naxos-api --project "$PROJECT" --region "$REGION" \
