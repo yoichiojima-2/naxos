@@ -8,18 +8,27 @@ os.environ.setdefault("DATABASE_URL", "postgresql://postgres@/naxos?host=/tmp&po
 
 from naxos_cp import api, db, internal, wake
 
+TABLES = (
+    "session_events, tool_confirmations, sessions, agent_versions, agents, "
+    "environments, deployment_runs, deployments"
+)
 
-@pytest_asyncio.fixture
+
+@pytest_asyncio.fixture(scope="session")
 async def pool():
+    """One pool for the whole run: asyncpg connections are bound to their loop."""
     pool = await db.connect()
     async with pool.acquire() as conn:
         await db.migrate(conn)
-        await conn.execute(
-            "TRUNCATE session_events, tool_confirmations, sessions, agent_versions, "
-            "agents, environments, deployment_runs, deployments RESTART IDENTITY CASCADE"
-        )
     yield pool
     await db.disconnect()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean(pool):
+    async with pool.acquire() as conn:
+        await conn.execute(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE")
+    yield
 
 
 @pytest_asyncio.fixture
