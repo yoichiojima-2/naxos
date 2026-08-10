@@ -143,10 +143,17 @@ nav.tabs button.active {
   letter-spacing: -0.005em;
 }
 
-.row { display: flex; align-items: center; gap: 12px; }
+.row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .muted { color: var(--muted); font-size: 15px; }
 .mono { font-family: var(--mono); font-size: 13.5px; }
+
+.table-wrap { overflow-x: auto; }
+
+a.mono { color: var(--accent); text-decoration: none; }
+a.mono:hover { text-decoration: underline; }
+
+input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 
 button.primary, button.ghost, button.danger {
   border-radius: 999px; padding: 9px 20px; cursor: pointer; font-size: 15px;
@@ -216,3 +223,10 @@ tr.click:hover td { background: var(--bg); }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+
+@media (max-width: 560px) {
+  main { padding: 32px 16px 80px; }
+  header.top h1 { font-size: 30px; }
+  .panel { padding: 18px; border-radius: 18px; }
+  th, td { padding: 11px 8px; font-size: 14px; }
+}

@@ -55,22 +55,32 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
           </button>
         </div>
       </div>
-      <table>
-        <thead>
-          <tr><th>title</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
-        </thead>
-        <tbody>
-          {sessions.map((s) => (
-            <tr key={s.id} className="click" onClick={() => setOpen(s)}>
-              <td>{s.title ?? s.id}</td>
-              <td><span className={`badge ${BADGE[s.status]}`}>{s.status}{s.stop_reason ? `:${s.stop_reason}` : ""}</span></td>
-              <td className="muted">{s.created_by}</td>
-              <td className="mono">${Number(s.cost_usd).toFixed(4)}</td>
-              <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>title</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
+          </thead>
+          <tbody>
+            {sessions.map((s) => {
+              const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
+              return (
+                <tr key={s.id} className="click" onClick={() => setOpen(s)}>
+                  <td>{s.title ?? s.id}</td>
+                  <td>
+                    <span className={`badge ${needsAction ? "requires_action" : BADGE[s.status]}`}>
+                      {needsAction ? "needs approval" : s.status}
+                      {s.stop_reason && !needsAction ? `:${s.stop_reason}` : ""}
+                    </span>
+                  </td>
+                  <td className="muted">{s.created_by}</td>
+                  <td className="mono">${Number(s.cost_usd).toFixed(4)}</td>
+                  <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -160,12 +170,15 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
               >
                 {f.path}
               </a>
-              <span className="muted">{f.size} B</span>
+              <span className="muted mono">{f.size} B</span>
             </div>
           ))}
         </div>
       )}
       <div className="timeline">
+        {events.length === 0 && status !== "rescheduling" && (
+          <span className="muted">no messages yet — say something below to begin.</span>
+        )}
         {events.map((event) => (
           <Event
             key={event.seq}

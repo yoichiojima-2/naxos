@@ -67,27 +67,29 @@ export default function Vaults() {
             <strong>{vault.name}</strong>
             <span className="muted mono">{vault.id}</span>
           </div>
-          <table>
-            <tbody>
-              {(credentials[vault.id] ?? []).map((cred) => (
-                <tr key={cred.id}>
-                  <td>{cred.name}</td>
-                  <td className="muted">{cred.type} → mcp:{cred.target.mcp_server}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <button
-                      className="danger"
-                      onClick={async () => {
-                        await api(`/v1/vaults/${vault.id}/credentials/${cred.id}`, { method: "DELETE" });
-                        refresh();
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {(credentials[vault.id] ?? []).map((cred) => (
+                  <tr key={cred.id}>
+                    <td>{cred.name}</td>
+                    <td className="muted">{cred.type} → mcp:{cred.target.mcp_server}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <button
+                        className="danger"
+                        onClick={async () => {
+                          await api(`/v1/vaults/${vault.id}/credentials/${cred.id}`, { method: "DELETE" });
+                          refresh();
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
 

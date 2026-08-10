@@ -86,16 +86,18 @@ export default function MemoryStores() {
               New file
             </button>
           </div>
-          <table>
-            <tbody>
-              {(memories[store.id] ?? []).map((memory) => (
-                <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
-                  <td className="mono">{memory.path}</td>
-                  <td className="muted" style={{ textAlign: "right" }}>{memory.size} B</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {(memories[store.id] ?? []).map((memory) => (
+                  <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
+                    <td className="mono">{memory.path}</td>
+                    <td className="muted" style={{ textAlign: "right" }}>{memory.size} B</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
     </div>
