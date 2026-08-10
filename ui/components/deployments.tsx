@@ -6,6 +6,7 @@ import { api, Agent, Deployment, DeploymentRun } from "@/lib/api";
 export default function Deployments({ agents }: { agents: Agent[] }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [runs, setRuns] = useState<Record<string, DeploymentRun[]>>({});
+  const [openId, setOpenId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [agentId, setAgentId] = useState("");
@@ -45,12 +46,17 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
     if (verb === "archive" && !window.confirm("Archive this deployment? Its schedule stops firing.")) return;
     await api(`/v1/deployments/${id}/${verb}`, { json: {} });
     refresh();
-    if (verb === "run") showRuns(id);
+    if (verb === "run") loadRuns(id);
   }
 
-  async function showRuns(id: string) {
+  async function loadRuns(id: string) {
     const result = await api<{ data: DeploymentRun[] }>(`/v1/deployments/${id}/runs`);
     setRuns((prev) => ({ ...prev, [id]: result.data }));
+  }
+
+  function toggleOpen(id: string) {
+    setOpenId((prev) => (prev === id ? null : id));
+    loadRuns(id);
   }
 
   return (
@@ -100,9 +106,11 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
               <DeploymentRow
                 key={d.id}
                 deployment={d}
+                agents={agents}
+                open={openId === d.id}
                 runs={runs[d.id]}
                 onAction={action}
-                onShowRuns={showRuns}
+                onToggle={toggleOpen}
               />
             ))}
           </tbody>
@@ -114,18 +122,28 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
 
 function DeploymentRow({
   deployment,
+  agents,
+  open,
   runs,
   onAction,
-  onShowRuns,
+  onToggle,
 }: {
   deployment: Deployment;
+  agents: Agent[];
+  open: boolean;
   runs?: DeploymentRun[];
   onAction: (id: string, verb: string) => void;
-  onShowRuns: (id: string) => void;
+  onToggle: (id: string) => void;
 }) {
+  const agentName = agents.find((a) => a.id === deployment.agent_id)?.name ?? deployment.agent_id;
+  const prompt = deployment.initial_events
+    ?.flatMap((e) => e.content ?? [])
+    .map((b) => b.text)
+    .filter(Boolean)
+    .join("\n");
   return (
     <>
-      <tr>
+      <tr className="click" onClick={() => onToggle(deployment.id)}>
         <td>{deployment.name}</td>
         <td className="mono">{deployment.cron}</td>
         <td>
@@ -133,22 +151,33 @@ function DeploymentRow({
             ? <span className="badge idle">paused</span>
             : <span className="badge running">active</span>}
         </td>
-        <td style={{ textAlign: "right" }}>
+        <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
           <span className="row" style={{ justifyContent: "flex-end" }}>
             <button className="ghost" onClick={() => onAction(deployment.id, "run")}>Run now</button>
             <button className="ghost" onClick={() => onAction(deployment.id, deployment.paused ? "unpause" : "pause")}>
               {deployment.paused ? "Unpause" : "Pause"}
             </button>
-            <button className="ghost" onClick={() => onShowRuns(deployment.id)}>Runs</button>
             <button className="danger" onClick={() => onAction(deployment.id, "archive")}>Archive</button>
           </span>
         </td>
       </tr>
-      {runs && (
+      {open && (
         <tr>
           <td colSpan={4}>
-            {runs.length === 0 && <span className="muted">no runs yet</span>}
-            {runs.map((run) => (
+            <div className="grid2" style={{ marginBottom: 10 }}>
+              <div><label>agent</label>{agentName}{" "}
+                <span className="muted">{deployment.agent_version ? `pinned to v${deployment.agent_version}` : "latest version"}</span>
+              </div>
+              <div><label>schedule</label><span className="mono">{deployment.cron}</span> <span className="muted">{deployment.timezone}</span></div>
+              <div><label>budget per run</label>{deployment.budget_usd ? `$${deployment.budget_usd}` : <span className="muted">none</span>}</div>
+              <div><label>created</label>{new Date(deployment.created_at).toLocaleString()} <span className="muted">by {deployment.created_by}</span></div>
+            </div>
+            <label>prompt for each run</label>
+            <pre style={{ whiteSpace: "pre-wrap", margin: "0 0 10px" }}>{prompt || <span className="muted">(none)</span>}</pre>
+            <label>recent runs</label>
+            {!runs && <span className="muted">loading…</span>}
+            {runs?.length === 0 && <span className="muted">no runs yet</span>}
+            {runs?.map((run) => (
               <div key={run.id} className="row muted" style={{ gap: 16 }}>
                 <span>{new Date(run.fired_at).toLocaleString()}</span>
                 <span className={`badge ${run.status === "failed" ? "terminated" : "running"}`}>

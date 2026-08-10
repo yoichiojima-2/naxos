@@ -65,9 +65,14 @@ export type Deployment = {
   id: string;
   name: string;
   agent_id: string;
+  agent_version: number | null;
   cron: string;
   timezone: string;
   paused: boolean;
+  initial_events: { type: string; content?: { type: string; text?: string }[] }[];
+  budget_usd: string | null;
+  created_by: string;
+  created_at: string;
 };
 
 export type DeploymentRun = {
