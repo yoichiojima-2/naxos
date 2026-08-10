@@ -685,10 +685,24 @@ resource "google_project_iam_member" "deployer" {
     "roles/run.developer",
     "roles/artifactregistry.writer",
     "roles/iam.serviceAccountUser",
+    "roles/cloudbuild.builds.editor",
+    "roles/serviceusage.serviceUsageConsumer",
+    # cloudbuild.yaml sets logging: CLOUD_LOGGING_ONLY; streaming those logs
+    # during `gcloud builds submit` needs log read access.
+    "roles/logging.viewer",
   ]) : toset([])
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.deployer[0].email}"
+}
+
+# `gcloud builds submit` stages the source tarball in this bucket, which
+# Cloud Build creates outside Terraform on first use.
+resource "google_storage_bucket_iam_member" "deployer_build_staging" {
+  count  = var.github_repository != "" ? 1 : 0
+  bucket = "${var.project_id}_cloudbuild"
+  role   = "roles/storage.admin"
+  member = "serviceAccount:${google_service_account.deployer[0].email}"
 }
 
 # --- budget (optional) ------------------------------------------------------
@@ -731,4 +745,9 @@ output "egress_url" {
 
 output "artifact_repo" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
+}
+
+output "wif_provider" {
+  description = "Set as the GCP_WIF_PROVIDER repository variable on GitHub."
+  value       = var.github_repository != "" ? google_iam_workload_identity_pool_provider.github[0].name : null
 }

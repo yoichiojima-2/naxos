@@ -1,0 +1,38 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "control-plane/**"
+      - "sandbox-runner/**"
+      - "egress-proxy/**"
+      - "shared/**"
+      - "ui/**"
+      - "cloudbuild.yaml"
+      - "scripts/deploy.sh"
+      - ".github/workflows/deploy.yml"
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          # `terraform output -raw wif_provider`, stored as a repository variable.
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: naxos2-deployer@naxos-503510.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: ./scripts/deploy.sh
