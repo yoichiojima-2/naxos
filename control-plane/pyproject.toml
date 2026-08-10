@@ -12,6 +12,8 @@ dependencies = [
     "google-auth>=2.35",
     "google-cloud-run>=0.10",
     "google-cloud-bigquery>=3.26",
+    "google-cloud-scheduler>=2.13",
+    "google-cloud-secret-manager>=2.20",
 ]
 
 [dependency-groups]

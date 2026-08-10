@@ -430,6 +430,14 @@ resource "google_cloud_run_v2_service" "internal" {
         name  = "ENFORCE_CALLER_AUTH"
         value = "1"
       }
+      env {
+        name  = "INTERNAL_URL"
+        value = "https://naxos-internal-${data.google_project.this.number}.${var.region}.run.app"
+      }
+      env {
+        name  = "EGRESS_URL"
+        value = "https://naxos-egress-${data.google_project.this.number}.${var.region}.run.app"
+      }
     }
   }
 
@@ -533,6 +541,67 @@ resource "google_cloud_run_v2_job_iam_member" "sandbox_runner" {
   member   = "serviceAccount:${google_service_account.api.email}"
 }
 
+
+resource "google_cloud_run_v2_service" "egress" {
+  name     = "naxos-egress"
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  template {
+    service_account = google_service_account.egress.email
+    timeout         = "300s"
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+    containers {
+      image = local.placeholder_image
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "256Mi"
+        }
+      }
+      env {
+        name  = "INTERNAL_URL"
+        value = google_cloud_run_v2_service.internal.uri
+      }
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      client,
+      client_version,
+      launch_stage,
+    ]
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "egress_env_invoker" {
+  for_each = local.environments
+  name     = google_cloud_run_v2_service.egress.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.environment[each.key].email}"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "internal_egress_invoker" {
+  name     = google_cloud_run_v2_service.internal.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.egress.email}"
+}
+
+# The control plane creates one secret per vault credential and grants
+# sa-egress accessor on it; that needs secret admin.
+resource "google_project_iam_member" "api_secret_admin" {
+  project = var.project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:${google_service_account.api.email}"
+}
+
 # --- reconciler -------------------------------------------------------------
 
 resource "google_cloud_scheduler_job" "reconcile" {
@@ -630,6 +699,10 @@ output "api_url" {
 
 output "internal_url" {
   value = google_cloud_run_v2_service.internal.uri
+}
+
+output "egress_url" {
+  value = google_cloud_run_v2_service.egress.uri
 }
 
 output "artifact_repo" {

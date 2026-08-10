@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -11,6 +12,7 @@ from naxos_shared.events import (
     SessionStatus,
     StopReason,
 )
+from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
 from . import audit, config, db, store, wake
@@ -89,10 +91,47 @@ async def heartbeat(
     return {"ok": True, "disabled": bool(killed)}
 
 
+async def _resolve_egress(conn, session_id: str, vault_ids: list[str], mcp_servers: dict) -> dict:
+    """Rewrite MCP server URLs through the egress proxy so credentials never
+    reach the sandbox. Servers without a matching credential pass through."""
+    if not config.EGRESS_URL or not vault_ids:
+        return mcp_servers
+    credentials = await conn.fetch(
+        "SELECT * FROM vault_credentials WHERE vault_id = ANY($1) AND type = 'header'",
+        vault_ids,
+    )
+    rewritten: dict = {}
+    for name, server in (mcp_servers or {}).items():
+        server = dict(server)
+        url = server.get("url", "")
+        match = next(
+            (c for c in credentials if (c["target"] or {}).get("mcp_server") == name), None
+        )
+        if match and url:
+            token = secrets.token_urlsafe(24)
+            await conn.execute(
+                "INSERT INTO egress_routes (token, session_id, credential_id, target_url, "
+                "  header, value_prefix) VALUES ($1, $2, $3, $4, $5, $6)",
+                token,
+                session_id,
+                match["id"],
+                url,
+                (match["target"] or {}).get("header", "authorization"),
+                (match["target"] or {}).get("prefix", "Bearer "),
+            )
+            server["url"] = f"{config.EGRESS_URL}/r/{token}"
+        rewritten[name] = server
+    return rewritten
+
+
 @router.get("/sessions/{session_id}/config")
 async def session_config(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
+        await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
+        mcp_servers = await _resolve_egress(
+            conn, session_id, list(row["vault_ids"] or []), row["mcp_servers"] or {}
+        )
     return SessionConfig(
         session_id=session_id,
         agent_id=row["agent_id"],
@@ -102,7 +141,7 @@ async def session_config(session_id: str, caller: str = Depends(caller_service_a
         model=row["model"],
         tools=list(row["tools"] or []),
         permission_policy=PermissionPolicy.model_validate(row["permission_policy"] or {}),
-        mcp_servers=row["mcp_servers"] or {},
+        mcp_servers=mcp_servers,
         session_bucket=row["session_bucket"],
         sdk_session_id=row["sdk_session_id"],
         budget_usd=float(row["budget_usd"]) if row["budget_usd"] is not None else None,
@@ -235,6 +274,94 @@ async def checkpoint(
         if pending and not body.terminated:
             await wake.wake(conn, session_id)
     return {"ok": True}
+
+
+@router.get("/sessions/{session_id}/memory")
+async def session_memory(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
+    async with db.transaction() as conn:
+        row = await _authorize(conn, session_id, caller)
+        stores: dict[str, dict[str, str]] = {}
+        for store_id in row["memory_store_ids"] or []:
+            name = await conn.fetchval("SELECT name FROM memory_stores WHERE id = $1", store_id)
+            if name is None:
+                continue
+            memories = await conn.fetch(
+                "SELECT path, content FROM memories WHERE store_id = $1", store_id
+            )
+            stores[store_id] = {
+                "name": name,
+                "files": {m["path"]: m["content"] for m in memories},
+            }
+    return {"stores": stores}
+
+
+@router.post("/sessions/{session_id}/memory")
+async def session_memory_writeback(
+    session_id: str, body: dict[str, Any], caller: str = Depends(caller_service_account)
+) -> dict:
+    """Persist memory files the agent changed during the burst. Last write wins."""
+    written = 0
+    async with db.transaction() as conn:
+        row = await _authorize(conn, session_id, caller)
+        allowed = set(row["memory_store_ids"] or [])
+        for store_id, files in (body.get("stores") or {}).items():
+            if store_id not in allowed:
+                continue
+            for path, content in files.items():
+                if content is None:
+                    await conn.execute(
+                        "DELETE FROM memories WHERE store_id = $1 AND path = $2",
+                        store_id,
+                        path,
+                    )
+                    continue
+                if len(str(content).encode()) > 64 * 1024:
+                    continue
+                await conn.execute(
+                    "INSERT INTO memories (id, store_id, path, content, updated_by) "
+                    "VALUES ($1, $2, $3, $4, $5) "
+                    "ON CONFLICT (store_id, path) DO UPDATE SET content = EXCLUDED.content, "
+                    "  updated_by = EXCLUDED.updated_by, updated_at = now()",
+                    new_id("memory"),
+                    store_id,
+                    path,
+                    content,
+                    f"agent:{session_id}",
+                )
+                written += 1
+    return {"written": written}
+
+
+@router.get("/egress/routes/{token}")
+async def egress_route(token: str, caller: str = Depends(caller_service_account)) -> dict:
+    """Resolve a route token for the egress proxy. Only the proxy may call."""
+    if config.ENFORCE_CALLER_AUTH and caller != config.EGRESS_SA:
+        raise HTTPException(403, "caller is not the egress proxy")
+    async with db.transaction() as conn:
+        row = await conn.fetchrow(
+            "SELECT r.*, c.secret_ref, s.status FROM egress_routes r "
+            "JOIN vault_credentials c ON c.id = r.credential_id "
+            "JOIN sessions s ON s.id = r.session_id WHERE r.token = $1",
+            token,
+        )
+    if row is None:
+        raise HTTPException(404, "unknown route")
+    if row["status"] == str(SessionStatus.TERMINATED):
+        raise HTTPException(409, "session is terminated")
+    return {
+        "target_url": row["target_url"],
+        "header": row["header"],
+        "value_prefix": row["value_prefix"],
+        "secret_ref": row["secret_ref"],
+    }
+
+
+@router.post("/deployments/{deployment_id}/fire")
+async def fire_deployment(deployment_id: str, _: str = Depends(caller_service_account)) -> dict:
+    from . import deployments
+
+    async with db.transaction() as conn:
+        return await deployments.fire(conn, deployment_id, trigger="schedule")
 
 
 @router.post("/reconcile")

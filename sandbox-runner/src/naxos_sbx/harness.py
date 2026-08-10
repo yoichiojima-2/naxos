@@ -58,6 +58,17 @@ class Harness:
         self.cost_usd: float = float(config.get("cost_usd") or 0.0)
         self.stop_reason = StopReason.END_TURN
         self.paused_call: dict[str, Any] | None = None
+        self._client: ClaudeSDKClient | None = None
+        self.interrupted = False
+
+    async def interrupt(self) -> None:
+        """Stop the in-flight turn. Called by the queue watcher mid-run."""
+        self.interrupted = True
+        if self._client is not None:
+            try:
+                await self._client.interrupt()
+            except Exception:
+                log.exception("SDK interrupt failed")
 
     # --- event plumbing ---------------------------------------------------
 
@@ -142,20 +153,26 @@ class Harness:
         if self._budget_exhausted():
             return StopReason.BUDGET_REACHED
         async with ClaudeSDKClient(self.options()) as client:
-            for prompt in prompts:
-                if self._budget_exhausted():
-                    return StopReason.BUDGET_REACHED
-                await client.query(prompt)
-                try:
-                    await self._drain(client)
-                except PermissionDenied:
-                    return StopReason.REQUIRES_ACTION
-                except BudgetReached:
-                    return StopReason.BUDGET_REACHED
-                except Killed:
-                    return StopReason.END_TURN
-                finally:
-                    await self.flush()
+            self._client = client
+            try:
+                for prompt in prompts:
+                    if self._budget_exhausted():
+                        return StopReason.BUDGET_REACHED
+                    if self.interrupted:
+                        return StopReason.END_TURN
+                    await client.query(prompt)
+                    try:
+                        await self._drain(client)
+                    except PermissionDenied:
+                        return StopReason.REQUIRES_ACTION
+                    except BudgetReached:
+                        return StopReason.BUDGET_REACHED
+                    except Killed:
+                        return StopReason.END_TURN
+                    finally:
+                        await self.flush()
+            finally:
+                self._client = None
         return StopReason.END_TURN
 
     async def _drain(self, client: ClaudeSDKClient) -> None:

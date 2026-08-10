@@ -9,8 +9,9 @@ os.environ.setdefault("DATABASE_URL", "postgresql://postgres@/naxos?host=/tmp&po
 from naxos_cp import api, db, internal, wake
 
 TABLES = (
-    "session_events, tool_confirmations, sessions, agent_versions, agents, "
-    "environments, deployment_runs, deployments"
+    "session_events, tool_confirmations, egress_routes, sessions, agent_versions, agents, "
+    "environments, deployment_runs, deployments, vault_credentials, vaults, "
+    "memories, memory_stores"
 )
 
 

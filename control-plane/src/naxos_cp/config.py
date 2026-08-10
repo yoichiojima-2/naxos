@@ -10,6 +10,13 @@ DEV_PRINCIPAL = os.environ.get("DEV_PRINCIPAL", "local-dev")
 
 AUDIT_DATASET = os.environ.get("AUDIT_DATASET", "audit")
 INTERNAL_URL = os.environ.get("INTERNAL_URL", "")
+SCHEDULER_SA = os.environ.get(
+    "SCHEDULER_SA", f"sa-scheduler@{PROJECT_ID}.iam.gserviceaccount.com" if PROJECT_ID else ""
+)
+EGRESS_SA = os.environ.get(
+    "EGRESS_SA", f"sa-egress@{PROJECT_ID}.iam.gserviceaccount.com" if PROJECT_ID else ""
+)
+EGRESS_URL = os.environ.get("EGRESS_URL", "")
 
 MAX_CONCURRENT_SANDBOXES = int(os.environ.get("MAX_CONCURRENT_SANDBOXES", "5"))
 MAX_WAKE_RETRIES = int(os.environ.get("MAX_WAKE_RETRIES", "3"))

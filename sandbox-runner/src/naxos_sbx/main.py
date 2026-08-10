@@ -7,6 +7,7 @@ from naxos_shared.events import EventType, StopReason
 
 from .control import ControlChannel
 from .harness import CONTINUE_PROMPT, Harness
+from .memory_sync import MemorySync
 from .workspace import Workspace
 
 log = logging.getLogger(__name__)
@@ -36,6 +37,29 @@ def _prompts(events: list[dict]) -> tuple[list[str], bool]:
     return prompts, interrupted
 
 
+async def _watch_queue(channel: ControlChannel, harness, carry: list[dict]) -> None:
+    """While a turn runs, pull the queue so an interrupt lands immediately.
+
+    Non-interrupt events claimed here are carried over to the next loop
+    iteration instead of being lost.
+    """
+    while True:
+        try:
+            batch = await channel.poll_queue(QUEUE_WAIT_SECONDS)
+        except Exception:
+            log.exception("queue watcher poll failed")
+            await asyncio.sleep(5)
+            continue
+        if batch.get("control") in ("kill", "terminate"):
+            await harness.interrupt()
+            return
+        for event in batch.get("events", []):
+            if event["type"] == str(EventType.USER_INTERRUPT):
+                await harness.interrupt()
+            else:
+                carry.append(event)
+
+
 async def _heartbeat(channel: ControlChannel, stop: asyncio.Event) -> None:
     while not stop.is_set():
         try:
@@ -56,6 +80,7 @@ async def run_session(session_id: str) -> None:
     stop = asyncio.Event()
     heartbeat_task: asyncio.Task | None = None
     workspace: Workspace | None = None
+    memory: MemorySync | None = None
     stop_reason = StopReason.END_TURN
     harness: Harness | None = None
     try:
@@ -63,13 +88,20 @@ async def run_session(session_id: str) -> None:
         config = await channel.config()
         workspace = Workspace(session_id, config["session_bucket"])
         workspace.restore()
+        memory = MemorySync(channel, workspace.ws)
+        await memory.materialise()
         heartbeat_task = asyncio.create_task(_heartbeat(channel, stop))
         harness = Harness(channel, config, str(workspace.ws))
 
         idle_since: float | None = None
+        carry: list[dict] = []
         loop = asyncio.get_running_loop()
         while not stop.is_set():
-            batch = await channel.poll_queue(QUEUE_WAIT_SECONDS)
+            if carry:
+                batch = {"control": None, "events": carry}
+                carry = []
+            else:
+                batch = await channel.poll_queue(QUEUE_WAIT_SECONDS)
             if batch.get("control") in ("kill", "terminate"):
                 stop_reason = StopReason.END_TURN
                 break
@@ -83,13 +115,23 @@ async def run_session(session_id: str) -> None:
                     break
                 continue
             idle_since = None
-            stop_reason = await harness.run(prompts)
+            harness.interrupted = False
+            watcher = asyncio.create_task(_watch_queue(channel, harness, carry))
+            try:
+                stop_reason = await harness.run(prompts)
+            finally:
+                watcher.cancel()
             if stop_reason in (StopReason.REQUIRES_ACTION, StopReason.BUDGET_REACHED):
                 break
     finally:
         stop.set()
         if heartbeat_task is not None:
             heartbeat_task.cancel()
+        if memory is not None:
+            try:
+                await memory.writeback()
+            except Exception:
+                log.exception("memory writeback failed")
         if workspace is not None:
             try:
                 workspace.checkpoint()
