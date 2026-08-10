@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { api, Agent, Environment } from "@/lib/api";
 
+const MODELS = [
+  { id: "claude-opus-5", label: "Claude Opus 5" },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
+  { id: "claude-fable-5", label: "Claude Fable 5" },
+  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+];
+
 export default function Agents({
   agents,
   environments,
@@ -14,7 +21,7 @@ export default function Agents({
 }) {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [model, setModel] = useState("claude-sonnet-5");
+  const [model, setModel] = useState(MODELS[1].id);
   const [environmentId, setEnvironmentId] = useState("");
   const [instructions, setInstructions] = useState("");
   const [askByDefault, setAskByDefault] = useState(true);
@@ -63,7 +70,11 @@ export default function Agents({
             </div>
             <div>
               <label>model</label>
-              <input value={model} onChange={(e) => setModel(e.target.value)} />
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                {MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
             </div>
           </div>
           <label>environment</label>
