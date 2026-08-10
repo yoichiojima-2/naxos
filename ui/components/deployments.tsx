@@ -56,7 +56,7 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
     <div className="panel">
       <div className="row between" style={{ marginBottom: 12 }}>
         <strong>Scheduled deployments</strong>
-        <button className="primary" onClick={() => setShowForm(!showForm)}>
+        <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New deployment"}
         </button>
       </div>
@@ -86,22 +86,24 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
         </div>
       )}
 
-      <table>
-        <thead>
-          <tr><th>name</th><th>cron</th><th>state</th><th /></tr>
-        </thead>
-        <tbody>
-          {deployments.map((d) => (
-            <DeploymentRow
-              key={d.id}
-              deployment={d}
-              runs={runs[d.id]}
-              onAction={action}
-              onShowRuns={showRuns}
-            />
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>name</th><th>cron</th><th>state</th><th /></tr>
+          </thead>
+          <tbody>
+            {deployments.map((d) => (
+              <DeploymentRow
+                key={d.id}
+                deployment={d}
+                runs={runs[d.id]}
+                onAction={action}
+                onShowRuns={showRuns}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

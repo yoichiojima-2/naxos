@@ -56,7 +56,7 @@ export default function Agents({
     <div className="panel">
       <div className="row between" style={{ marginBottom: 12 }}>
         <strong>Agents</strong>
-        <button className="primary" onClick={() => setShowForm(!showForm)}>
+        <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New agent"}
         </button>
       </div>
@@ -101,32 +101,34 @@ export default function Agents({
         </div>
       )}
 
-      <table>
-        <thead>
-          <tr><th>name</th><th>version</th><th>kill switch</th><th /></tr>
-        </thead>
-        <tbody>
-          {agents.map((agent) => (
-            <tr key={agent.id}>
-              <td>{agent.name} <span className="muted mono">{agent.id}</span></td>
-              <td>v{agent.latest_version}</td>
-              <td>
-                {agent.disabled
-                  ? <span className="badge terminated">disabled</span>
-                  : <span className="badge running">active</span>}
-              </td>
-              <td style={{ textAlign: "right" }}>
-                <button
-                  className={agent.disabled ? "ghost" : "danger"}
-                  onClick={() => toggleKill(agent)}
-                >
-                  {agent.disabled ? "Enable" : "Kill"}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>name</th><th>version</th><th>kill switch</th><th /></tr>
+          </thead>
+          <tbody>
+            {agents.map((agent) => (
+              <tr key={agent.id}>
+                <td>{agent.name} <span className="muted mono">{agent.id}</span></td>
+                <td>v{agent.latest_version}</td>
+                <td>
+                  {agent.disabled
+                    ? <span className="badge terminated">disabled</span>
+                    : <span className="badge running">active</span>}
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  <button
+                    className={agent.disabled ? "ghost" : "danger"}
+                    onClick={() => toggleKill(agent)}
+                  >
+                    {agent.disabled ? "Enable" : "Kill"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
