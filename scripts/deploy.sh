@@ -18,7 +18,7 @@ gcloud run services update naxos-egress --project "$PROJECT" --region "$REGION" 
   --image "$REPO/egress-proxy:$TAG"
 
 for job in $(gcloud run jobs list --project "$PROJECT" --region "$REGION" \
-    --format "value(name)" --filter "name~naxos-sbx-"); do
+    --format "value(metadata.name)" --filter "metadata.name~naxos-sbx-"); do
   gcloud run jobs update "$job" --project "$PROJECT" --region "$REGION" \
     --image "$REPO/sandbox-runner:$TAG"
 done
