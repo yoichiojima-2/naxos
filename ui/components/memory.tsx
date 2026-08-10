@@ -74,7 +74,7 @@ export default function MemoryStores() {
         </div>
       </div>
       {stores.map((store) => (
-        <div className="panel" style={{ background: "var(--panel2)" }} key={store.id}>
+        <div className="panel" key={store.id}>
           <div className="row between">
             <strong>{store.name}</strong>
             <button

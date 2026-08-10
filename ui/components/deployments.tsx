@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, Agent, Deployment, DeploymentRun } from "@/lib/api";
+import { agentName, api, Agent, Deployment, DeploymentRun } from "@/lib/api";
 
 export default function Deployments({ agents }: { agents: Agent[] }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -12,7 +12,6 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
   const [agentId, setAgentId] = useState("");
   const [cron, setCron] = useState("0 9 * * *");
   const [prompt, setPrompt] = useState("");
-  const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Deployment[] }>("/v1/deployments");
@@ -22,24 +21,20 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
   useEffect(() => { refresh(); }, [refresh]);
 
   async function create() {
-    try {
-      await api("/v1/deployments", {
-        json: {
-          name,
-          agent_id: agentId || agents[0]?.id,
-          cron,
-          initial_events: [
-            { type: "user.message", content: [{ type: "text", text: prompt }] },
-          ],
-        },
-      });
-      setShowForm(false);
-      setName("");
-      setPrompt("");
-      refresh();
-    } catch (e) {
-      setError(String(e));
-    }
+    await api("/v1/deployments", {
+      json: {
+        name,
+        agent_id: agentId || agents[0]?.id,
+        cron,
+        initial_events: [
+          { type: "user.message", content: [{ type: "text", text: prompt }] },
+        ],
+      },
+    });
+    setShowForm(false);
+    setName("");
+    setPrompt("");
+    refresh();
   }
 
   async function action(id: string, verb: string) {
@@ -69,7 +64,7 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
       </div>
 
       {showForm && (
-        <div className="panel" style={{ background: "var(--panel2)" }}>
+        <div className="panel">
           <div className="grid2">
             <div>
               <label>name</label>
@@ -86,7 +81,6 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
           </select>
           <label>prompt for each run</label>
           <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-          {error && <p className="muted" style={{ color: "var(--danger)" }}>{error}</p>}
           <div style={{ marginTop: 12 }}>
             <button className="primary" onClick={create} disabled={!name || !prompt}>Create</button>
           </div>
@@ -135,7 +129,6 @@ function DeploymentRow({
   onAction: (id: string, verb: string) => void;
   onToggle: (id: string) => void;
 }) {
-  const agentName = agents.find((a) => a.id === deployment.agent_id)?.name ?? deployment.agent_id;
   const prompt = deployment.initial_events
     ?.flatMap((e) => e.content ?? [])
     .map((b) => b.text)
@@ -165,7 +158,7 @@ function DeploymentRow({
         <tr>
           <td colSpan={4}>
             <div className="grid2" style={{ marginBottom: 10 }}>
-              <div><label>agent</label>{agentName}{" "}
+              <div><label>agent</label>{agentName(agents, deployment.agent_id)}{" "}
                 <span className="muted">{deployment.agent_version ? `pinned to v${deployment.agent_version}` : "latest version"}</span>
               </div>
               <div><label>schedule</label><span className="mono">{deployment.cron}</span> <span className="muted">{deployment.timezone}</span></div>

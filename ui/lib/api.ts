@@ -40,6 +40,9 @@ export type Agent = {
   instructions?: string | null;
 };
 
+export const agentName = (agents: Agent[], id: string) =>
+  agents.find((a) => a.id === id)?.name ?? id;
+
 export type Session = {
   id: string;
   agent_id: string;

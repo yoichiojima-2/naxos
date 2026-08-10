@@ -25,26 +25,21 @@ export default function Agents({
   const [environmentId, setEnvironmentId] = useState("");
   const [instructions, setInstructions] = useState("");
   const [askByDefault, setAskByDefault] = useState(true);
-  const [error, setError] = useState("");
 
   async function create() {
-    try {
-      await api("/v1/agents", {
-        json: {
-          name,
-          model,
-          environment_id: environmentId || environments[0]?.id,
-          instructions: instructions || null,
-          permission_policy: { default: askByDefault ? "always_ask" : "always_allow", rules: [] },
-        },
-      });
-      setShowForm(false);
-      setName("");
-      setInstructions("");
-      onChange();
-    } catch (e) {
-      setError(String(e));
-    }
+    await api("/v1/agents", {
+      json: {
+        name,
+        model,
+        environment_id: environmentId || environments[0]?.id,
+        instructions: instructions || null,
+        permission_policy: { default: askByDefault ? "always_ask" : "always_allow", rules: [] },
+      },
+    });
+    setShowForm(false);
+    setName("");
+    setInstructions("");
+    onChange();
   }
 
   async function toggleKill(agent: Agent) {
@@ -62,7 +57,7 @@ export default function Agents({
       </div>
 
       {showForm && (
-        <div className="panel" style={{ background: "var(--panel2)" }}>
+        <div className="panel">
           <div className="grid2">
             <div>
               <label>name</label>
@@ -94,7 +89,6 @@ export default function Agents({
             />
             require approval for every tool call (always_ask)
           </label>
-          {error && <p className="muted" style={{ color: "var(--danger)" }}>{error}</p>}
           <div style={{ marginTop: 12 }}>
             <button className="primary" onClick={create} disabled={!name}>Create</button>
           </div>

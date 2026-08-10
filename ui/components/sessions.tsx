@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { agentName, api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 
 const BADGE: Record<string, string> = {
   idle: "idle",
@@ -19,8 +19,6 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     const result = await api<{ data: Session[] }>("/v1/sessions");
     setSessions(result.data);
   }, []);
-
-  const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
 
   useEffect(() => {
     refresh();
@@ -74,7 +72,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
               return (
                 <tr key={s.id} className="click" onClick={() => setOpen(s)}>
                   <td>{s.title ?? s.id}</td>
-                  <td className="muted">{agentName(s.agent_id)}</td>
+                  <td className="muted">{agentName(agents, s.agent_id)}</td>
                   <td>
                     <span className={`badge ${needsAction ? "requires_action" : BADGE[s.status]}`}>
                       {needsAction ? "needs approval" : s.status}
@@ -179,7 +177,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
         </div>
       </div>
       {files && (
-        <div className="panel" style={{ background: "var(--panel2)", marginBottom: 12 }}>
+        <div className="panel" style={{ marginBottom: 12 }}>
           {files.length === 0 && <span className="muted">workspace is empty</span>}
           {files.map((f) => (
             <div className="row between" key={f.path}>

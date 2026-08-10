@@ -8,7 +8,6 @@ export default function Vaults() {
   const [credentials, setCredentials] = useState<Record<string, Credential[]>>({});
   const [vaultName, setVaultName] = useState("");
   const [form, setForm] = useState({ vaultId: "", name: "", value: "", mcpServer: "" });
-  const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Vault[] }>("/v1/vaults");
@@ -28,20 +27,16 @@ export default function Vaults() {
   }
 
   async function addCredential() {
-    try {
-      await api(`/v1/vaults/${form.vaultId || vaults[0]?.id}/credentials`, {
-        json: {
-          name: form.name,
-          type: "header",
-          value: form.value,
-          target: { mcp_server: form.mcpServer, header: "authorization", prefix: "Bearer " },
-        },
-      });
-      setForm({ vaultId: "", name: "", value: "", mcpServer: "" });
-      refresh();
-    } catch (e) {
-      setError(String(e));
-    }
+    await api(`/v1/vaults/${form.vaultId || vaults[0]?.id}/credentials`, {
+      json: {
+        name: form.name,
+        type: "header",
+        value: form.value,
+        target: { mcp_server: form.mcpServer, header: "authorization", prefix: "Bearer " },
+      },
+    });
+    setForm({ vaultId: "", name: "", value: "", mcpServer: "" });
+    refresh();
   }
 
   return (
@@ -62,7 +57,7 @@ export default function Vaults() {
       </div>
 
       {vaults.map((vault) => (
-        <div className="panel" style={{ background: "var(--panel2)" }} key={vault.id}>
+        <div className="panel" key={vault.id}>
           <div className="row between">
             <strong>{vault.name}</strong>
             <span className="row">
@@ -107,7 +102,7 @@ export default function Vaults() {
       ))}
 
       {vaults.length > 0 && (
-        <div className="panel" style={{ background: "var(--panel2)" }}>
+        <div className="panel">
           <strong>Add credential</strong>
           <div className="grid2">
             <div>
@@ -129,7 +124,6 @@ export default function Vaults() {
               <input type="password" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
             </div>
           </div>
-          {error && <p className="muted" style={{ color: "var(--danger)" }}>{error}</p>}
           <div style={{ marginTop: 12 }}>
             <button className="primary" onClick={addCredential} disabled={!form.name || !form.value}>
               Store credential
