@@ -1,4 +1,5 @@
 import json
+import uuid
 from typing import Any
 
 import asyncpg
@@ -121,7 +122,16 @@ async def acquire_lease(
     return str(row["lease_id"]) if row else None
 
 
+def _uuid(value: str | None) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
 async def heartbeat(conn: asyncpg.Connection, session_id: str, lease_id: str) -> bool:
+    if _uuid(lease_id) is None:
+        return False
     result = await conn.execute(
         "UPDATE sessions SET lease_expires_at = now() + make_interval(secs => $3) "
         "WHERE id = $1 AND lease_id = $2::uuid",
@@ -133,6 +143,8 @@ async def heartbeat(conn: asyncpg.Connection, session_id: str, lease_id: str) ->
 
 
 async def release_lease(conn: asyncpg.Connection, session_id: str, lease_id: str) -> None:
+    if _uuid(lease_id) is None:
+        return
     await conn.execute(
         "UPDATE sessions SET lease_id = NULL, lease_expires_at = NULL "
         "WHERE id = $1 AND lease_id = $2::uuid",

@@ -36,6 +36,13 @@ def create_app() -> FastAPI:
     return app
 
 
+def create_app_without_lifespan() -> FastAPI:
+    """For tests, which manage the pool themselves."""
+    app = FastAPI(title="naxos")
+    app.include_router(router)
+    return app
+
+
 def _row(record: Any) -> dict[str, Any]:
     return {k: v for k, v in dict(record).items()}
 

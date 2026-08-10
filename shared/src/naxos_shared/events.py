@@ -74,7 +74,9 @@ class EventIn(BaseModel):
             raise ValueError(f"{self.type} is not a client-sendable event type")
         if self.type is EventType.USER_MESSAGE and not self.content:
             raise ValueError("user.message requires content")
-        if self.type is EventType.USER_TOOL_CONFIRMATION and not (self.call_hash and self.result):
+        if self.type is EventType.USER_TOOL_CONFIRMATION and not (
+            self.call_hash and self.result
+        ):
             raise ValueError("user.tool_confirmation requires call_hash and result")
 
 

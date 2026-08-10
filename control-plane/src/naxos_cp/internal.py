@@ -29,6 +29,13 @@ def create_app() -> FastAPI:
     return app
 
 
+def create_app_without_lifespan() -> FastAPI:
+    """For tests, which manage the pool themselves."""
+    app = FastAPI(title="naxos-internal")
+    app.include_router(router)
+    return app
+
+
 async def _authorize(conn, session_id: str, caller: str) -> Any:
     row = await conn.fetchrow(
         "SELECT s.*, e.service_account_email, e.session_bucket, a.disabled, "
