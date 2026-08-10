@@ -107,6 +107,9 @@ export default function Agents({
             <tr><th>name</th><th>version</th><th>kill switch</th><th /></tr>
           </thead>
           <tbody>
+            {agents.length === 0 && (
+              <tr><td className="empty" colSpan={4}>no agents yet — create one to get started.</td></tr>
+            )}
             {agents.map((agent) => (
               <tr key={agent.id}>
                 <td>{agent.name} <span className="muted mono">{agent.id}</span></td>

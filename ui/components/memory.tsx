@@ -98,6 +98,7 @@ export default function MemoryStores() {
                         className="danger"
                         onClick={async (e) => {
                           e.stopPropagation();
+                          if (!window.confirm(`Delete "${memory.path}"?`)) return;
                           await api(`/v1/memory_stores/${store.id}/memories/${memory.id}`, { method: "DELETE" });
                           refresh();
                         }}

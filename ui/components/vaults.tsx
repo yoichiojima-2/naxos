@@ -70,6 +70,7 @@ export default function Vaults() {
               <button
                 className="danger"
                 onClick={async () => {
+                  if (!window.confirm(`Delete vault "${vault.name}"? Agents using it lose its credentials.`)) return;
                   await api(`/v1/vaults/${vault.id}/archive`, { json: {} });
                   setVaults((prev) => prev.filter((v) => v.id !== vault.id));
                 }}
@@ -89,6 +90,7 @@ export default function Vaults() {
                       <button
                         className="danger"
                         onClick={async () => {
+                          if (!window.confirm(`Delete credential "${cred.name}"?`)) return;
                           await api(`/v1/vaults/${vault.id}/credentials/${cred.id}`, { method: "DELETE" });
                           refresh();
                         }}

@@ -42,6 +42,7 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
   }
 
   async function action(id: string, verb: string) {
+    if (verb === "archive" && !window.confirm("Archive this deployment? Its schedule stops firing.")) return;
     await api(`/v1/deployments/${id}/${verb}`, { json: {} });
     refresh();
     if (verb === "run") showRuns(id);
@@ -92,6 +93,9 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
             <tr><th>name</th><th>cron</th><th>state</th><th /></tr>
           </thead>
           <tbody>
+            {deployments.length === 0 && (
+              <tr><td className="empty" colSpan={4}>no deployments yet — schedule an agent to run unattended.</td></tr>
+            )}
             {deployments.map((d) => (
               <DeploymentRow
                 key={d.id}
