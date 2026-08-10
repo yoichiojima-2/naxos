@@ -218,6 +218,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
           placeholder="Message the agent…"
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
+          onFocus={(e) => e.target.scrollIntoView({ block: "center" })}
           disabled={status === "terminated"}
         />
         <button className="primary" onClick={send} disabled={status === "terminated"}>Send</button>

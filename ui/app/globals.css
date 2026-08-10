@@ -151,7 +151,7 @@ nav.tabs button.active {
 .table-wrap { overflow-x: auto; }
 
 .toast {
-  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: calc(28px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
   background: var(--danger); color: #fff; padding: 12px 24px;
   border-radius: 999px; font-size: 15px; font-weight: 500; cursor: pointer;
   box-shadow: 0 6px 24px rgba(30, 52, 72, 0.25); z-index: 10;
