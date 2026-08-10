@@ -55,25 +55,25 @@
   src: url("/fonts/IBMPlexMono-500.woff2") format("woff2");
 }
 :root {
-  --bg: #eff3f0;
+  --bg: #eef2f6;
   --panel: #ffffff;
-  --panel2: #e3eae5;
-  --border: #d2ddd5;
-  --ink: #263d38;
-  --text: #263d38;
-  --muted: #5e7570;
-  --faint: #8ba19a;
-  --accent: #2e756a;
-  --accent-soft: #ddece7;
-  --contrast: #263d38;
+  --panel2: #e1e9f1;
+  --border: #cfdbe7;
+  --ink: #1e3448;
+  --text: #1e3448;
+  --muted: #5a7186;
+  --faint: #8ba0b3;
+  --accent: #1f5f9e;
+  --accent-soft: #dce9f6;
+  --contrast: #1e3448;
   --ok: #2c7a4b;
   --ok-soft: #dff0e4;
   --warn: #a86a1f;
   --warn-soft: #f6ecd9;
   --danger: #b3402f;
   --danger-soft: #f7e3de;
-  --info: #2e756a;
-  --info-soft: #ddece7;
+  --info: #1f5f9e;
+  --info-soft: #dce9f6;
   --sans: "Figtree", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --display: "Fraunces", Georgia, serif;
   --serif: var(--display);
@@ -116,7 +116,7 @@ nav.tabs button {
 nav.tabs button:hover { color: var(--ink); }
 nav.tabs button.active {
   background: var(--panel); color: var(--accent); font-weight: 600;
-  box-shadow: 0 1px 5px rgba(38, 61, 56, 0.14);
+  box-shadow: 0 1px 5px rgba(30, 52, 72, 0.14);
 }
 
 .tab-info {
@@ -133,7 +133,7 @@ nav.tabs button.active {
 .panel {
   background: var(--panel); border: none; border-radius: 22px;
   padding: 28px; margin-bottom: 22px;
-  box-shadow: 0 2px 6px rgba(38, 61, 56, 0.05), 0 14px 36px rgba(38, 61, 56, 0.07);
+  box-shadow: 0 2px 6px rgba(30, 52, 72, 0.05), 0 14px 36px rgba(30, 52, 72, 0.07);
 }
 .panel .panel {
   background: var(--bg); border-radius: 16px; box-shadow: none; padding: 22px;
@@ -162,7 +162,7 @@ button.primary, button.ghost, button.danger {
   transition: background 0.18s, color 0.18s, opacity 0.18s;
 }
 button.primary { background: var(--accent); color: #fff; }
-button.primary:hover:not(:disabled) { background: #256157; }
+button.primary:hover:not(:disabled) { background: #1a4f85; }
 button.ghost:hover:not(:disabled) { background: var(--panel2); }
 button.danger { color: var(--danger); background: var(--danger-soft); }
 button.danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
