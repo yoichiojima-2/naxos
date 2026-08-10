@@ -3,7 +3,7 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "~> 6.0"
+      version = "~> 7.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -37,6 +37,7 @@ locals {
     "iamcredentials.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
+    "iap.googleapis.com",
   ]
   placeholder_image = "us-docker.pkg.dev/cloudrun/container/hello"
 }
@@ -316,9 +317,10 @@ resource "google_secret_manager_secret_iam_member" "database_url_api" {
 # carry the boundary instead.
 
 resource "google_cloud_run_v2_service" "api" {
-  name     = "naxos-api"
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  name        = "naxos-api"
+  location    = var.region
+  ingress     = "INGRESS_TRAFFIC_ALL"
+  iap_enabled = length(var.iap_members) > 0
 
   template {
     service_account = google_service_account.api.email
@@ -490,6 +492,14 @@ resource "google_cloud_run_v2_service_iam_member" "internal_scheduler_invoker" {
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "api_iap_invoker" {
+  count    = length(var.iap_members) > 0 ? 1 : 0
+  location = var.region
+  name     = google_cloud_run_v2_service.api.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-iap.iam.gserviceaccount.com"
 }
 
 resource "google_iap_web_cloud_run_service_iam_member" "members" {
