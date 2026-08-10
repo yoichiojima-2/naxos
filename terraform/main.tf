@@ -139,7 +139,7 @@ resource "google_secret_manager_secret_version" "database_url" {
 # --- audit ------------------------------------------------------------------
 
 resource "google_bigquery_dataset" "audit" {
-  dataset_id = "audit"
+  dataset_id = "naxos_audit"
   location   = var.region
   depends_on = [google_project_service.enabled]
 }
@@ -200,23 +200,23 @@ resource "google_bigquery_table" "tool_calls" {
 # --- service accounts -------------------------------------------------------
 
 resource "google_service_account" "api" {
-  account_id   = "sa-api"
+  account_id   = "naxos2-api"
   display_name = "naxos control plane"
 }
 
 resource "google_service_account" "egress" {
-  account_id   = "sa-egress"
+  account_id   = "naxos2-egress"
   display_name = "naxos egress proxy (sole reader of vault secrets)"
 }
 
 resource "google_service_account" "scheduler" {
-  account_id   = "sa-scheduler"
+  account_id   = "naxos2-scheduler"
   display_name = "naxos scheduler"
 }
 
 resource "google_service_account" "environment" {
   for_each     = local.environments
-  account_id   = "sa-env-${each.key}"
+  account_id   = "naxos2-env-${each.key}"
   display_name = "naxos sandbox: ${each.key}"
 }
 
@@ -363,6 +363,18 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "REGION"
         value = var.region
       }
+      env {
+        name  = "AUDIT_DATASET"
+        value = google_bigquery_dataset.audit.dataset_id
+      }
+      env {
+        name  = "SCHEDULER_SA"
+        value = google_service_account.scheduler.email
+      }
+      env {
+        name  = "EGRESS_SA"
+        value = google_service_account.egress.email
+      }
     }
   }
 
@@ -425,6 +437,18 @@ resource "google_cloud_run_v2_service" "internal" {
       env {
         name  = "REGION"
         value = var.region
+      }
+      env {
+        name  = "AUDIT_DATASET"
+        value = google_bigquery_dataset.audit.dataset_id
+      }
+      env {
+        name  = "SCHEDULER_SA"
+        value = google_service_account.scheduler.email
+      }
+      env {
+        name  = "EGRESS_SA"
+        value = google_service_account.egress.email
       }
       env {
         name  = "ENFORCE_CALLER_AUTH"
@@ -626,7 +650,7 @@ resource "google_cloud_scheduler_job" "reconcile" {
 
 resource "google_service_account" "deployer" {
   count        = var.github_repository != "" ? 1 : 0
-  account_id   = "sa-deployer"
+  account_id   = "naxos2-deployer"
   display_name = "naxos CI deployer"
 }
 
