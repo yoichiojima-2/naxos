@@ -1,3 +1,59 @@
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Archivo-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/Archivo-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/Archivo-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Archivo-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/IBMPlexMono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/IBMPlexMono-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Syne";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/Syne-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Syne";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/Syne-800.woff2") format("woff2");
+}
 :root {
   --bg: #f1f0ec;
   --panel: #ffffff;
@@ -18,7 +74,8 @@
   --danger-soft: #fadfdb;
   --info: #1f4fd8;
   --info-soft: #dfe6fa;
-  --sans: "Space Grotesk", "Inter", -apple-system, "Segoe UI", Arial, sans-serif;
+  --sans: "Archivo", "Inter", -apple-system, "Segoe UI", Arial, sans-serif;
+  --display: "Syne", var(--sans);
   --serif: var(--sans);
   --mono: "IBM Plex Mono", "SF Mono", ui-monospace, Menlo, monospace;
 }
@@ -38,13 +95,25 @@ main { max-width: 1120px; margin: 0 auto; padding: 48px 28px 112px; }
 
 header.top {
   display: flex; align-items: baseline; gap: 32px; flex-wrap: wrap;
-  padding-bottom: 24px; border-bottom: 3px solid var(--ink); margin-bottom: 36px;
+  padding-bottom: 24px; border-bottom: 3px solid var(--ink); margin-bottom: 0;
 }
 header.top h1 {
-  font-size: 38px; font-weight: 700; letter-spacing: -0.03em;
+  font-family: var(--display); font-size: 38px; font-weight: 800; letter-spacing: -0.02em;
   text-transform: uppercase; line-height: 1;
 }
 header.top h1 span { color: var(--accent); }
+
+.tab-info {
+  display: flex; align-items: baseline; gap: 16px;
+  background: var(--ink); color: var(--panel);
+  padding: 16px 20px; margin-bottom: 32px;
+  font-size: 15px; line-height: 1.55;
+}
+.tab-info span {
+  font-family: var(--display); color: var(--accent); font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.12em; font-size: 13px;
+  white-space: nowrap;
+}
 
 nav.tabs { display: flex; gap: 0; flex-wrap: wrap; }
 nav.tabs button {
