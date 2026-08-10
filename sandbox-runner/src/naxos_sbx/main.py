@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 import os
+from datetime import UTC, datetime
 
 from naxos_shared.events import EventType, StopReason
 
@@ -77,6 +78,7 @@ async def _heartbeat(channel: ControlChannel, stop: asyncio.Event) -> None:
 
 async def run_session(session_id: str) -> None:
     channel = ControlChannel(session_id)
+    started_at = datetime.now(UTC).isoformat()
     stop = asyncio.Event()
     heartbeat_task: asyncio.Task | None = None
     workspace: Workspace | None = None
@@ -142,6 +144,9 @@ async def run_session(session_id: str) -> None:
                 sdk_session_id=harness.sdk_session_id if harness else None,
                 cost_usd=harness.cost_usd if harness else None,
                 stop_reason=str(stop_reason),
+                run_id=harness.run_id if harness else None,
+                started_at=started_at,
+                num_turns=harness.num_turns if harness else 0,
             )
         except Exception:
             log.exception("control-plane checkpoint failed")

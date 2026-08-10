@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from typing import Any
@@ -28,15 +29,7 @@ CONTINUE_PROMPT = (
 PERMISSION_POLL_SECONDS = 2.0
 
 
-class PermissionDenied(Exception):
-    pass
-
-
 class BudgetReached(Exception):
-    pass
-
-
-class Killed(Exception):
     pass
 
 
@@ -60,6 +53,8 @@ class Harness:
         self.paused_call: dict[str, Any] | None = None
         self._client: ClaudeSDKClient | None = None
         self.interrupted = False
+        self.killed = False
+        self.num_turns = 0
 
     async def interrupt(self) -> None:
         """Stop the in-flight turn. Called by the queue watcher mid-run."""
@@ -90,6 +85,10 @@ class Harness:
         decision = verdict.get("decision")
 
         if decision == "pending":
+            # Raising here does not stop the SDK turn (hook exceptions are
+            # swallowed and the CLI falls back to its own permission system,
+            # observed on GCP). Deny the call and interrupt the turn instead;
+            # run() sees paused_call and reports requires_action.
             self.paused_call = {
                 "call_hash": digest,
                 "tool_name": tool_name,
@@ -107,8 +106,18 @@ class Harness:
                 },
             )
             await self.flush()
-            self.stop_reason = StopReason.REQUIRES_ACTION
-            raise PermissionDenied(digest)
+            if self._client is not None:
+                asyncio.create_task(self._client.interrupt())
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "This call requires human approval. Execution is paused; "
+                        "do not retry or work around it."
+                    ),
+                }
+            }
 
         allowed = decision == "allow"
         self._queue(
@@ -122,8 +131,9 @@ class Harness:
             },
         )
         if verdict.get("killed"):
-            self.stop_reason = StopReason.END_TURN
-            raise Killed(tool_name)
+            self.killed = True
+            if self._client is not None:
+                asyncio.create_task(self._client.interrupt())
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -158,19 +168,19 @@ class Harness:
                 for prompt in prompts:
                     if self._budget_exhausted():
                         return StopReason.BUDGET_REACHED
-                    if self.interrupted:
+                    if self.interrupted or self.killed:
                         return StopReason.END_TURN
                     await client.query(prompt)
                     try:
                         await self._drain(client)
-                    except PermissionDenied:
-                        return StopReason.REQUIRES_ACTION
                     except BudgetReached:
                         return StopReason.BUDGET_REACHED
-                    except Killed:
-                        return StopReason.END_TURN
                     finally:
                         await self.flush()
+                    if self.paused_call is not None:
+                        return StopReason.REQUIRES_ACTION
+                    if self.killed:
+                        return StopReason.END_TURN
             finally:
                 self._client = None
         return StopReason.END_TURN
@@ -202,6 +212,7 @@ class Harness:
                         )
             elif isinstance(message, ResultMessage):
                 self.cost_usd = float(message.total_cost_usd or self.cost_usd)
+                self.num_turns += int(message.num_turns or 0)
                 self._queue(
                     EventType.SPAN_MODEL_REQUEST_END,
                     {

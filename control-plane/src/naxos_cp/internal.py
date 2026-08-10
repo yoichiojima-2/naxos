@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import secrets
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -247,6 +248,9 @@ class Checkpoint(BaseModel):
     cost_usd: float | None = None
     stop_reason: StopReason = StopReason.END_TURN
     terminated: bool = False
+    run_id: str | None = None
+    started_at: datetime | None = None
+    num_turns: int = 0
 
 
 @router.post("/sessions/{session_id}/checkpoint")
@@ -254,7 +258,8 @@ async def checkpoint(
     session_id: str, body: Checkpoint, caller: str = Depends(caller_service_account)
 ) -> dict:
     async with db.transaction() as conn:
-        await _authorize(conn, session_id, caller)
+        row = await _authorize(conn, session_id, caller)
+        previous_cost = float(row["cost_usd"])
         await conn.execute(
             "UPDATE sessions SET sdk_session_id = COALESCE($2, sdk_session_id), "
             "  cost_usd = COALESCE($3, cost_usd), updated_at = now() WHERE id = $1",
@@ -273,6 +278,22 @@ async def checkpoint(
         )
         if pending and not body.terminated:
             await wake.wake(conn, session_id)
+
+    created_by = row["created_by"] or ""
+    audit.log_run(
+        run_id=body.run_id or f"{session_id}-{int(datetime.now(UTC).timestamp())}",
+        session_id=session_id,
+        agent_id=row["agent_id"],
+        environment_id=row["environment_id"],
+        principal=created_by,
+        trigger_type="deployment" if created_by.startswith("deployment:") else "interactive",
+        started_at=body.started_at or row["updated_at"],
+        status=str(status),
+        stop_reason=str(body.stop_reason),
+        num_turns=body.num_turns,
+        cost_usd=(body.cost_usd or previous_cost) - previous_cost,
+        model=row["model"],
+    )
     return {"ok": True}
 
 

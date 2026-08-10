@@ -90,6 +90,9 @@ class ControlChannel:
         cost_usd: float | None,
         stop_reason: str,
         terminated: bool = False,
+        run_id: str | None = None,
+        started_at: str | None = None,
+        num_turns: int = 0,
     ) -> None:
         await self._post(
             "/checkpoint",
@@ -99,5 +102,8 @@ class ControlChannel:
                 "cost_usd": cost_usd,
                 "stop_reason": stop_reason,
                 "terminated": terminated,
+                "run_id": run_id,
+                "started_at": started_at,
+                "num_turns": num_turns,
             },
         )
