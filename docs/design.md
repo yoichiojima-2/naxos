@@ -1,0 +1,279 @@
+# naxos v2 — Claude Managed Agents on Google Cloud
+
+Design document. Status: approved 2026-08-10. All project documentation is written in English.
+
+## 1. Context and goal
+
+naxos v1 was a Phase-1 walking skeleton: `roles.json` "tenants", per-role Cloud Run Jobs fired by Cloud Scheduler, a single-table audit log, and a Next.js chat UI behind IAP. It proved the loop (Scheduler → Cloud Run Job → Claude Agent SDK → Slack) with audit and a kill switch. That code is preserved on the `poc` branch and is reference-only.
+
+v2 rebuilds the platform greenfield as a **faithful Google Cloud implementation of Claude Managed Agents (CMA)** — the same object model, REST surface, and event vocabulary as `platform.claude.com/docs/en/managed-agents`, running entirely inside the org's GCP boundary. The platform's original reason to exist is unchanged (see CLAUDE.md): the data boundary (Vertex-only model exit), internal-system integration inside that boundary, and execution-level governance that the Claude app cannot provide.
+
+Decisions fixed with the owner:
+
+- **Faithful API clone** of the CMA REST surface and `{domain}.{action}` event types.
+- **Container per session**: each session's agent loop + tools run in an isolated container.
+- **V1 scope**: agents / environments / sessions / events core, scheduled deployments, permission policies (`always_ask` approval), vaults **with a real egress proxy** (full CMA credential fidelity — credentials never enter the sandbox), memory stores. Outcomes, multiagent, and webhooks are out of v1.
+- **Cold resume accepted**: idle sessions release their container; the next event relaunches it (CMA's `rescheduling` status). UI shows a "waking up" state.
+- **Environments are Terraform-provisioned**: the API only registers rows; the per-environment SA / sandbox Job / bucket come from a `for_each` over `terraform/environments.json`. The control plane never holds IAM-admin.
+
+## 2. Core design stance
+
+**Sessions are durable state, not processes.** A session lives in Postgres (metadata, event log) and GCS (SDK transcript, workspace). A container — one Cloud Run Job execution — exists only while the session is actively processing events. When the queue drains, the sandbox checkpoints to GCS and exits; the next incoming event relaunches it. This is the only shape that satisfies both CMA-style per-session isolation and scale-to-zero under the ¥100k/month cap.
+
+## 3. Components
+
+| Component | GCP resource | Scaling | SA |
+|---|---|---|---|
+| `naxos-api` — /v1 REST + SSE, serves the UI static export | Cloud Run Service, IAP directly on Cloud Run (no LB) | min=0, request timeout 3600s (SSE) | `sa-api` |
+| `naxos-internal` — sandbox↔control-plane channel, scheduler targets, reconciler (same image as api, entrypoint flag) | Cloud Run Service, internal ingress, IAM auth | min=0 | `sa-api` |
+| `naxos-egress` — credential-substituting proxy for MCP/HTTP egress | Cloud Run Service, internal ingress, IAM auth | min=0 | `sa-egress` (sole secretAccessor on vault secrets) |
+| `naxos-sbx-{env}` — session sandbox: Claude Agent SDK loop + tools; one Job per environment, one execution per session wake | Cloud Run Job (`max_retries=0`, task timeout 3600s, self-checkpoint at ~55 min) | zero when idle | `sa-env-{env}` |
+| Deployment cron `naxos-deploy-{id}`; reconciler tick (1/min) | Cloud Scheduler | — | `sa-scheduler` |
+| State | Cloud SQL Postgres `db-g1-small`, private IP, Direct VPC egress from Cloud Run | always-on (the one fixed cost) | — |
+| Workspaces | GCS bucket per environment `naxos2-sess-{env}` | — | env SA + `sa-api` only |
+| Audit | BigQuery `audit.runs` + `audit.tool_calls`, written **only by the control plane** | — | `sa-api` |
+| UI — agents, session chat/timeline, approval inbox, deployments, vaults, memory, kill switch | Next.js static export baked into the api image | — | — |
+
+The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json` (the v1 `roles.json` pattern, re-derived). Many agents can share an environment.
+
+## 4. Session lifecycle and event flow
+
+Statuses: `idle | running | rescheduling | terminated`, with `stop_reason` on idle: `end_turn | requires_action | budget_reached | retries_exhausted`.
+
+```
+create ──▶ [idle]  (no container; workspace created lazily in GCS)
+   │   user event → INSERT session_events (per-session seq; processed_at NULL = queued)
+   ▼   no live lease? jobs.run(naxos-sbx-{env}, args=["--session", id])
+[rescheduling]
+   ▼   sandbox boot:
+[running]   1. OIDC ID token → POST /internal/sessions/{id}/claim   (lease)
+            2. GET /internal/sessions/{id}/config   (resolved agent version, tools,
+               permission policies, egress routes, memory snapshot)
+            3. restore gs://…/{id}/transcript.jsonl + ws/ ; write memory files
+            4. ClaudeSDKClient(resume=sdk_session_id, cwd=ws, mcp_servers=…,
+               can_use_tool=permission_hook)  — Vertex AI backend
+            loop: long-poll /internal/sessions/{id}/queue?wait=25
+                  (queued events + control signals: interrupt / kill / terminate)
+                  → SDK turn → batch-POST agent.*/span.* events to /internal
+   ▼   queue empty → emit session.status_idle(stop_reason) → linger ≈120s
+[idle]  new event during linger → back to [running] warm
+        linger expires → checkpoint (transcript + ws delta + memory writeback)
+        → release lease → exit → cost 0
+   ▼   next user event → relaunch (cold resume, ~10–40s)
+[terminated]  explicit terminate; live sandbox told over the control channel
+```
+
+**Client-facing streaming.** `GET /v1/sessions/{id}/events?stream=sse&after={seq}` — the API polls `session_events` every 1s, emits SSE frames with `id:{seq}`, honors `Last-Event-ID` for reconnect replay, sends a ping comment every 15s. This is v1's `EventStream` re-derived but DB-backed: replay survives instance loss, so no Cloud Run session affinity is needed anywhere. LISTEN/NOTIFY is a later latency optimization, deliberately not built in v1.
+
+**Interrupt.** `user.interrupt` is inserted as an event and surfaced immediately on the control channel; the sandbox calls `client.interrupt()`. Jumps the queue, per CMA.
+
+**Permission pause (`always_ask`).** Inside the SDK `can_use_tool` hook:
+
+1. Check the kill switch (`agents.disabled`; 15s cache + control-channel push).
+2. Match the tool against the agent version's permission policy. `always_allow` → allow, record the decision in audit.
+3. `always_ask` → look up `tool_confirmations` by `(session_id, tool_use_id)`. Stored decision → return it (this is what makes resume work).
+4. No decision → insert a pending row, emit `session.status_idle(stop_reason=requires_action)`, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, **checkpoint and exit** — a blocked container costs nothing.
+5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox; SDK resume re-invokes `can_use_tool` for the pending tool_use, and step 3 answers instantly.
+
+Step 5 depends on the SDK re-asking permission for a pending tool_use after `resume` — spiked before anything else (risk R1). Fallback if it does not replay: on deny, resume and inject a synthetic denied tool_result; on allow, resume with a system reminder to re-issue the call.
+
+**Budget.** The harness checks `cost_usd + accrued >= budget_usd` before dispatching each queued user event and after each model response; on breach it interrupts, emits `session.status_idle(stop_reason=budget_reached)`, checkpoints, exits. Deviation from CMA: this is a post-response check (the SDK has no pre-request hook), so worst-case overshoot is one model call. `PATCH /v1/sessions/{id}` raises the budget; the next event resumes the session.
+
+**Crash safety.** The sandbox heartbeats its lease every 30s. A 1-minute reconciler relaunches sessions that have queued events and an expired lease, up to `MAX_RETRIES=3` per batch, then emits `session.error` + `session.status_idle(stop_reason=retries_exhausted)`. The Job never self-retries (`max_retries=0`); the sandbox self-checkpoints at ~55 min and exits cleanly so a fresh execution can continue.
+
+## 5. Vault egress proxy (full CMA fidelity)
+
+Credentials never enter the sandbox:
+
+- `POST /v1/vaults/{id}/credentials` writes the secret value straight to Secret Manager. Postgres stores metadata and the secret ref only; values are write-only and never returned by the API.
+- Agent config declares MCP servers by their real URL. The sandbox's resolved config rewrites MCP URLs to `naxos-egress` with an opaque route token. The proxy authenticates the caller (OIDC; the SA must match the session's environment), resolves session → vault_ids → credential matched by target URL, injects the Authorization/header, and forwards to the real server.
+- Env-var-style credentials for CLIs: the sandbox env carries an opaque placeholder; the proxy substitutes it in request headers for declared HTTP targets routed through it. Transparent interception of arbitrary egress is out of scope — bash traffic not routed through the proxy simply has no credential. This limitation is documented, not hidden.
+- Only `sa-egress` holds `secretAccessor` on vault secrets. Environment SAs hold none.
+
+## 6. Data model
+
+### Postgres (control-plane state)
+
+```sql
+environments (id, name, service_account_email, sandbox_job_name, session_bucket,
+              cpu, memory, archived_at, created_at)
+
+agents (id, name, environment_id, latest_version, disabled, archived_at,
+        created_at, updated_at)
+
+agent_versions (agent_id, version, PRIMARY KEY (agent_id, version),
+        instructions, model, tools jsonb, permission_policy jsonb,
+        vault_ids text[], memory_store_ids text[],
+        default_budget_usd numeric, max_turns int, created_by, created_at)
+
+sessions (id, agent_id, agent_version, overrides jsonb, environment_id,
+        status CHECK IN ('idle','running','rescheduling','terminated'),
+        stop_reason, budget_usd, cost_usd DEFAULT 0,
+        vault_ids text[], memory_store_ids text[], resources jsonb,
+        sdk_session_id, lease_id uuid, lease_expires_at, execution_name,
+        retry_count DEFAULT 0, last_event_seq DEFAULT 0,
+        created_by, created_at, updated_at, terminated_at)
+
+session_events (id bigserial, session_id, seq, UNIQUE (session_id, seq),
+        type, payload jsonb,        -- ≤64KB; oversize truncated, full copy in transcript
+        principal, processed_at,    -- NULL on user.* rows = still queued
+        created_at)
+        -- seq assigned under SELECT … FOR UPDATE on the session row
+
+tool_confirmations (id, session_id, tool_use_id, UNIQUE (session_id, tool_use_id),
+        tool_name, input jsonb,
+        status CHECK IN ('pending','allowed','denied','expired'),
+        requested_at, expires_at, decided_by, decided_at)
+
+deployments (id, agent_id, agent_version,   -- NULL = latest at fire time
+        name, cron, timezone DEFAULT 'Asia/Tokyo', initial_events jsonb,
+        budget_usd, paused DEFAULT false, archived_at, scheduler_job_name,
+        created_by, created_at)
+
+deployment_runs (id, deployment_id, session_id,
+        status CHECK IN ('queued','running','succeeded','failed'),
+        error_type,    -- session_error|budget_reached|timeout|retries_exhausted|infra_error
+        fired_at, finished_at)
+
+vaults (id, name, archived_at, created_at)
+vault_credentials (id, vault_id, name,
+        type,          -- 'env' | 'header'
+        secret_ref,    -- Secret Manager resource name; value NEVER in Postgres
+        target jsonb,  -- e.g. {"mcp_server": "github"} or {"host": "api.example.com"}
+        created_at)
+
+memory_stores (id, name, created_at)
+memories (id, store_id, path, UNIQUE (store_id, path),
+        content,       -- ≤64KB; Postgres is source of truth
+        updated_by,    -- principal or 'agent:{session_id}'
+        created_at, updated_at)
+        -- mounted as ws/memory/{store}/…, written back at checkpoint
+        -- versioning deferred (documented)
+```
+
+### Storage split
+
+- **Postgres** — all queryable control-plane state (above).
+- **GCS** (`naxos2-sess-{env}`) — `sessions/{id}/transcript.jsonl` (SDK session file) and `sessions/{id}/ws/**` (workspace).
+- **BigQuery `audit`** — append-only governance record:
+
+```
+audit.runs(run_id, session_id, agent_id, environment_id, deployment_run_id,
+           trigger_type,        -- interactive | deployment | api
+           principal, started_at, ended_at, status, stop_reason,
+           num_turns, input_tokens, output_tokens, cost_usd, approx_cost_jpy, model)
+           -- a "run" = one wake-to-idle processing burst of a session
+
+audit.tool_calls(run_id, session_id, agent_id, principal, ts, tool_use_id,
+           tool_name, args_redacted,
+           decision,            -- auto_allowed | user_allowed | user_denied | killed
+           result_status, latency_ms, error)
+```
+
+## 7. API surface (v1)
+
+All under IAP; the principal is the verified IAP JWT email. Programmatic clients authenticate as IAP-authorized service accounts (ID token). Deliberate deviation: no API keys.
+
+```
+POST   /v1/agents                          create (version 1)
+GET    /v1/agents · GET /v1/agents/{id}    list / get (?version=)
+POST   /v1/agents/{id}/versions            new immutable version (CMA "update = new version")
+POST   /v1/agents/{id}/archive
+PATCH  /v1/agents/{id}                     {disabled: bool}    -- kill switch (explicit deviation)
+
+POST   /v1/environments                    register; 409 until Terraform-provisioned (deviation)
+GET    /v1/environments[/{id}] · POST /v1/environments/{id}/archive
+
+POST   /v1/sessions                        {agent: {id, version?} | agent_with_overrides,
+                                            initial_events?, budget?, vault_ids?,
+                                            memory_store_ids?, resources?}
+GET    /v1/sessions[?agent_id&status] · GET /v1/sessions/{id}
+PATCH  /v1/sessions/{id}                   raise budget
+POST   /v1/sessions/{id}/terminate
+POST   /v1/sessions/{id}/events            user.message | user.interrupt |
+                                           user.tool_confirmation | user.custom_tool_result
+GET    /v1/sessions/{id}/events?after={seq}&limit=      list (cursor = seq)
+GET    /v1/sessions/{id}/events?stream=sse&after={seq}  SSE (Last-Event-ID honored)
+
+POST   /v1/deployments · GET /v1/deployments[/{id}]
+POST   /v1/deployments/{id}/pause | /unpause | /archive | /run
+GET    /v1/deployments/{id}/runs
+
+POST   /v1/vaults · GET /v1/vaults[/{id}] · POST /v1/vaults/{id}/archive
+POST   /v1/vaults/{id}/credentials         write-only; value → Secret Manager directly
+GET    /v1/vaults/{id}/credentials         metadata only
+DELETE /v1/vaults/{id}/credentials/{cid}
+
+POST   /v1/memory_stores · GET /v1/memory_stores[/{id}]
+POST   /v1/memory_stores/{id}/memories · GET (list) · GET/PUT/DELETE …/memories/{mid}
+```
+
+Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / memory_writeback`, plus `deployments/{id}/fire` and `reconcile`.
+
+Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
+
+Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks in v1.
+
+## 8. Security model
+
+- **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else. No BigQuery, no secrets, no other environment's anything. A fully prompt-injected agent is still boxed by IAM.
+- **Sandbox ↔ control-plane auth**: OIDC ID token of the env SA → Cloud Run IAM on `naxos-internal`, then an app-level check that the token's SA equals `environments.service_account_email` for the session being touched. No bearer tokens to mint or leak.
+- **Tool restriction**: tools not in the agent version's `tools` list are never passed to the SDK. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
+- **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside `can_use_tool` before every tool call — the v1 gap fixed); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
+- **Audit**: all agent events flow through `naxos-internal`, so the control plane is the single audit writer — the sandbox cannot forge or skip audit rows. `principal` is the IAP email for user-triggered turns, `deployment:{id}` for cron.
+- **IAP** directly on Cloud Run with the custom OAuth client (no-org project); the app verifies the IAP JWT.
+
+## 9. Cost model (¥100k cap / ¥70k target)
+
+| Item | Sizing | ¥/month |
+|---|---|---|
+| Cloud SQL Postgres | db-g1-small, 10GB SSD, no HA, private IP | ~5,500 |
+| naxos-api / internal / egress | all min=0 | ~1,000–2,000 |
+| Sandbox executions | 1 vCPU / 2GiB ≈ ¥15 per active-hour; generous 150h/mo | ~2,500 |
+| Scheduler / GCS / BQ streaming / Secret Manager / logs | | ~1,000 |
+| **Infra total** | | **≈ ¥10k** |
+| Model (Vertex) headroom | | ~¥60–90k |
+
+Runaway protection: a control-plane global cap on concurrent sandbox executions (default 5). The idle-linger window (~120s) is the main sandbox cost knob. If cold-resume chat UX hurts, `naxos-api` min=1 adds ~¥4k — still inside target.
+
+## 10. Repo layout
+
+```
+control-plane/     Python 3.13 + uv + FastAPI; entrypoints: api | internal; alembic migrations
+sandbox-runner/    Python + claude-agent-sdk: main, harness, permissions, budget,
+                   workspace, control_channel, memory_sync
+egress-proxy/      credential-substituting proxy (FastAPI/httpx)
+shared/            pydantic event/config models used by all three
+ui/                Next.js static export, baked into the control-plane image
+terraform/         one root module; environments.json → for_each (SA, Job, bucket, IAM)
+docs/              design docs (English)
+.github/workflows/ lint/test + WIF deploy loop
+```
+
+## 11. Build order
+
+Each phase ends deployed and demoable.
+
+0. **This document**; old code moved to the `poc` branch.
+1. **Spike (blocking)**: Agent SDK resume semantics — pending tool_use replay through `can_use_tool`, transcript restore from a relocated directory, Vertex backend availability in asia-northeast1/global (resolves the model-region open issue).
+2. **Walking skeleton**: Terraform base (SQL, buckets, BQ, SAs, services, one `default` environment Job) + agents CRUD (versioned) + sessions + events + the full loop: create session → job launch → SDK turn on Vertex → events → SSE → idle checkpoint → resume. Audit (`runs` + `tool_calls`) and kill switch from day one. Reconciler.
+3. **Permissions + budget + interrupt**: `always_ask` round-trip including pause/release/resume, budget enforcement, minimal UI (session timeline + approval inbox).
+4. **Deployments**: Scheduler-per-deployment, `deployment_runs` with error types, pause/unpause/run-now, UI tab.
+5. **Vaults + egress proxy**: Secret Manager write path, MCP URL rewriting, header substitution, per-vault IAM.
+6. **Memory stores**: CRUD + mount/writeback + UI.
+7. **Hardening**: second environment (proves the fan-out), budget alerts, cost review at the phase gate.
+
+## 12. Verification
+
+- Phase 1 spike has an explicit pass/fail: resume replays the pending tool_use, or the fallback is adopted and documented here.
+- Every phase ships to the project and runs its end-to-end demo (Phase 2: curl create agent → session → SSE shows `agent.message` → `audit.runs` row exists → flip `disabled` → event rejected).
+- Approval flow: `always_ask` tool → container exits during the pause (verify zero cost while pending) → confirm via UI → session resumes and completes.
+- Deployments: cron fires → `deployment_runs` row → session completes; error path exercised by archiving the agent.
+- Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.
+
+## 13. Risks and open items
+
+- **R1** — SDK resume-through-pending-tool_use: spiked first; fallback documented in §4.
+- **R2** — Claude on Vertex in asia-northeast1 (or the global endpoint): resolved during the spike; data-residency implications surfaced explicitly, never silently decided. The Anthropic API-key exception stays until Vertex works.
+- Egress proxy covers MCP + declared HTTP targets only; arbitrary bash egress is credential-less (documented limitation).
+- Memory versioning, outcomes, multiagent, webhooks: deferred; schema leaves room.
