@@ -65,7 +65,18 @@ export default function Vaults() {
         <div className="panel" style={{ background: "var(--panel2)" }} key={vault.id}>
           <div className="row between">
             <strong>{vault.name}</strong>
-            <span className="muted mono">{vault.id}</span>
+            <span className="row">
+              <span className="muted mono">{vault.id}</span>
+              <button
+                className="danger"
+                onClick={async () => {
+                  await api(`/v1/vaults/${vault.id}/archive`, { json: {} });
+                  setVaults((prev) => prev.filter((v) => v.id !== vault.id));
+                }}
+              >
+                Delete
+              </button>
+            </span>
           </div>
           <div className="table-wrap">
             <table>
