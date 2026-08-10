@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Agent, Session, SessionEvent } from "@/lib/api";
+import { api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 
 const BADGE: Record<string, string> = {
   idle: "idle",
@@ -79,7 +79,14 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState(session.status);
+  const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const source = useRef<EventSource | null>(null);
+
+  async function loadFiles() {
+    if (files) { setFiles(null); return; }
+    const result = await api<{ data: WorkspaceFile[] }>(`/v1/sessions/${session.id}/workspace`);
+    setFiles(result.data);
+  }
 
   useEffect(() => {
     const es = new EventSource(`/v1/sessions/${session.id}/events?stream=sse`);
@@ -136,9 +143,28 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
           <span className={`badge ${BADGE[status]}`}>{status}</span>
         </div>
         <div className="row">
+          <button className="ghost" onClick={loadFiles}>Files</button>
           <button className="ghost" onClick={interrupt}>Interrupt</button>
         </div>
       </div>
+      {files && (
+        <div className="panel" style={{ background: "var(--panel2)", marginBottom: 12 }}>
+          {files.length === 0 && <span className="muted">workspace is empty</span>}
+          {files.map((f) => (
+            <div className="row between" key={f.path}>
+              <a
+                className="mono"
+                href={`/v1/sessions/${session.id}/workspace/${f.path}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {f.path}
+              </a>
+              <span className="muted">{f.size} B</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="timeline">
         {events.map((event) => (
           <Event

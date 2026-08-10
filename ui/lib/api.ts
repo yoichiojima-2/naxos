@@ -75,3 +75,4 @@ export type Vault = { id: string; name: string };
 export type Credential = { id: string; name: string; type: string; target: Record<string, string> };
 export type MemoryStore = { id: string; name: string };
 export type Memory = { id: string; path: string; size?: number; content?: string };
+export type WorkspaceFile = { path: string; size: number };
