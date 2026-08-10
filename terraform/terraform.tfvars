@@ -1,1 +1,2 @@
-project_id = "naxos-503510"
+project_id        = "naxos-503510"
+github_repository = "yoichiojima-2/naxos"
