@@ -34,13 +34,14 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    from . import deployments, memory, vaults
+    from . import deployments, memory, vaults, workspace
 
     app = FastAPI(title="naxos", lifespan=lifespan)
     app.include_router(router)
     app.include_router(deployments.router)
     app.include_router(vaults.router)
     app.include_router(memory.router)
+    app.include_router(workspace.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
@@ -49,13 +50,14 @@ def create_app() -> FastAPI:
 
 def create_app_without_lifespan() -> FastAPI:
     """For tests, which manage the pool themselves."""
-    from . import deployments, memory, vaults
+    from . import deployments, memory, vaults, workspace
 
     app = FastAPI(title="naxos")
     app.include_router(router)
     app.include_router(deployments.router)
     app.include_router(vaults.router)
     app.include_router(memory.router)
+    app.include_router(workspace.router)
     return app
 
 
