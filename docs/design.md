@@ -280,7 +280,21 @@ Each phase ends deployed and demoable.
 - Deployments: cron fires → `deployment_runs` row → session completes; error path exercised by archiving the agent.
 - Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.
 
-## 13. Risks and open items
+## 13. GCP verification (2026-08-11)
+
+The end-to-end system was deployed to the project and verified live:
+
+- **Plain session**: create agent → session with `initial_events` → sandbox Job execution boots → SDK turn (Anthropic API) → `agent.message` → `session.status_idle(end_turn)` → cost and `sdk_session_id` checkpointed. Model reply round-trip ≈ 40s including cold start.
+- **Approval cycle**: `always_ask` agent paused at `agent.tool_use(awaiting_confirmation)` → `session.status_idle(requires_action)` → **the sandbox execution exited while waiting** (zero cost while pending) → `user.tool_confirmation(allow)` → fresh execution resumed the SDK session → the model re-issued the same call under a new `tool_use_id` → the stored decision (keyed by call hash) allowed it → command ran and completed. This validates the load-bearing design decision end to end.
+- **Audit**: `naxos_audit.runs` (one row per wake-to-idle burst) and `naxos_audit.tool_calls` (per-call decisions) populated by the control plane.
+- **Deviation found on GCP**: exceptions raised inside a `PreToolUse` hook are swallowed by the SDK (the CLI falls back to its own permission system). The pause is therefore implemented as deny + interrupt, with `paused_call` state driving `requires_action` — §4 updated accordingly by the code.
+
+Known issues (non-blocking):
+- Per-run `cost_usd` delta can go negative on resume bursts — the SDK cost counter resets per burst while the session accumulates; per-burst baseline accounting needed.
+- A call approved by a human is audit-labeled `auto_allowed`; should be `user_allowed`.
+- Cost parking: `naxos-state` Cloud SQL is stopped (`activation-policy NEVER`) and the reconcile scheduler paused when the platform is idle; restart with `gcloud sql instances patch naxos-state --activation-policy ALWAYS` + `gcloud scheduler jobs resume naxos-reconcile`.
+
+## 14. Risks and open items
 
 - **R1 — resolved.** Resume does replay the pending tool call; see §4.1. The design stands, with confirmations keyed on the call hash and the gate implemented as a `PreToolUse` hook.
 - **R2 — open, and it now has a hard finding.** Claude models are **not available in `asia-northeast1`** on Vertex: `getPublisherModel` returns "not found" for `claude-sonnet-5` / `claude-opus-5` in both `asia-northeast1` and `us-east5`, and resolves only on the **`global`** endpoint. A live `rawPredict` against `global` then returned **429 `RESOURCE_EXHAUSTED`** — the project's `global_online_prediction_requests_per_base_model` quota for `anthropic-claude-sonnet` is zero, so a quota-increase request is required before Vertex can serve any traffic.
