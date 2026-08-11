@@ -581,11 +581,23 @@ async def create_session_deployment(
     agent:{session_id}, so operators can see and govern what agents scheduled.
     """
     _validate_cron(body.cron)
+    if body.budget_usd is not None and body.budget_usd > config.MAX_AGENT_DEPLOYMENT_BUDGET_USD:
+        # Fired sessions take the deployment's budget as their hard cap, so an
+        # agent-chosen value must not be able to disable budget governance.
+        raise HTTPException(
+            422,
+            f"budget_usd may not exceed {config.MAX_AGENT_DEPLOYMENT_BUDGET_USD} for "
+            "agent-created deployments; leave it unset to use the agent's default",
+        )
     initial_events = [
         EventIn(type=EventType.USER_MESSAGE, content=[{"type": "text", "text": body.prompt}])
     ]
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
+        if row["disabled"]:
+            raise HTTPException(409, "agent is disabled (kill switch)")
+        # Lock the agent row so concurrent creates serialize and the cap holds.
+        await conn.execute("SELECT 1 FROM agents WHERE id = $1 FOR UPDATE", row["agent_id"])
         existing = await conn.fetchval(
             "SELECT count(*) FROM deployments WHERE agent_id = $1 AND archived_at IS NULL "
             "AND created_by LIKE 'agent:%'",
@@ -619,6 +631,8 @@ async def archive_session_deployment(
     read-only to agents: visible in the list, not archivable from the sandbox."""
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
+        if row["disabled"]:
+            raise HTTPException(409, "agent is disabled (kill switch)")
         record = await conn.fetchrow(
             "SELECT * FROM deployments WHERE id = $1 AND agent_id = $2 AND archived_at IS NULL",
             deployment_id,

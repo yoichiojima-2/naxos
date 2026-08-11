@@ -239,6 +239,20 @@ async def test_agent_schedule_validation_and_cap(client, internal_client, launch
     )
     assert bad_cron.status_code == 422
 
+    over_budget = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "x", "cron": "0 8 * * *", "prompt": "p", "budget_usd": 1e9},
+    )
+    assert over_budget.status_code == 422
+
+    await client.patch(f"/v1/agents/{agent['id']}", json={"disabled": True})
+    killed = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "x", "cron": "0 8 * * *", "prompt": "p"},
+    )
+    assert killed.status_code == 409
+    await client.patch(f"/v1/agents/{agent['id']}", json={"disabled": False})
+
     monkeypatch.setattr(cp_config, "MAX_AGENT_DEPLOYMENTS", 1)
     first = await internal_client.post(
         f"/internal/sessions/{session_id}/deployments",

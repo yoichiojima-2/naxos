@@ -12,23 +12,12 @@ policy and the kill switch.
 """
 
 import json
-import logging
 from typing import Any
 
-import httpx
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from .control import ControlChannel
-
-log = logging.getLogger(__name__)
-
-
-def _text(message: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": message}]}
-
-
-def _error(message: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": message}], "is_error": True}
+from .mcp_result import guarded, text
 
 
 class ScheduleTools:
@@ -43,7 +32,7 @@ class ScheduleTools:
             timezone=args.get("timezone") or "Asia/Tokyo",
             budget_usd=args.get("budget_usd"),
         )
-        return _text(
+        return text(
             f"Created deployment '{record['name']}' (id {record['id']}): cron "
             f"'{record['cron']}' in {record['timezone']}. Each firing starts a fresh "
             "session of this agent with the stored prompt — it will not have this "
@@ -54,27 +43,11 @@ class ScheduleTools:
 
     async def list(self, args: dict[str, Any]) -> dict[str, Any]:
         rows = (await self.channel.list_deployments()).get("data", [])
-        return _text(json.dumps(rows, indent=2))
+        return text(json.dumps(rows, indent=2))
 
     async def delete(self, args: dict[str, Any]) -> dict[str, Any]:
         record = await self.channel.archive_deployment(args["deployment_id"])
-        return _text(f"Archived deployment {record['id']}; its schedule no longer fires.")
-
-
-def _guarded(handler):
-    async def wrapped(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return await handler(args)
-        except httpx.HTTPStatusError as exc:
-            detail = exc.response.text[:500]
-            return _error(
-                f"control plane rejected the request ({exc.response.status_code}): {detail}"
-            )
-        except Exception as exc:
-            log.exception("schedule tool failed")
-            return _error(f"schedule operation failed: {exc}")
-
-    return wrapped
+        return text(f"Archived deployment {record['id']}; its schedule no longer fires.")
 
 
 def build_server(channel: ControlChannel):
@@ -112,14 +85,14 @@ def build_server(channel: ControlChannel):
             },
             "required": ["name", "cron", "prompt"],
         },
-    )(_guarded(tools_.create))
+    )(guarded(tools_.create, "schedule"))
 
     list_ = tool(
         "schedule_list",
         "List this agent's scheduled deployments (agent-created and operator-created), "
         "with ids, cron schedules, and prompts.",
         {"type": "object", "properties": {}},
-    )(_guarded(tools_.list))
+    )(guarded(tools_.list, "schedule"))
 
     delete = tool(
         "schedule_delete",
@@ -130,6 +103,6 @@ def build_server(channel: ControlChannel):
             "properties": {"deployment_id": {"type": "string"}},
             "required": ["deployment_id"],
         },
-    )(_guarded(tools_.delete))
+    )(guarded(tools_.delete, "schedule"))
 
     return create_sdk_mcp_server(name="schedules", version="1.0.0", tools=[create, list_, delete])

@@ -82,7 +82,7 @@ async def test_delete_archives_by_id(tools):
 
 
 async def test_control_plane_rejection_surfaces_as_tool_error():
-    from naxos_sbx.schedules import _guarded
+    from naxos_sbx.mcp_result import guarded
 
     async def refuse(args):
         raise httpx.HTTPStatusError(
@@ -91,7 +91,7 @@ async def test_control_plane_rejection_surfaces_as_tool_error():
             response=httpx.Response(403, text="operator-created deployment"),
         )
 
-    result = await _guarded(refuse)({})
+    result = await guarded(refuse, "schedule")({})
     assert result["is_error"]
     assert "403" in result["content"][0]["text"]
 
