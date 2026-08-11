@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { agentName, api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { BackIcon } from "@/components/icons";
 
 const BADGE: Record<string, string> = {
   idle: "idle",
@@ -41,9 +42,11 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   }
 
   return (
-    <div className="panel">
+    <>
       <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Sessions</strong>
+        <span className="muted">
+          {sessions === null ? "…" : `${sessions.length} session${sessions.length === 1 ? "" : "s"}`}
+        </span>
         <div className="row">
           <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ width: 220 }}>
             {agents.map((a) => (
@@ -55,8 +58,9 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
           </button>
         </div>
       </div>
-      <div className="table-wrap">
-        <table>
+      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="table-wrap">
+          <table>
           <thead>
             <tr><th>title</th><th>agent</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
           </thead>
@@ -87,8 +91,9 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
             })}
           </tbody>
         </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -167,7 +172,9 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
     <div className="panel">
       <div className="row between" style={{ marginBottom: 12 }}>
         <div className="row">
-          <button className="ghost" onClick={onBack}>&larr;</button>
+          <button className="ghost" onClick={onBack} aria-label="back" style={{ display: "inline-flex" }}>
+            <BackIcon />
+          </button>
           <strong>{session.title ?? session.id}</strong>
           <span className={`badge ${BADGE[status]}`}>{status}</span>
         </div>

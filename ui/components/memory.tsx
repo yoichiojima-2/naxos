@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, Memory, MemoryStore } from "@/lib/api";
+import { BackIcon } from "@/components/icons";
 
 export default function MemoryStores() {
   const [stores, setStores] = useState<MemoryStore[]>([]);
@@ -45,7 +46,14 @@ export default function MemoryStores() {
       <div className="panel">
         <div className="row between" style={{ marginBottom: 12 }}>
           <div className="row">
-            <button className="ghost" onClick={() => setEditing(null)}>&larr;</button>
+            <button
+              className="ghost"
+              onClick={() => setEditing(null)}
+              aria-label="back"
+              style={{ display: "inline-flex" }}
+            >
+              <BackIcon />
+            </button>
             <span className="mono">{editing.path}</span>
           </div>
           <button className="primary" onClick={save}>Save</button>
@@ -60,9 +68,9 @@ export default function MemoryStores() {
   }
 
   return (
-    <div className="panel">
+    <>
       <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Memory stores</strong>
+        <span className="muted">{stores.length} store{stores.length === 1 ? "" : "s"}</span>
         <div className="row">
           <input
             placeholder="new store name"
@@ -113,6 +121,6 @@ export default function MemoryStores() {
           </div>
         </div>
       ))}
-    </div>
+    </>
   );
 }

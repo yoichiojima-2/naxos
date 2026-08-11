@@ -1,14 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { api, Agent, Environment } from "@/lib/api";
-
-const MODELS = [
-  { id: "claude-opus-5", label: "Claude Opus 5" },
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
-  { id: "claude-fable-5", label: "Claude Fable 5" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-];
+import { api, Agent, AgentIn, Environment } from "@/lib/api";
+import AgentForm from "@/components/agent-form";
 
 export default function Agents({
   agents,
@@ -20,26 +14,12 @@ export default function Agents({
   onChange: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [model, setModel] = useState(MODELS[1].id);
-  const [environmentId, setEnvironmentId] = useState("");
-  const [instructions, setInstructions] = useState("");
-  const [askByDefault, setAskByDefault] = useState(true);
 
-  async function create() {
-    await api("/v1/agents", {
-      json: {
-        name,
-        model,
-        environment_id: environmentId || environments[0]?.id,
-        instructions: instructions || null,
-        permission_policy: { default: askByDefault ? "always_ask" : "always_allow", rules: [] },
-      },
-    });
+  async function create(body: AgentIn) {
+    const created = await api<Agent>("/v1/agents", { json: body });
     setShowForm(false);
-    setName("");
-    setInstructions("");
     onChange();
+    window.location.hash = `#agents/${created.id}`;
   }
 
   async function toggleKill(agent: Agent) {
@@ -47,89 +27,67 @@ export default function Agents({
     onChange();
   }
 
+  const envName = (id: string) => environments.find((e) => e.id === id)?.name ?? id;
+
   return (
-    <div className="panel">
+    <>
       <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Agents</strong>
+        <span className="muted">{agents.length} agent{agents.length === 1 ? "" : "s"}</span>
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New agent"}
         </button>
       </div>
 
       {showForm && (
-        <div className="panel">
-          <div className="grid2">
-            <div>
-              <label>name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div>
-              <label>model</label>
-              <select value={model} onChange={(e) => setModel(e.target.value)}>
-                {MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {environments.length > 1 && (
-            <>
-              <label>environment</label>
-              <select value={environmentId} onChange={(e) => setEnvironmentId(e.target.value)}>
-                {environments.map((env) => (
-                  <option key={env.id} value={env.id}>{env.name}</option>
-                ))}
-              </select>
-            </>
-          )}
-          <label>instructions</label>
-          <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} />
-          <label className="row" style={{ marginTop: 10 }}>
-            <input
-              type="checkbox"
-              style={{ width: "auto" }}
-              checked={askByDefault}
-              onChange={(e) => setAskByDefault(e.target.checked)}
-            />
-            require approval for every tool call (always_ask)
-          </label>
-          <div style={{ marginTop: 12 }}>
-            <button className="primary" onClick={create} disabled={!name}>Create</button>
-          </div>
-        </div>
+        <AgentForm
+          environments={environments}
+          submitLabel="Create agent"
+          onSubmit={create}
+          onCancel={() => setShowForm(false)}
+        />
       )}
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr><th>name</th><th>version</th><th>kill switch</th><th /></tr>
-          </thead>
-          <tbody>
-            {agents.length === 0 && (
-              <tr><td className="empty" colSpan={4}>no agents yet — create one to get started.</td></tr>
-            )}
-            {agents.map((agent) => (
-              <tr key={agent.id}>
-                <td>{agent.name} <span className="muted mono">{agent.id}</span></td>
-                <td>v{agent.latest_version}</td>
-                <td>
-                  {agent.disabled
-                    ? <span className="badge terminated">disabled</span>
-                    : <span className="badge running">active</span>}
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  <button
-                    className={agent.disabled ? "ghost" : "danger"}
-                    onClick={() => toggleKill(agent)}
-                  >
-                    {agent.disabled ? "Enable" : "Kill"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Environment</th><th>Version</th><th>Status</th><th /></tr>
+            </thead>
+            <tbody>
+              {agents.length === 0 && (
+                <tr><td className="empty" colSpan={5}>no agents yet — create one to get started.</td></tr>
+              )}
+              {agents.map((agent) => (
+                <tr
+                  key={agent.id}
+                  className="click"
+                  onClick={() => { window.location.hash = `#agents/${agent.id}`; }}
+                >
+                  <td>
+                    {agent.name}{" "}
+                    <span className="muted mono">{agent.id}</span>
+                  </td>
+                  <td className="muted">{envName(agent.environment_id)}</td>
+                  <td>v{agent.latest_version}</td>
+                  <td>
+                    {agent.disabled
+                      ? <span className="badge terminated">disabled</span>
+                      : <span className="badge running">active</span>}
+                  </td>
+                  <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className={agent.disabled ? "ghost" : "danger"}
+                      onClick={() => toggleKill(agent)}
+                    >
+                      {agent.disabled ? "Enable" : "Kill"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -40,12 +40,7 @@ export default function Vaults() {
   }
 
   return (
-    <div className="panel">
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Vaults</strong>
-        <span className="muted">values are write-only; the sandbox never sees them</span>
-      </div>
-
+    <>
       <div className="row" style={{ marginBottom: 16 }}>
         <input
           placeholder="new vault name"
@@ -131,6 +126,6 @@ export default function Vaults() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

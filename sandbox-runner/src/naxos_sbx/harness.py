@@ -150,6 +150,7 @@ class Harness:
             system_prompt=self.config.get("instructions"),
             model=self.config.get("model"),
             mcp_servers=self.config.get("mcp_servers") or {},
+            allowed_tools=self.config.get("tools") or [],
             max_turns=self.config.get("max_turns"),
             resume=self.sdk_session_id,
             hooks={"PreToolUse": [HookMatcher(hooks=[self._pre_tool_use])]},

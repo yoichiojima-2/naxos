@@ -55,9 +55,11 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
   }
 
   return (
-    <div className="panel">
+    <>
       <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Scheduled deployments</strong>
+        <span className="muted">
+          {deployments.length} deployment{deployments.length === 1 ? "" : "s"}
+        </span>
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New deployment"}
         </button>
@@ -87,8 +89,9 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
         </div>
       )}
 
-      <div className="table-wrap">
-        <table>
+      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="table-wrap">
+          <table>
           <thead>
             <tr><th>name</th><th>cron</th><th>state</th><th /></tr>
           </thead>
@@ -109,8 +112,9 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
