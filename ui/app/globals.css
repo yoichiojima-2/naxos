@@ -412,6 +412,29 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
 .viewer-body img { max-width: 100%; border-radius: var(--radius-sm); }
 .viewer-notice { color: var(--faint); font-size: 12.5px; margin-top: 8px; }
 
+.viewer-full {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; background: var(--bg);
+}
+.viewer-full-bar {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: var(--appbar-h); padding: 6px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.viewer-full-name {
+  flex: 1; min-width: 0; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.viewer-full-body {
+  flex: 1; min-height: 0; overflow: auto; padding: 16px;
+  display: flex; flex-direction: column;
+}
+.viewer-full-body .viewer-frame { flex: 1; min-height: 0; height: auto; }
+.viewer-full-body pre { max-height: none; }
+.viewer-full-body .md { width: 100%; max-width: 90ch; margin: 0 auto; }
+.viewer-full-body img { max-height: 100%; object-fit: contain; margin: auto; }
+@media (max-width: 560px) { .viewer-full-name { display: none; } }
+
 /* --- docs ----------------------------------------------------------------- */
 
 .docs p, .docs ul { font-size: 13.5px; line-height: 1.65; margin: 8px 0 0; max-width: 72ch; }

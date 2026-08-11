@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBlob, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
 import Markdown from "@/components/markdown";
 
@@ -84,12 +84,20 @@ export default function ArtifactViewer({
   const [missing, setMissing] = useState(false);
   const [showSource, setShowSource] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const fullscreenTrigger = useRef<HTMLButtonElement>(null);
+
+  const closeFullscreen = useCallback(() => {
+    setFullscreen(false);
+    fullscreenTrigger.current?.focus();
+  }, []);
 
   const kind = artifact ? kindOf(artifact.content_type, artifact.name) : null;
 
   useEffect(() => {
     let cancelled = false;
     setArtifact(null); setBlob(null); setText(null); setMissing(false); setShowSource(false);
+    setFullscreen(false);
     (async () => {
       try {
         const meta = await api<Artifact>(metaPath);
@@ -118,6 +126,18 @@ export default function ArtifactViewer({
     setBlobUrl(url);
     return () => { setBlobUrl(null); URL.revokeObjectURL(url); };
   }, [blob, kind]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeFullscreen(); };
+    window.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [fullscreen, closeFullscreen]);
 
   const body = useMemo(() => {
     if (!artifact || !kind) return null;
@@ -219,6 +239,18 @@ export default function ArtifactViewer({
 
   const hasSourceToggle =
     kind !== null && ["html", "markdown", "svg", "csv"].includes(kind) && text !== null;
+  const canFullscreen = kind !== null && kind !== "binary";
+
+  const sourceToggle = hasSourceToggle && (
+    <>
+      <button className={`chip ${showSource ? "" : "on"}`} onClick={() => setShowSource(false)}>
+        Preview
+      </button>
+      <button className={`chip ${showSource ? "on" : ""}`} onClick={() => setShowSource(true)}>
+        Source
+      </button>
+    </>
+  );
 
   async function copyLink() {
     const path = artifact!.share_token
@@ -257,15 +289,11 @@ export default function ArtifactViewer({
           {artifact.share_token && <span className="badge running">shared</span>}
         </div>
         <div className="row">
-          {hasSourceToggle && (
-            <>
-              <button className={`chip ${showSource ? "" : "on"}`} onClick={() => setShowSource(false)}>
-                Preview
-              </button>
-              <button className={`chip ${showSource ? "on" : ""}`} onClick={() => setShowSource(true)}>
-                Source
-              </button>
-            </>
+          {sourceToggle}
+          {canFullscreen && (
+            <button className="ghost" ref={fullscreenTrigger} onClick={() => setFullscreen(true)}>
+              Full screen
+            </button>
           )}
           <a className="mono" href={contentPath}>Download</a>
           <button className="ghost" onClick={copyLink}>{copied ? "Copied!" : "Copy link"}</button>
@@ -290,8 +318,27 @@ export default function ArtifactViewer({
         </dl>
       </div>
       <div className="panel viewer-body">
-        {body ?? <span className="muted">loading content…</span>}
+        {fullscreen
+          ? <span className="muted">showing full screen…</span>
+          : body ?? <span className="muted">loading content…</span>}
       </div>
+      {fullscreen && (
+        <div className="viewer-full" role="dialog" aria-modal="true" aria-label={artifact.name}>
+          <div className="viewer-full-bar">
+            <span className="mono viewer-full-name">{artifact.name}</span>
+            <span className="row">
+              {sourceToggle}
+              <a className="mono" href={contentPath}>Download</a>
+              <button className="ghost" autoFocus onClick={closeFullscreen}>
+                Exit full screen
+              </button>
+            </span>
+          </div>
+          <div className="viewer-body viewer-full-body">
+            {body ?? <span className="muted">loading content…</span>}
+          </div>
+        </div>
+      )}
     </>
   );
 }
