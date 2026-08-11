@@ -252,6 +252,15 @@ built-in tool rather than a shell command. The mechanism mirrors artifacts:
   without the grant has no BigQuery tools at all rather than tools that fail. That is
   the same list that drives the IAM grants, so the tool surface and the IAM boundary
   cannot drift apart.
+- **The audit dataset is read through authorized views, never through a grant.**
+  `naxos_audit` holds every tenant's rows and is never grantable to an environment SA.
+  Terraform republishes `runs` and `tool_calls` as authorized views in a separate
+  dataset, `naxos_audit_shared`, and grants those views access on the source: an
+  environment that lists `naxos_audit_shared` reads the platform's own history while
+  holding no permission on `naxos_audit` itself. Writes remain control-plane-only, so
+  the single-writer property is unaffected. The views select every row, so a second
+  environment needs a tenant filter in the view query before this dataset is opted
+  into more than once.
 - **Guardrails are enforced in code, not prompt**: only a single read-only
   `SELECT`/`WITH` runs (DML, DDL, and multi-statement scripts are refused before the
   API call); every query is dry-run first and refused if it would scan more than
@@ -406,7 +415,7 @@ Documented deviations from CMA: IAP auth instead of API keys; environments opera
 
 ## 8. Security model
 
-- **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a `bigquery_datasets` list in `environments.json` grants the SA `bigquery.jobUser` plus `dataViewer` on exactly the listed datasets (the audit dataset is never grantable) and is passed to the sandbox job as `BIGQUERY_DATASETS`, which is what decides whether the BigQuery tools exist at all — so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.
+- **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a `bigquery_datasets` list in `environments.json` grants the SA `bigquery.jobUser` plus `dataViewer` on exactly the listed datasets (`naxos_audit` itself is never grantable; the platform's own history is reachable only as authorized views in `naxos_audit_shared`, see §6 BigQuery) and is passed to the sandbox job as `BIGQUERY_DATASETS`, which is what decides whether the BigQuery tools exist at all — so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.
 - **Sandbox ↔ control-plane auth**: OIDC ID token of the env SA → Cloud Run IAM on `naxos-internal`, then an app-level check that the token's SA equals `environments.service_account_email` for the session being touched. No bearer tokens to mint or leak.
 - **Tool restriction**: a non-empty `tools` list on the agent version is enforced in the control plane's permission endpoint — a call to anything outside it is denied before any policy or confirmation lookup, and audited `not_allowed`. It cannot be enforced by the SDK: `allowed_tools` only pre-approves calls (measured, §4.1), and the CLI's built-ins cannot be withheld from the model at all, so the gate is the only place the restriction can actually hold. Entries may be globs, so `mcp__artifacts__*` names a whole built-in server. An empty list means unrestricted. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
 - **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
