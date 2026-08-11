@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
 import CountHeader from "@/components/list-header";
+import FilterInput from "@/components/filter-input";
 
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -65,12 +66,7 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
     <>
       <CountHeader count={filtered.length} of={artifacts.length} noun="artifact">
         {artifacts.length > 0 && (
-          <input
-            className="filter-input"
-            placeholder="Filter artifacts…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <FilterInput placeholder="Filter artifacts…" value={query} onChange={setQuery} />
         )}
       </CountHeader>
       <div className="panel">

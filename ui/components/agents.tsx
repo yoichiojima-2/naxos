@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, Agent, AgentIn, Environment } from "@/lib/api";
 import AgentForm from "@/components/agent-form";
 import CountHeader from "@/components/list-header";
+import FilterInput from "@/components/filter-input";
 
 export default function Agents({
   agents,
@@ -40,12 +41,7 @@ export default function Agents({
     <>
       <CountHeader count={filtered.length} of={agents.length} noun="agent">
         {agents.length > 0 && (
-          <input
-            className="filter-input"
-            placeholder="Filter agents…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <FilterInput placeholder="Filter agents…" value={query} onChange={setQuery} />
         )}
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New agent"}

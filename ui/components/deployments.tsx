@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { agentName, api, apiConfirm, Agent, Deployment, DeploymentRun } from "@/lib/api";
 import CountHeader from "@/components/list-header";
+import FilterInput from "@/components/filter-input";
 
 export default function Deployments({ agents }: { agents: Agent[] }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -73,12 +74,7 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
     <>
       <CountHeader count={filtered.length} of={deployments.length} noun="deployment">
         {deployments.length > 0 && (
-          <input
-            className="filter-input"
-            placeholder="Filter deployments…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <FilterInput placeholder="Filter deployments…" value={query} onChange={setQuery} />
         )}
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New deployment"}

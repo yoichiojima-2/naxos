@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
+import FilterInput from "@/components/filter-input";
 
 const MD_COMPONENTS: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
@@ -28,6 +29,11 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   const refresh = useCallback(async () => {
     const result = await api<{ data: Session[] }>("/v1/sessions?limit=200");
     setSessions(result.data);
+    setSelected((prev) => {
+      const ids = new Set(result.data.map((s) => s.id));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
   }, []);
 
   useEffect(() => {
@@ -56,18 +62,18 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   }
 
   const q = query.trim().toLowerCase();
-  const filtered = (sessions ?? []).filter((s) => {
+  const base = (sessions ?? []).filter((s) => {
     if (agentFilter && s.agent_id !== agentFilter) return false;
-    if (statusFilter && statusOf(s) !== statusFilter) return false;
     if (!q) return true;
     return `${s.title ?? ""} ${s.id} ${s.created_by ?? ""} ${agentName(agents, s.agent_id)}`
       .toLowerCase()
       .includes(q);
   });
+  const filtered = base.filter((s) => !statusFilter || statusOf(s) === statusFilter);
   const hasFilters = !!(q || agentFilter || statusFilter);
 
   const statusCounts = new Map<string, number>();
-  for (const s of sessions ?? []) {
+  for (const s of base) {
     const status = statusOf(s);
     statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
   }
@@ -79,9 +85,17 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   }
 
   const allSelected = !!filtered.length && filtered.every((s) => selected.has(s.id));
+  const hiddenSelected = selected.size - filtered.filter((s) => selected.has(s.id)).length;
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(filtered.map((s) => s.id)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const s of filtered) {
+        if (allSelected) next.delete(s.id);
+        else next.add(s.id);
+      }
+      return next;
+    });
   }
 
   const noun = selected.size === 1 ? "session" : "sessions";
@@ -125,7 +139,10 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
       <CountHeader count={sessions === null ? null : filtered.length} of={sessions?.length} noun="session">
         {selected.size > 0 ? (
           <>
-            <span className="muted">{selected.size} selected</span>
+            <span className="muted">
+              {selected.size} selected
+              {hiddenSelected > 0 && ` (${hiddenSelected} hidden by filters)`}
+            </span>
             <button className="ghost" onClick={bulkSetBudget}>Set budget</button>
             <button className="danger" onClick={bulkTerminate}>Terminate</button>
             <button className="ghost" onClick={() => setSelected(new Set())}>Clear</button>
@@ -145,11 +162,10 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
       </CountHeader>
       {!!sessions?.length && (
         <div className="row mb12">
-          <input
-            className="filter-input"
+          <FilterInput
             placeholder="Filter by title, id, or principal…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={setQuery}
           />
           <select
             className="filter-input"
@@ -162,17 +178,22 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
-          {STATUS_FILTERS.filter((status) => statusCounts.get(status)).map((status) => (
+          {STATUS_FILTERS.filter(
+            (status) => statusCounts.get(status) || status === statusFilter,
+          ).map((status) => (
             <button
               key={status}
               className={`chip ${statusFilter === status ? "on" : ""}`}
               onClick={() => setStatusFilter(statusFilter === status ? "" : status)}
             >
-              {status} {statusCounts.get(status)}
+              {status} {statusCounts.get(status) ?? 0}
             </button>
           ))}
           {hasFilters && (
             <button className="ghost" onClick={clearFilters}>Clear filters</button>
+          )}
+          {sessions?.length === 200 && (
+            <span className="muted">showing the newest 200 sessions</span>
           )}
         </div>
       )}
