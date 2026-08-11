@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, Agent } from "@/lib/api";
+import { api, Agent, Environment } from "@/lib/api";
+import Agents from "@/components/agents";
+import AgentDetail from "@/components/agent-detail";
 import Sessions from "@/components/sessions";
 import Deployments from "@/components/deployments";
 import Vaults from "@/components/vaults";
 import MemoryStores from "@/components/memory";
 import Docs from "@/components/docs";
 import {
+  AgentsIcon,
   DeploymentsIcon,
   DocsIcon,
   MemoryIcon,
@@ -15,12 +18,13 @@ import {
   VaultsIcon,
 } from "@/components/icons";
 
-const PAGES = ["sessions", "deployments", "vaults", "memory", "docs"] as const;
+const PAGES = ["sessions", "agents", "deployments", "vaults", "memory", "docs"] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page; id?: string };
 
 const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
   { page: "sessions", label: "Sessions", icon: SessionsIcon },
+  { page: "agents", label: "Agents", icon: AgentsIcon },
   { page: "deployments", label: "Deployments", icon: DeploymentsIcon },
   { page: "vaults", label: "Vaults", icon: VaultsIcon },
   { page: "memory", label: "Memory", icon: MemoryIcon },
@@ -30,6 +34,8 @@ const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
 const PAGE_INFO: Record<Page, string> = {
   sessions:
     "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
+  agents:
+    "Define who your agents are: instructions, model, tools, and permission policy. Every edit creates a new version, and the kill switch to disable an agent instantly lives here.",
   deployments:
     "Unattended scheduled runs. A cron schedule wakes an agent with a fixed prompt — no human in the loop, results land as sessions.",
   vaults:
@@ -51,12 +57,17 @@ function parseHash(hash: string): Route {
 export default function Page() {
   const [route, setRoute] = useState<Route>({ page: "sessions" });
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [environments, setEnvironments] = useState<Environment[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const result = await api<{ data: Agent[] }>("/v1/agents");
-    setAgents(result.data);
+    const [agentResult, envResult] = await Promise.all([
+      api<{ data: Agent[] }>("/v1/agents"),
+      api<{ data: Environment[] }>("/v1/environments"),
+    ]);
+    setAgents(agentResult.data);
+    setEnvironments(envResult.data);
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -95,6 +106,7 @@ export default function Page() {
   }
 
   const current = NAV.find((n) => n.page === route.page) ?? NAV[0];
+  const agentDetail = route.page === "agents" && route.id;
 
   return (
     <div className="shell">
@@ -121,11 +133,23 @@ export default function Page() {
           </button>
         </header>
         <main className="content">
-          <div className="page-head">
-            <h2>{current.label}</h2>
-            <p>{PAGE_INFO[route.page]}</p>
-          </div>
+          {!agentDetail && (
+            <div className="page-head">
+              <h2>{current.label}</h2>
+              <p>{PAGE_INFO[route.page]}</p>
+            </div>
+          )}
           {route.page === "sessions" && <Sessions agents={agents} />}
+          {route.page === "agents" && !route.id && (
+            <Agents agents={agents} environments={environments} onChange={refresh} />
+          )}
+          {agentDetail && (
+            <AgentDetail
+              agentId={route.id!}
+              environments={environments}
+              onChange={refresh}
+            />
+          )}
           {route.page === "deployments" && <Deployments agents={agents} />}
           {route.page === "vaults" && <Vaults />}
           {route.page === "memory" && <MemoryStores />}

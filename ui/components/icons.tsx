@@ -17,6 +17,14 @@ export const SessionsIcon = () => (
   </svg>
 );
 
+export const AgentsIcon = () => (
+  <svg {...base}>
+    <rect x="5" y="8" width="14" height="11" rx="2" />
+    <path d="M12 8V4M9 4h6" />
+    <path d="M9.5 13.5h.01M14.5 13.5h.01" strokeWidth={2.4} />
+  </svg>
+);
+
 export const DeploymentsIcon = () => (
   <svg {...base}>
     <circle cx="12" cy="12" r="8.5" />
