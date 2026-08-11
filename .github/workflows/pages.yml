@@ -25,9 +25,10 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # Pages must be enabled once by a repo admin (Settings → Pages → Source:
+      # "GitHub Actions"): creating the site needs administration:write, which
+      # GITHUB_TOKEN can never hold, so `enablement: true` always fails here.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/pages
