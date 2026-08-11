@@ -60,7 +60,7 @@ export default function MemoryStores() {
   }
 
   async function deleteStore(store: MemoryStore) {
-    const files = memories[store.id]?.length ?? 0;
+    const files = store.file_count ?? 0;
     if (
       await apiConfirm(
         `Delete store "${store.name}"${files ? ` and its ${files} file(s)` : ""}?`,

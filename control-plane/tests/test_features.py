@@ -356,6 +356,23 @@ async def test_memory_store_rename_and_delete(client):
     assert attached.status_code == 409
     assert agent["name"] in attached.json()["detail"]
 
+    detached = await client.post(
+        f"/v1/agents/{agent['id']}/versions",
+        json={
+            "environment_id": agent["environment_id"],
+            "name": agent["name"],
+            "model": agent["model"],
+            "instructions": agent["instructions"],
+        },
+    )
+    assert detached.json()["memory_store_ids"] == []
+    pinnable = await client.delete(f"/v1/memory_stores/{store['id']}")
+    assert pinnable.status_code == 409
+
+    await client.post(f"/v1/agents/{agent['id']}/archive")
+    freed = await client.delete(f"/v1/memory_stores/{store['id']}")
+    assert freed.json()["deleted"] is True
+
     deleted = await client.delete(f"/v1/memory_stores/{other['id']}")
     assert deleted.json() == {"id": other["id"], "deleted": True}
     assert (await client.delete(f"/v1/memory_stores/{other['id']}")).status_code == 404

@@ -65,8 +65,8 @@ async def rename_store(store_id: str, body: StoreIn, _: str = Depends(principal_
 async def delete_store(store_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         agents = await conn.fetch(
-            "SELECT a.name FROM agents a "
-            "JOIN agent_versions v ON v.agent_id = a.id AND v.version = a.latest_version "
+            "SELECT DISTINCT a.name FROM agents a "
+            "JOIN agent_versions v ON v.agent_id = a.id "
             "WHERE a.archived_at IS NULL AND $1 = ANY(v.memory_store_ids) ORDER BY a.name",
             store_id,
         )
