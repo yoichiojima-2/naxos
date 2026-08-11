@@ -2,7 +2,7 @@
 
 A Google Cloud implementation of Claude Managed Agents (CMA): a secure, multi-tenant agent platform that mirrors the CMA object model (Agent → Environment → Session → Events), REST surface, and event vocabulary — running entirely inside the org's GCP boundary. Always *available* rather than always running (scale-to-zero), with governance (audit / approval / kill switch) built into the platform itself.
 
-The v1 PoC lives on the `poc` branch (reference only). v2 is a greenfield rebuild; the full design is `docs/design.md` — read it before changing architecture-level code.
+The full design is `docs/design.md` — read it before changing architecture-level code.
 
 ## Why this exists — and what it must not become
 
@@ -48,7 +48,7 @@ Single GCP project, `asia-northeast1`. Components:
 - **Governance lives in the control plane and sandbox harness**, where agent config cannot bypass it. Tools are restricted by never passing them to the SDK, not by prompt.
 - **The control plane never holds IAM-admin.** Environments are Terraform-provisioned.
 - **Single project, `asia-northeast1`.** If a model needs another region, surface the data-residency implication — don't silently decide.
-- **Budget: ¥100k/month hard cap, ¥70k target.** Infra ≈ ¥10k (Cloud SQL is the only always-on cost); everything else scale-to-zero. Global cap on concurrent sandbox executions (default 5).
+- **Cost: everything scale-to-zero.** Cloud SQL is the only always-on cost (reference sizing in docs/design.md §9 targets ≈ ¥10k/month infra). Global cap on concurrent sandbox executions (default 5).
 
 ## Conventions
 
@@ -59,6 +59,6 @@ Single GCP project, `asia-northeast1`. Components:
 
 ## Open issues
 
-- R1 **resolved** (2026-08-10 spike, docs/design.md §4.1): resume replays the pending tool call, so the pause/release/resume design holds. Two corrections it forced: confirmations are keyed on `sha256(tool_name + canonical input)` because `tool_use_id` changes across resume, and the permission gate is a **`PreToolUse` hook** — `can_use_tool` is shadowed by `allowed_tools` entries and by the CLI's read-only auto-approval, so it cannot gate every call.
-- R2 **open, needs a decision**: Claude on Vertex resolves only on the **`global`** endpoint — not `asia-northeast1` (nor `us-east5`) — and this project's Vertex quota for it is currently zero (live `rawPredict` → 429 `RESOURCE_EXHAUSTED`). So (1) using Vertex means accepting `global` inference rather than regional residency, and (2) a quota-increase request gates removing the Anthropic API-key exception. Do not connect real internal data until this is settled.
+- R1 **resolved** (measured; docs/design.md §4.1): resume replays the pending tool call, so the pause/release/resume design holds. Two corrections it forced: confirmations are keyed on `sha256(tool_name + canonical input)` because `tool_use_id` changes across resume, and the permission gate is a **`PreToolUse` hook** — `can_use_tool` is shadowed by `allowed_tools` entries and by the CLI's read-only auto-approval, so it cannot gate every call.
+- R2 **open, needs a decision**: Claude on Vertex resolves only on the **`global`** endpoint — not `asia-northeast1` (nor `us-east5`) — and a fresh project's Vertex quota for it starts at zero (live `rawPredict` → 429 `RESOURCE_EXHAUSTED`). So (1) using Vertex means accepting `global` inference rather than regional residency, and (2) a quota-increase request gates removing the Anthropic API-key exception. Do not connect real internal data until this is settled.
 - Deferred: outcomes, multiagent, webhooks, memory versioning

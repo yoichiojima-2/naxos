@@ -4,7 +4,15 @@ A Google Cloud implementation of Claude Managed Agents: versioned agents, isolat
 
 - Design: [`docs/design.md`](docs/design.md)
 - Constraints and conventions: [`CLAUDE.md`](CLAUDE.md)
-- The previous PoC is preserved on the [`poc`](../../tree/poc) branch (reference only).
+
+## Why
+
+Hosted agent platforms run the agent loop and sandbox on the provider's cloud. naxos exists for workloads that can't leave your own boundary:
+
+- **Data boundary** — model access via Vertex AI only; data never leaves the project.
+- **Internal-system integration** — self-hosted MCP servers reach closed-network systems without egress.
+- **Execution-level governance** — per-tool-call audit, human approval gates, an instant per-agent kill switch, and per-tenant IAM.
+- **Scale-to-zero** — always *available* rather than always running; idle sessions checkpoint to storage and release their container.
 
 ## Layout
 
@@ -16,8 +24,12 @@ A Google Cloud implementation of Claude Managed Agents: versioned agents, isolat
 | `shared/` | Pydantic event/config models shared by the three services |
 | `ui/` | Next.js static export, baked into the control-plane image |
 | `terraform/` | One root module; `environments.json` fans out per-environment SA / Job / bucket / IAM |
-| `docs/` | Design docs (English) |
+| `docs/` | Design docs |
 
 ## Status
 
-Greenfield rebuild in progress — see `docs/design.md` §11 for the phase plan.
+Under active development — see the roadmap in [`docs/design.md`](docs/design.md) §11.
+
+## License
+
+[MIT](LICENSE)

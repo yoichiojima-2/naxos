@@ -1,24 +1,22 @@
-# naxos v2 — Claude Managed Agents on Google Cloud
+# naxos — Claude Managed Agents on Google Cloud
 
-Design document. Status: approved 2026-08-10. All project documentation is written in English.
+Design document. All project documentation is written in English.
 
 ## 1. Context and goal
 
-naxos v1 was a Phase-1 walking skeleton: `roles.json` "tenants", per-role Cloud Run Jobs fired by Cloud Scheduler, a single-table audit log, and a Next.js chat UI behind IAP. It proved the loop (Scheduler → Cloud Run Job → Claude Agent SDK → Slack) with audit and a kill switch. That code is preserved on the `poc` branch and is reference-only.
+naxos is a **faithful Google Cloud implementation of Claude Managed Agents (CMA)** — the same object model, REST surface, and event vocabulary as `platform.claude.com/docs/en/managed-agents`, running entirely inside your own GCP boundary. The platform's reason to exist (see CLAUDE.md): the data boundary (Vertex-only model exit), internal-system integration inside that boundary, and execution-level governance that a hosted platform cannot provide.
 
-v2 rebuilds the platform greenfield as a **faithful Google Cloud implementation of Claude Managed Agents (CMA)** — the same object model, REST surface, and event vocabulary as `platform.claude.com/docs/en/managed-agents`, running entirely inside the org's GCP boundary. The platform's original reason to exist is unchanged (see CLAUDE.md): the data boundary (Vertex-only model exit), internal-system integration inside that boundary, and execution-level governance that the Claude app cannot provide.
-
-Decisions fixed with the owner:
+Fixed design decisions:
 
 - **Faithful API clone** of the CMA REST surface and `{domain}.{action}` event types.
 - **Container per session**: each session's agent loop + tools run in an isolated container.
-- **V1 scope**: agents / environments / sessions / events core, scheduled deployments, permission policies (`always_ask` approval), vaults **with a real egress proxy** (full CMA credential fidelity — credentials never enter the sandbox), memory stores. Outcomes, multiagent, and webhooks are out of v1.
+- **Initial scope**: agents / environments / sessions / events core, scheduled deployments, permission policies (`always_ask` approval), vaults **with a real egress proxy** (full CMA credential fidelity — credentials never enter the sandbox), memory stores. Outcomes, multiagent, and webhooks are deferred.
 - **Cold resume accepted**: idle sessions release their container; the next event relaunches it (CMA's `rescheduling` status). UI shows a "waking up" state.
 - **Environments are Terraform-provisioned**: the API only registers rows; the per-environment SA / sandbox Job / bucket come from a `for_each` over `terraform/environments.json`. The control plane never holds IAM-admin.
 
 ## 2. Core design stance
 
-**Sessions are durable state, not processes.** A session lives in Postgres (metadata, event log) and GCS (SDK transcript, workspace). A container — one Cloud Run Job execution — exists only while the session is actively processing events. When the queue drains, the sandbox checkpoints to GCS and exits; the next incoming event relaunches it. This is the only shape that satisfies both CMA-style per-session isolation and scale-to-zero under the ¥100k/month cap.
+**Sessions are durable state, not processes.** A session lives in Postgres (metadata, event log) and GCS (SDK transcript, workspace). A container — one Cloud Run Job execution — exists only while the session is actively processing events. When the queue drains, the sandbox checkpoints to GCS and exits; the next incoming event relaunches it. This is the only shape that satisfies both CMA-style per-session isolation and scale-to-zero within the cost envelope of §9.
 
 ## 3. Components
 
@@ -34,7 +32,7 @@ Decisions fixed with the owner:
 | Audit | BigQuery `audit.runs` + `audit.tool_calls`, written **only by the control plane** | — | `sa-api` |
 | UI — agents, session chat/timeline, approval inbox, deployments, artifacts, vaults, memory, skills, kill switch | Next.js static export baked into the api image | — | — |
 
-The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json` (the v1 `roles.json` pattern, re-derived). Many agents can share an environment.
+The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json`. Many agents can share an environment.
 
 ## 4. Session lifecycle and event flow
 
@@ -63,7 +61,7 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 [terminated]  explicit terminate; live sandbox told over the control channel
 ```
 
-**Client-facing streaming.** `GET /v1/sessions/{id}/events?stream=sse&after={seq}` — the API polls `session_events` every 1s, emits SSE frames with `id:{seq}`, honors `Last-Event-ID` for reconnect replay, sends a ping comment every 15s. This is v1's `EventStream` re-derived but DB-backed: replay survives instance loss, so no Cloud Run session affinity is needed anywhere. LISTEN/NOTIFY is a later latency optimization, deliberately not built in v1.
+**Client-facing streaming.** `GET /v1/sessions/{id}/events?stream=sse&after={seq}` — the API polls `session_events` every 1s, emits SSE frames with `id:{seq}`, honors `Last-Event-ID` for reconnect replay, sends a ping comment every 15s. Because the stream is DB-backed, replay survives instance loss, so no Cloud Run session affinity is needed anywhere. LISTEN/NOTIFY is a later latency optimization, deliberately deferred.
 
 **Interrupt.** `user.interrupt` is inserted as an event and surfaced immediately on the control channel; the sandbox calls `client.interrupt()`. Jumps the queue, per CMA.
 
@@ -75,9 +73,9 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 4. No decision → insert a pending row, emit `session.status_idle(stop_reason=requires_action)`, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, **checkpoint and exit** — a blocked container costs nothing.
 5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.
 
-### 4.1 Spike results (2026-08-10, `claude-agent-sdk` 0.2.134)
+### 4.1 Measured SDK resume semantics (`claude-agent-sdk` 0.2.134)
 
-Three measured findings, all load-bearing:
+Measured findings, all load-bearing:
 
 - **Resume replays the pending tool call — R1 is resolved.** Killing the process inside the permission callback (mid-decision) and then resuming with `resume=<session_id>` plus a continuation prompt made the model re-issue the *same tool with the same input*, and the callback fired again. The pause/release/resume design works as specified.
 - **`tool_use_id` is not stable across resume.** The replayed call carried a new `toolu_…` id. Confirmation records must therefore be keyed on a canonical hash of `(tool_name, input)`, not on `tool_use_id`. (`tool_use_id` is still recorded for audit.)
@@ -326,18 +324,18 @@ Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / 
 
 Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
 
-Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks in v1.
+Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks initially.
 
 ## 8. Security model
 
 - **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else. No BigQuery, no secrets, no other environment's anything. A fully prompt-injected agent is still boxed by IAM.
 - **Sandbox ↔ control-plane auth**: OIDC ID token of the env SA → Cloud Run IAM on `naxos-internal`, then an app-level check that the token's SA equals `environments.service_account_email` for the session being touched. No bearer tokens to mint or leak.
 - **Tool restriction**: tools not in the agent version's `tools` list are never passed to the SDK. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
-- **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside `can_use_tool` before every tool call — the v1 gap fixed); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
+- **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
 - **Audit**: all agent events flow through `naxos-internal`, so the control plane is the single audit writer — the sandbox cannot forge or skip audit rows. `principal` is the IAP email for user-triggered turns, `deployment:{id}` for cron.
 - **IAP** directly on Cloud Run with the custom OAuth client (no-org project); the app verifies the IAP JWT.
 
-## 9. Cost model (¥100k cap / ¥70k target)
+## 9. Cost model (reference sizing: ¥100k/month cap, ¥70k target)
 
 | Item | Sizing | ¥/month |
 |---|---|---|
@@ -372,7 +370,6 @@ docs/              design docs (English)
 
 Each phase ends deployed and demoable.
 
-0. **This document**; old code moved to the `poc` branch.
 1. **Spike (blocking)**: Agent SDK resume semantics — pending tool_use replay through `can_use_tool`, transcript restore from a relocated directory, Vertex backend availability in asia-northeast1/global (resolves the model-region open issue).
 2. **Walking skeleton**: Terraform base (SQL, buckets, BQ, SAs, services, one `default` environment Job) + agents CRUD (versioned) + sessions + events + the full loop: create session → job launch → SDK turn on Vertex → events → SSE → idle checkpoint → resume. Audit (`runs` + `tool_calls`) and kill switch from day one. Reconciler.
 3. **Permissions + budget + interrupt**: `always_ask` round-trip including pause/release/resume, budget enforcement, minimal UI (session timeline + approval inbox).
@@ -389,9 +386,9 @@ Each phase ends deployed and demoable.
 - Deployments: cron fires → `deployment_runs` row → session completes; error path exercised by archiving the agent.
 - Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.
 
-## 13. GCP verification (2026-08-11)
+## 13. GCP verification
 
-The end-to-end system was deployed to the project and verified live:
+The end-to-end system was deployed to a live project and verified:
 
 - **Plain session**: create agent → session with `initial_events` → sandbox Job execution boots → SDK turn (Anthropic API) → `agent.message` → `session.status_idle(end_turn)` → cost and `sdk_session_id` checkpointed. Model reply round-trip ≈ 40s including cold start.
 - **Approval cycle**: `always_ask` agent paused at `agent.tool_use(awaiting_confirmation)` → `session.status_idle(requires_action)` → **the sandbox execution exited while waiting** (zero cost while pending) → `user.tool_confirmation(allow)` → fresh execution resumed the SDK session → the model re-issued the same call under a new `tool_use_id` → the stored decision (keyed by call hash) allowed it → command ran and completed. This validates the load-bearing design decision end to end.
@@ -401,14 +398,13 @@ The end-to-end system was deployed to the project and verified live:
 Known issues (non-blocking):
 - Per-run `cost_usd` delta can go negative on resume bursts — the SDK cost counter resets per burst while the session accumulates; per-burst baseline accounting needed.
 - A call approved by a human is audit-labeled `auto_allowed`; should be `user_allowed`.
-- Cost parking: `naxos-state` Cloud SQL is stopped (`activation-policy NEVER`) and the reconcile scheduler paused when the platform is idle; restart with `gcloud sql instances patch naxos-state --activation-policy ALWAYS` + `gcloud scheduler jobs resume naxos-reconcile`.
 
 ## 14. Risks and open items
 
 - **R1 — resolved.** Resume does replay the pending tool call; see §4.1. The design stands, with confirmations keyed on the call hash and the gate implemented as a `PreToolUse` hook.
-- **R2 — open, and it now has a hard finding.** Claude models are **not available in `asia-northeast1`** on Vertex: `getPublisherModel` returns "not found" for `claude-sonnet-5` / `claude-opus-5` in both `asia-northeast1` and `us-east5`, and resolves only on the **`global`** endpoint. A live `rawPredict` against `global` then returned **429 `RESOURCE_EXHAUSTED`** — the project's `global_online_prediction_requests_per_base_model` quota for `anthropic-claude-sonnet` is zero, so a quota-increase request is required before Vertex can serve any traffic.
+- **R2 — open, and it now has a hard finding.** Claude models are **not available in `asia-northeast1`** on Vertex: `getPublisherModel` returns "not found" for `claude-sonnet-5` / `claude-opus-5` in both `asia-northeast1` and `us-east5`, and resolves only on the **`global`** endpoint. A live `rawPredict` against `global` then returned **429 `RESOURCE_EXHAUSTED`** — a fresh project's `global_online_prediction_requests_per_base_model` quota for `anthropic-claude-sonnet` is zero, so a quota-increase request is required before Vertex can serve any traffic.
 
-  Two decisions this forces, both for the owner (per the hard constraint against silently deciding region questions):
+  Two decisions this forces, both for the deployment operator (per the hard constraint against silently deciding region questions):
   1. **Data residency**: using Vertex at all means using the `global` endpoint — inference is not pinned to `asia-northeast1`. Accept, or keep model traffic off Vertex until a regional endpoint exists.
   2. **Unblocking**: file the Vertex quota-increase request now, since it gates the removal of the Anthropic API-key exception. Until then the key exception stays, and no real internal data may be connected.
 - Egress proxy covers MCP + declared HTTP targets only; arbitrary bash egress is credential-less (documented limitation).
