@@ -26,10 +26,11 @@ router = APIRouter(prefix="/v1")
 
 
 def create_app(manage_pool: bool = True) -> FastAPI:
-    from . import artifacts, deployments, memory, skills, vaults, workspace
+    from . import artifacts, deployments, memory, monitoring, skills, vaults, workspace
 
     app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
+    app.include_router(monitoring.router)
     app.include_router(deployments.router)
     app.include_router(vaults.router)
     app.include_router(memory.router)

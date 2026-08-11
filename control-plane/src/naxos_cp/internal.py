@@ -273,6 +273,7 @@ class Checkpoint(BaseModel):
 async def checkpoint(
     session_id: str, body: Checkpoint, caller: str = Depends(caller_service_account)
 ) -> dict:
+    run_id = body.run_id or f"{session_id}-{int(datetime.now(UTC).timestamp())}"
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
         version = await _agent_version(conn, row)
@@ -288,6 +289,25 @@ async def checkpoint(
         await store.set_status(
             conn, session_id, status, None if body.terminated else body.stop_reason
         )
+        created_by = row["created_by"] or ""
+        await conn.execute(
+            "INSERT INTO session_runs (id, session_id, agent_id, environment_id, trigger_type, "
+            "  principal, model, status, stop_reason, num_turns, cost_usd, started_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) "
+            "ON CONFLICT (id) DO NOTHING",
+            run_id,
+            session_id,
+            row["agent_id"],
+            row["environment_id"],
+            "deployment" if created_by.startswith("deployment:") else "interactive",
+            created_by,
+            version["model"],
+            str(status),
+            str(body.stop_reason),
+            body.num_turns,
+            (body.cost_usd or previous_cost) - previous_cost,
+            body.started_at or row["updated_at"],
+        )
         await store.release_lease(conn, session_id, body.lease_id)
         pending = await conn.fetchval(
             "SELECT count(*) FROM session_events WHERE session_id = $1 AND processed_at IS NULL",
@@ -296,9 +316,8 @@ async def checkpoint(
         if pending and not body.terminated:
             await wake.wake(conn, session_id)
 
-    created_by = row["created_by"] or ""
     await audit.log_run(
-        run_id=body.run_id or f"{session_id}-{int(datetime.now(UTC).timestamp())}",
+        run_id=run_id,
         session_id=session_id,
         agent_id=row["agent_id"],
         environment_id=row["environment_id"],

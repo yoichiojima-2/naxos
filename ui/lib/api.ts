@@ -195,6 +195,24 @@ export type Artifact = {
   updated_at: string;
 };
 
+export type MonitoringSummary = {
+  window_days: number;
+  totals: { cost_usd: number; runs: number; num_turns: number; tool_calls: number };
+  all_time: { cost_usd: number; sessions: number };
+  cost_by_day: { day: string; cost_usd: number; runs: number }[];
+  cost_by_agent: {
+    agent_id: string;
+    name: string;
+    cost_usd: number;
+    runs: number;
+    sessions: number;
+  }[];
+  cost_by_model: { model: string; cost_usd: number; runs: number }[];
+  sessions_by_status: { status: string; count: number }[];
+  tool_usage: { tool_name: string; calls: number; denied: number }[];
+  deployment_runs: { status: string; count: number }[];
+};
+
 export type MemoryStore = { id: string; name: string; file_count?: number; used_by?: string[] };
 export type Memory = {
   id: string;

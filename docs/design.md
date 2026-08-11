@@ -142,6 +142,14 @@ deployment_runs (id, deployment_id, session_id,
         error_type,    -- session_error|budget_reached|timeout|retries_exhausted|infra_error
         fired_at, finished_at)
 
+session_runs (id, session_id, agent_id, environment_id,
+        trigger_type, principal, model, status, stop_reason,
+        num_turns, cost_usd,    -- the burst's cost DELTA, not the session total
+        started_at, ended_at)
+        -- one row per wake-to-idle burst, written at checkpoint alongside the
+        -- BigQuery audit.runs row; feeds the monitoring view without granting
+        -- the API BigQuery read access
+
 vaults (id, name, archived_at, created_at)
 vault_credentials (id, vault_id, name,
         type,          -- 'env' | 'header'
@@ -321,6 +329,8 @@ GET    /v1/artifacts/shared/{token}[/content]       stable share URL (still behi
 POST   /v1/skills · GET /v1/skills[/{id}] · POST /v1/skills/{id}/archive
 POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
+
+GET    /v1/monitoring/summary?days=N       cost/usage aggregates from session_runs
 ```
 
 Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)`, plus `deployments/{id}/fire` and `reconcile`.
