@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { fullTime, relativeTime, shortId } from "@/lib/format";
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
 import Markdown from "@/components/markdown";
@@ -12,9 +13,10 @@ const STATUS_FILTERS = ["needs approval", "running", "idle", "rescheduling", "te
 const statusOf = (s: Session) =>
   s.status === "idle" && s.stop_reason === "requires_action" ? "needs approval" : s.status;
 
-export default function Sessions({ agents }: { agents: Agent[] }) {
+const openSession = (id: string) => { window.location.hash = `#sessions/${id}`; };
+
+export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessionId?: string }) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
-  const [open, setOpen] = useState<Session | null>(null);
   const [agentId, setAgentId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -32,10 +34,11 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   }, []);
 
   useEffect(() => {
+    if (sessionId) return;
     refresh();
     const timer = setInterval(refresh, 10_000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, sessionId]);
 
   async function createSession() {
     const target = agentId || agents[0]?.id;
@@ -43,8 +46,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     const session = await api<Session>("/v1/sessions", {
       json: { agent: { id: target } },
     });
-    await refresh();
-    setOpen(session);
+    openSession(session.id);
   }
 
   function toggle(id: string) {
@@ -134,8 +136,14 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     await bulkApply((id) => api(`/v1/sessions/${id}`, { method: "DELETE" }));
   }
 
-  if (open) {
-    return <Timeline session={open} onBack={() => { setOpen(null); refresh(); }} />;
+  if (sessionId) {
+    return (
+      <Timeline
+        key={sessionId}
+        sessionId={sessionId}
+        known={sessions?.find((s) => s.id === sessionId)}
+      />
+    );
   }
 
   return (
@@ -215,7 +223,8 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
                   aria-label="select all sessions"
                 />
               </th>
-              <th>title</th><th>agent</th><th>status</th><th>principal</th><th>cost</th><th>created</th>
+              <th>title</th><th>agent</th><th>status</th><th>principal</th>
+              <th className="ta-right">cost</th><th>created</th>
             </tr>
           </thead>
           <tbody>
@@ -231,7 +240,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
             {filtered.map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
               return (
-                <tr key={s.id} className="click" onClick={() => setOpen(s)}>
+                <tr key={s.id} className="click" onClick={() => openSession(s.id)}>
                   <td onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -240,7 +249,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
                       aria-label={`select ${s.title ?? s.id}`}
                     />
                   </td>
-                  <td>{s.title ?? s.id}</td>
+                  <td>{s.title ?? <span className="muted mono" title={s.id}>{shortId(s.id)}</span>}</td>
                   <td className="muted">{agentName(agents, s.agent_id)}</td>
                   <td>
                     <span className={`badge ${needsAction ? "requires_action" : s.status}`}>
@@ -249,8 +258,8 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
                     </span>
                   </td>
                   <td className="muted">{s.created_by}</td>
-                  <td className="mono">${Number(s.cost_usd).toFixed(4)}</td>
-                  <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
+                  <td className="mono ta-right">${Number(s.cost_usd).toFixed(4)}</td>
+                  <td className="muted" title={fullTime(s.created_at)}>{relativeTime(s.created_at)}</td>
                 </tr>
               );
             })}
@@ -262,14 +271,29 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   );
 }
 
-function Timeline({ session, onBack }: { session: Session; onBack: () => void }) {
+function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) {
+  const [session, setSession] = useState<Session | null>(known ?? null);
+  const [missing, setMissing] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [message, setMessage] = useState("");
-  const [status, setStatus] = useState(session.status);
+  const [sending, setSending] = useState(false);
+  const [status, setStatus] = useState(known?.status ?? "idle");
+  const [connected, setConnected] = useState(true);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const source = useRef<EventSource | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const followed = useRef(false);
+
+  useEffect(() => {
+    if (known) return;
+    api<Session>(`/v1/sessions/${sessionId}`)
+      .then((s) => {
+        setSession(s);
+        setStatus(s.status);
+      })
+      .catch(() => setMissing(true));
+  }, [sessionId, known]);
 
   useEffect(() => {
     if (!events.length) return;
@@ -283,42 +307,56 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
 
   async function loadFiles() {
     if (files) { setFiles(null); return; }
-    const result = await api<{ data: WorkspaceFile[] }>(`/v1/sessions/${session.id}/workspace`);
+    const result = await api<{ data: WorkspaceFile[] }>(`/v1/sessions/${sessionId}/workspace`);
     setFiles(result.data);
   }
 
   useEffect(() => {
-    const es = new EventSource(`/v1/sessions/${session.id}/events?stream=sse`);
+    const es = new EventSource(`/v1/sessions/${sessionId}/events?stream=sse`);
     source.current = es;
     const push = (raw: MessageEvent) => {
+      setConnected(true);
       const event = JSON.parse(raw.data) as SessionEvent;
       setEvents((prev) => (prev.some((e) => e.seq === event.seq) ? prev : [...prev, event]));
       if (event.type === "session.status_running") setStatus("running");
       if (event.type === "session.status_idle") setStatus("idle");
       if (event.type === "session.status_rescheduling") setStatus("rescheduling");
-      if (event.type === "session.status_terminated") setStatus("terminated");
+      if (event.type === "session.status_terminated") {
+        setStatus("terminated");
+        es.close(); // the server ends the stream here; without close() EventSource reconnects forever
+      }
     };
     // Named SSE events require a listener per type; a catch-all keeps this simple.
     EVENT_TYPES.forEach((type) => es.addEventListener(type, push));
+    es.onopen = () => setConnected(true);
+    // A CLOSED source never retries (e.g. the session does not exist), so
+    // "reconnecting…" would be a lie; the missing-session state covers it.
+    es.onerror = () => setConnected(es.readyState === EventSource.CLOSED);
     return () => es.close();
-  }, [session.id]);
+  }, [sessionId]);
 
   async function send() {
-    if (!message.trim()) return;
-    await api(`/v1/sessions/${session.id}/events`, {
-      json: { events: [{ type: "user.message", content: [{ type: "text", text: message }] }] },
-    });
-    setMessage("");
+    if (!message.trim() || sending) return;
+    setSending(true);
+    try {
+      await api(`/v1/sessions/${sessionId}/events`, {
+        json: { events: [{ type: "user.message", content: [{ type: "text", text: message }] }] },
+      });
+      setMessage("");
+      if (composerRef.current) composerRef.current.style.height = "auto";
+    } finally {
+      setSending(false);
+    }
   }
 
   async function interrupt() {
-    await api(`/v1/sessions/${session.id}/events`, {
+    await api(`/v1/sessions/${sessionId}/events`, {
       json: { events: [{ type: "user.interrupt" }] },
     });
   }
 
   async function confirm(callHash: string, result: "allow" | "deny") {
-    await api(`/v1/sessions/${session.id}/events`, {
+    await api(`/v1/sessions/${sessionId}/events`, {
       json: { events: [{ type: "user.tool_confirmation", call_hash: callHash, result }] },
     });
   }
@@ -329,19 +367,48 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
       .map((e) => String(e.payload.call_hash)),
   );
 
+  const live = status === "running" || status === "rescheduling";
+
+  if (missing) {
+    return (
+      <div className="panel">
+        <div className="row mb12">
+          <a className="back" href="#sessions" aria-label="back to sessions">
+            <BackIcon />
+          </a>
+          <strong className="mono">{shortId(sessionId)}</strong>
+        </div>
+        <p className="muted">
+          this session could not be loaded — it may have been deleted.{" "}
+          <a href="#sessions">Back to sessions</a>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="panel">
       <div className="row between mb12">
         <div className="row">
-          <button className="ghost flex-inline" onClick={onBack} aria-label="back">
+          <a className="back" href="#sessions" aria-label="back to sessions">
             <BackIcon />
-          </button>
-          <strong>{session.title ?? session.id}</strong>
+          </a>
+          <strong>{session?.title ?? <span className="mono" title={sessionId}>{shortId(sessionId)}</span>}</strong>
           <span className={`badge ${status}`}>{status}</span>
+          {!connected && status !== "terminated" && (
+            <span className="stream-note"><span className="spinner" />reconnecting…</span>
+          )}
         </div>
         <div className="row">
           <button className="ghost" onClick={loadFiles}>Files</button>
-          <button className="ghost" onClick={interrupt}>Interrupt</button>
+          <button
+            className="ghost"
+            onClick={interrupt}
+            disabled={!live}
+            title={live ? undefined : "the agent is not running"}
+          >
+            Interrupt
+          </button>
         </div>
       </div>
       {files && (
@@ -351,7 +418,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
             <div className="row between" key={f.path}>
               <a
                 className="mono"
-                href={`/v1/sessions/${session.id}/workspace/${f.path}`}
+                href={`/v1/sessions/${sessionId}/workspace/${f.path}`}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -379,20 +446,47 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
             <span className="muted"><span className="spinner" />session is waking up…</span>
           </div>
         )}
+        <div ref={endRef} />
       </div>
       <div className="composer">
-        <input
+        <textarea
+          ref={composerRef}
+          rows={1}
           value={message}
           placeholder="Message the agent…"
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          title="Enter to send, Shift+Enter for a new line"
+          onChange={(e) => {
+            setMessage(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = `${e.target.scrollHeight + 4}px`;
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              send();
+            }
+          }}
           onFocus={(e) => e.target.scrollIntoView({ block: "center" })}
           disabled={status === "terminated"}
+          aria-label="message the agent"
         />
-        <button className="primary" onClick={send} disabled={status === "terminated"}>Send</button>
+        <button
+          className="primary"
+          onClick={send}
+          disabled={status === "terminated" || sending || !message.trim()}
+        >
+          {sending ? "Sending…" : "Send"}
+        </button>
       </div>
-      <div ref={endRef} />
     </div>
+  );
+}
+
+function EventTime({ at }: { at: string }) {
+  return (
+    <span className="event-time" title={fullTime(at)}>
+      {new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+    </span>
   );
 }
 
@@ -447,6 +541,7 @@ function ArtifactEvent({ event }: { event: SessionEvent }) {
         ) : (
           share_url && <a href={share_url} target="_blank" rel="noreferrer">link</a>
         ))}
+        <EventTime at={event.created_at} />
       </span>
     </div>
   );
@@ -468,7 +563,8 @@ function ApprovalEvent({
       <div className="row between">
         <span>
           <span className="badge requires_action">approval</span>{" "}
-          <strong>{String(event.payload.tool_name ?? "")}</strong>
+          <strong>{String(event.payload.tool_name ?? "")}</strong>{" "}
+          <EventTime at={event.created_at} />
         </span>
         {pending && (
           <span className="row">
@@ -506,6 +602,7 @@ function FoldedEvent({ event }: { event: SessionEvent }) {
       {label}
       {name && <span className="mono">{name}</span>}
       {flag && <span className="badge terminated">{flag}</span>}
+      <EventTime at={event.created_at} />
     </>
   );
   return (
@@ -545,7 +642,11 @@ function MessageEvent({ event }: { event: SessionEvent }) {
         event.type === "agent.message" ? "prose" : "",
       ].join(" ").trim()}
     >
-      <span className="muted">{event.type}{event.principal ? ` · ${event.principal}` : ""}</span>
+      <span className="muted">
+        {event.type}
+        {event.principal ? ` · ${event.principal}` : ""}{" "}
+        <EventTime at={event.created_at} />
+      </span>
       {markdown && <Markdown source={markdown} />}
       {body && <pre>{body}</pre>}
     </div>
