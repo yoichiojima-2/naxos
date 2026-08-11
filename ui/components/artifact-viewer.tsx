@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBlob, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
 import Markdown from "@/components/markdown";
 
@@ -84,12 +84,17 @@ export default function ArtifactViewer({
   const [missing, setMissing] = useState(false);
   const [showSource, setShowSource] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const fullscreenTrigger = useRef<HTMLButtonElement>(null);
+  const container = useRef<HTMLDivElement>(null);
+  const wasFullscreen = useRef(false);
 
   const kind = artifact ? kindOf(artifact.content_type, artifact.name) : null;
 
   useEffect(() => {
     let cancelled = false;
     setArtifact(null); setBlob(null); setText(null); setMissing(false); setShowSource(false);
+    setFullscreen(false);
     (async () => {
       try {
         const meta = await api<Artifact>(metaPath);
@@ -118,6 +123,40 @@ export default function ArtifactViewer({
     setBlobUrl(url);
     return () => { setBlobUrl(null); URL.revokeObjectURL(url); };
   }, [blob, kind]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    // The covered page stays in the tab order and the accessibility tree —
+    // Delete included — so inert every ancestor sibling of the overlay. This is
+    // what <dialog>.showModal() does, which we cannot use: swapping the element
+    // would remount the preview. The error toast draws above the overlay and
+    // must stay clickable and announced, so top-level alerts are exempt — this
+    // holds only while the toast stays an unwrapped [role=alert] in the shell.
+    const inerted: HTMLElement[] = [];
+    for (let node: HTMLElement | null = container.current; node?.parentElement; node = node.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling.getAttribute("role") === "alert") continue;
+        if (sibling !== node && sibling instanceof HTMLElement && !sibling.inert) {
+          sibling.inert = true;
+          inerted.push(sibling);
+        }
+      }
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      inerted.forEach((el) => { el.inert = false; });
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if (!fullscreen && wasFullscreen.current) fullscreenTrigger.current?.focus();
+    wasFullscreen.current = fullscreen;
+  }, [fullscreen]);
 
   const body = useMemo(() => {
     if (!artifact || !kind) return null;
@@ -219,6 +258,18 @@ export default function ArtifactViewer({
 
   const hasSourceToggle =
     kind !== null && ["html", "markdown", "svg", "csv"].includes(kind) && text !== null;
+  const canFullscreen = kind !== null && kind !== "binary";
+
+  const sourceToggle = hasSourceToggle && (
+    <>
+      <button className={`chip ${showSource ? "" : "on"}`} onClick={() => setShowSource(false)}>
+        Preview
+      </button>
+      <button className={`chip ${showSource ? "on" : ""}`} onClick={() => setShowSource(true)}>
+        Source
+      </button>
+    </>
+  );
 
   async function copyLink() {
     const path = artifact!.share_token
@@ -257,15 +308,11 @@ export default function ArtifactViewer({
           {artifact.share_token && <span className="badge running">shared</span>}
         </div>
         <div className="row">
-          {hasSourceToggle && (
-            <>
-              <button className={`chip ${showSource ? "" : "on"}`} onClick={() => setShowSource(false)}>
-                Preview
-              </button>
-              <button className={`chip ${showSource ? "on" : ""}`} onClick={() => setShowSource(true)}>
-                Source
-              </button>
-            </>
+          {sourceToggle}
+          {canFullscreen && (
+            <button className="ghost" ref={fullscreenTrigger} onClick={() => setFullscreen(true)}>
+              Full screen
+            </button>
           )}
           <a className="mono" href={contentPath}>Download</a>
           <button className="ghost" onClick={copyLink}>{copied ? "Copied!" : "Copy link"}</button>
@@ -289,8 +336,29 @@ export default function ArtifactViewer({
           {artifact.description && <><dt>Description</dt><dd>{artifact.description}</dd></>}
         </dl>
       </div>
-      <div className="panel viewer-body">
-        {body ?? <span className="muted">loading content…</span>}
+      {/* One container in both modes: remounting would reload the preview iframe. */}
+      <div
+        ref={container}
+        className={fullscreen ? "viewer-full" : "panel"}
+        role={fullscreen ? "dialog" : undefined}
+        aria-modal={fullscreen || undefined}
+        aria-label={fullscreen ? artifact.name : undefined}
+      >
+        {fullscreen && (
+          <div className="viewer-full-bar">
+            <span className="mono viewer-full-name">{artifact.name}</span>
+            <span className="row">
+              {sourceToggle}
+              <a className="mono" href={contentPath}>Download</a>
+              <button className="ghost" autoFocus onClick={() => setFullscreen(false)}>
+                Exit full screen
+              </button>
+            </span>
+          </div>
+        )}
+        <div className={`viewer-body ${fullscreen ? "viewer-full-body" : ""}`}>
+          {body ?? <span className="muted">loading content…</span>}
+        </div>
       </div>
     </>
   );
