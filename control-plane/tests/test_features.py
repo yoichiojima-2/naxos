@@ -580,6 +580,42 @@ async def test_skill_round_trip_and_validation(client):
     assert reused.status_code == 201
 
 
+async def test_skill_tags_filter_and_update(client):
+    for bad in (["Bad Tag"], ["-lead"], ["x" * 33]):
+        rejected = await client.post("/v1/skills", json={"name": "tagged", "tags": bad})
+        assert rejected.status_code == 422, bad
+
+    skill = (
+        await client.post(
+            "/v1/skills", json={"name": "tagged", "tags": ["deploy", "gcp", "deploy"]}
+        )
+    ).json()
+    assert skill["tags"] == ["deploy", "gcp"]
+    other = (await client.post("/v1/skills", json={"name": "untagged"})).json()
+
+    assert [s["name"] for s in (await client.get("/v1/skills")).json()["data"]] == [
+        "tagged",
+        "untagged",
+    ]
+    by_tag = (await client.get("/v1/skills", params={"tag": "gcp"})).json()["data"]
+    assert [s["name"] for s in by_tag] == ["tagged"]
+    assert (await client.get("/v1/skills", params={"tag": "nope"})).json()["data"] == []
+
+    patched = (await client.patch(f"/v1/skills/{skill['id']}", json={"tags": ["release"]})).json()
+    assert patched["tags"] == ["release"]
+    described = (
+        await client.patch(f"/v1/skills/{skill['id']}", json={"description": "ships it"})
+    ).json()
+    assert described["description"] == "ships it"
+    assert described["tags"] == ["release"]
+
+    assert (await client.patch(f"/v1/skills/{skill['id']}", json={})).status_code == 400
+
+    await client.post(f"/v1/skills/{other['id']}/archive")
+    archived = await client.patch(f"/v1/skills/{other['id']}", json={"tags": ["x"]})
+    assert archived.status_code == 404
+
+
 async def test_seed_samples_creates_once_and_never_overrides(pool, client, tmp_path):
     folder = tmp_path / "bigquery"
     (folder / "reference").mkdir(parents=True)

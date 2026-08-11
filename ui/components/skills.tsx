@@ -7,6 +7,7 @@ import CountHeader from "@/components/list-header";
 import FileList from "@/components/file-list";
 import FileEditor, { PATH_PATTERN } from "@/components/file-editor";
 import LoadingPanel from "@/components/loading-panel";
+import { parseTags, TAG_PATTERN, useTagFilter } from "@/components/tag-filter";
 
 const SKILL_MD_TEMPLATE = (name: string) =>
   `---\nname: ${name}\ndescription: When and how to use this skill.\n---\n\nInstructions the agent loads when it uses this skill.\n`;
@@ -19,11 +20,14 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   const [files, setFiles] = useState<Record<string, SkillFile[]>>({});
   const [skillName, setSkillName] = useState("");
   const [description, setDescription] = useState("");
+  const [tags, setTags] = useState("");
+  const [tagEdit, setTagEdit] = useState<{ skillId: string; value: string } | null>(null);
   const [editing, setEditing] = useState<
     { skillId: string; path: string; content: string; isNew: boolean } | null
   >(null);
   const opened = useRef<Set<string>>(new Set());
   const favFilter = useFavoriteFilter("skill", skills ?? [], favorites);
+  const tagFilter = useTagFilter(skills ?? []);
 
   // One request per skill on load costs a round trip each for lists nobody has
   // opened; load a skill's files the first time it is expanded instead, and
@@ -46,9 +50,22 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   useEffect(() => { refresh(); }, [refresh]);
 
   async function createSkill() {
-    await api("/v1/skills", { json: { name: skillName, description: description || null } });
+    await api("/v1/skills", {
+      json: { name: skillName, description: description || null, tags: parseTags(tags) },
+    });
     setSkillName("");
     setDescription("");
+    setTags("");
+    refresh();
+  }
+
+  async function saveTags() {
+    if (!tagEdit) return;
+    await api(`/v1/skills/${tagEdit.skillId}`, {
+      method: "PATCH",
+      json: { tags: parseTags(tagEdit.value) },
+    });
+    setTagEdit(null);
     refresh();
   }
 
@@ -112,6 +129,7 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
     <>
       <CountHeader count={skills === null ? null : skills.length} noun="skill">
         {favFilter.chip}
+        {tagFilter.chips}
         <input
           placeholder="skill-name (lowercase, dashes)"
           value={skillName}
@@ -124,10 +142,19 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
           onChange={(e) => setDescription(e.target.value)}
           style={{ width: 260 }}
         />
+        <input
+          placeholder="tags (optional)"
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          style={{ width: 160 }}
+        />
         <button
           className="primary"
           onClick={createSkill}
-          disabled={!/^[a-z0-9][a-z0-9-]{0,63}$/.test(skillName)}
+          disabled={
+            !/^[a-z0-9][a-z0-9-]{0,63}$/.test(skillName) ||
+            !parseTags(tags).every((t) => TAG_PATTERN.test(t))
+          }
         >
           Create
         </button>
@@ -138,7 +165,7 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
           <span className="muted">no skills yet — create one above to share know-how across agents.</span>
         </div>
       )}
-      {favFilter.apply(skills ?? []).map((skill) => (
+      {favFilter.apply(tagFilter.apply(skills ?? [])).map((skill) => (
         <div className="panel" key={skill.id}>
           <div className="row between">
             <div className="row">
@@ -154,8 +181,45 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
                   needs SKILL.md
                 </span>
               )}
+              {tagEdit?.skillId === skill.id ? (
+                <>
+                  <input
+                    autoFocus
+                    placeholder="tags (space separated)"
+                    value={tagEdit.value}
+                    style={{ width: 220 }}
+                    onChange={(e) => setTagEdit({ ...tagEdit, value: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setTagEdit(null);
+                    }}
+                  />
+                  <button
+                    className="primary"
+                    onClick={saveTags}
+                    disabled={!parseTags(tagEdit.value).every((t) => TAG_PATTERN.test(t))}
+                  >
+                    Save
+                  </button>
+                </>
+              ) : (
+                skill.tags.length > 0 && (
+                  <span className="muted">{skill.tags.map((t) => `#${t}`).join(" ")}</span>
+                )
+              )}
             </div>
             <div className="row">
+              <button
+                className="ghost"
+                onClick={() =>
+                  setTagEdit(
+                    tagEdit?.skillId === skill.id
+                      ? null
+                      : { skillId: skill.id, value: skill.tags.join(" ") },
+                  )
+                }
+              >
+                Tags
+              </button>
               <button
                 className="ghost"
                 onClick={() => {

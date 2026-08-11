@@ -661,7 +661,7 @@ table.api td.d code { font-size: 0.9em; }
 <div class="tbl">
   <div class="tbl-head"><span class="tbl-name">skills · skill_files</span><span class="tbl-key">UNIQUE <code>(skill_id, path)</code></span></div>
   <div class="table-wrap"><table>
-    <tr><td class="c">skills: id, name UNIQUE, description, archived_at, created_by, …</td><td class="n"><code>name</code> is the mount directory name</td></tr>
+    <tr><td class="c">skills: id, name UNIQUE, description, tags[], archived_at, created_by, …</td><td class="n"><code>name</code> is the mount directory name; tags are list-view filters</td></tr>
     <tr><td class="c">skill_files: id, skill_id, path, content</td><td class="n">≤64KB per file</td></tr>
     <tr><td class="c">updated_by, created_at, updated_at</td><td class="n"></td></tr>
   </table></div>
@@ -711,6 +711,7 @@ table.api td.d code { font-size: 0.9em; }
   <li><strong>Settings isolation</strong>: the harness always runs the SDK with <code>setting_sources=[]</code> — the SDK's default would load <code>.claude/settings.json</code> from the agent-writable workspace, where settings can register hooks that execute outside the tool gate.</li>
   <li><strong>Read-only from the sandbox</strong> — deliberate deviation from memory: no skill writeback path, the plugin tree lives outside the workspace checkpoint and is rebuilt before every SDK turn, so a prompt-injected agent cannot poison a skill shared by every other agent. Skills change only through the API, by a human principal.</li>
   <li><strong>Governance unchanged</strong>: <code>Skill</code> invocations pass the same <code>PreToolUse</code> gate as every other tool call. <strong>Not versioned</strong> (like memory, documented): editing a skill changes it for every agent that references it, including pinned agent versions.</li>
+  <li><strong>Tags</strong> (<code>skills.tags</code>, set via <code>PATCH /v1/skills/{id}</code>): free-form labels that keep a growing library navigable — <code>GET /v1/skills?tag=</code> filters, and the UI offers the same filter in the skills view and the agent form's skill picker. They carry no semantics for mounting or governance; the sandbox never sees them.</li>
 </ul>
 
 <h3>Storage split</h3>
@@ -814,7 +815,8 @@ table.api td.d code { font-size: 0.9em; }
 <h4>Skills</h4>
 <div class="table-wrap api-group"><table class="api">
   <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/skills</td><td class="d">create</td></tr>
-  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/skills · /v1/skills/{id}</td><td class="d">list / get</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/skills · /v1/skills/{id}</td><td class="d">list (<code>?tag=</code>) / get</td></tr>
+  <tr><td class="m"><span class="mb patch">PATCH</span></td><td class="p">/v1/skills/{id}</td><td class="d">update description / tags</td></tr>
   <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/skills/{id}/archive</td><td class="d">archive</td></tr>
   <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/skills/{id}/files</td><td class="d">upsert by path</td></tr>
   <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/skills/{id}/files[/{fid}]</td><td class="d">list / get (also <span class="mb del" style="width:auto;padding:0.2em 0.5em;">DELETE</span> on <code>/{fid}</code>)</td></tr>
