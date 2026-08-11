@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, listFor, Skill, SkillFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
+import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FileList from "@/components/file-list";
 
@@ -12,7 +13,7 @@ const SKILL_MD_TEMPLATE = (name: string) =>
 const byPath = (a: SkillFile, b: SkillFile) =>
   Number(b.path === "SKILL.md") - Number(a.path === "SKILL.md") || a.path.localeCompare(b.path);
 
-export default function Skills() {
+export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [files, setFiles] = useState<Record<string, SkillFile[]>>({});
   const [skillName, setSkillName] = useState("");
@@ -20,6 +21,7 @@ export default function Skills() {
   const [editing, setEditing] = useState<
     { skillId: string; path: string; content: string; isNew: boolean } | null
   >(null);
+  const favFilter = useFavoriteFilter("skill", skills ?? [], favorites);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Skill[] }>("/v1/skills");
@@ -124,6 +126,7 @@ export default function Skills() {
   return (
     <>
       <CountHeader count={skills === null ? null : skills.length} noun="skill">
+        {favFilter.chip}
         <input
           placeholder="skill-name (lowercase, dashes)"
           value={skillName}
@@ -150,10 +153,16 @@ export default function Skills() {
           <span className="muted">no skills yet — create one above to share know-how across agents.</span>
         </div>
       )}
-      {(skills ?? []).map((skill) => (
+      {favFilter.apply(skills ?? []).map((skill) => (
         <div className="panel" key={skill.id}>
           <div className="row between">
             <div className="row">
+              <FavoriteStar
+                type="skill"
+                id={skill.id}
+                favorites={favorites}
+                onToggleFavorite={onToggleFavorite}
+              />
               <strong>{skill.name}</strong>
               {!skill.ready && (
                 <span className="muted" title="Add a SKILL.md file so agents can load this skill">

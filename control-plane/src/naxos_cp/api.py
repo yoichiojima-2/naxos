@@ -18,7 +18,7 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import config, db, gcs, notify, sessions, store, wake
+from . import config, db, favorites, gcs, notify, sessions, store, wake
 from .auth import principal_of
 
 log = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ def create_app(manage_pool: bool = True) -> FastAPI:
     app.include_router(skills.router)
     app.include_router(workspace.router)
     app.include_router(artifacts.router)
+    app.include_router(favorites.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
@@ -330,6 +331,11 @@ async def delete_session(session_id: str, principal: str = Depends(principal_of)
         )
         if row is None:
             raise HTTPException(404, "session not found")
+        # Artifacts cascade with the session, so their ids are read before the delete.
+        artifact_ids = [
+            r["id"]
+            for r in await conn.fetch("SELECT id FROM artifacts WHERE session_id = $1", session_id)
+        ]
         # Conditional DELETE so the liveness check and the delete are one atomic
         # statement — a claim landing in between makes the condition fail, not race.
         result = await conn.execute(
@@ -339,6 +345,9 @@ async def delete_session(session_id: str, principal: str = Depends(principal_of)
         )
         if db.rowcount(result) != 1:
             raise HTTPException(409, "session has a live sandbox — terminate it and retry")
+        # Favorites have no FK (entity_type spans tables); cleared after the delete so a
+        # favorite landing concurrently is still caught.
+        await favorites.clear_for_entities(conn, session_id, *artifact_ids)
     log.info("session %s deleted by %s", session_id, principal)
     try:
         await gcs.delete_prefix(row["session_bucket"], f"sessions/{session_id}/")

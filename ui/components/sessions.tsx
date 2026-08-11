@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 import { fullTime, relativeTime, shortId } from "@/lib/format";
 import { BackIcon } from "@/components/icons";
+import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import Markdown from "@/components/markdown";
 import FilterInput from "@/components/filter-input";
@@ -15,7 +16,12 @@ const statusOf = (s: Session) =>
 
 const openSession = (id: string) => { window.location.hash = `#sessions/${id}`; };
 
-export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessionId?: string }) {
+export default function Sessions({
+  agents,
+  sessionId,
+  favorites,
+  onToggleFavorite,
+}: { agents: Agent[]; sessionId?: string } & FavoriteProps) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [agentId, setAgentId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -66,8 +72,11 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
       .toLowerCase()
       .includes(q);
   });
-  const filtered = base.filter((s) => !statusFilter || statusOf(s) === statusFilter);
-  const hasFilters = !!(q || agentFilter || statusFilter);
+  const favFilter = useFavoriteFilter("session", base, favorites);
+  const filtered = favFilter.apply(
+    base.filter((s) => !statusFilter || statusOf(s) === statusFilter),
+  );
+  const hasFilters = !!(q || agentFilter || statusFilter || favFilter.favOnly);
 
   const statusCounts = new Map<string, number>();
   for (const s of base) {
@@ -79,6 +88,7 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
     setQuery("");
     setAgentFilter("");
     setStatusFilter("");
+    favFilter.clear();
   }
 
   const allSelected = !!filtered.length && filtered.every((s) => selected.has(s.id));
@@ -191,6 +201,7 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
+          {favFilter.chip}
           {STATUS_FILTERS.filter(
             (status) => statusCounts.get(status) || status === statusFilter,
           ).map((status) => (
@@ -223,19 +234,20 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
                   aria-label="select all sessions"
                 />
               </th>
+              <th />
               <th>title</th><th>agent</th><th>status</th><th>principal</th>
               <th className="ta-right">cost</th><th>created</th>
             </tr>
           </thead>
           <tbody>
             {sessions === null && (
-              <tr><td className="empty" colSpan={7}>loading…</td></tr>
+              <tr><td className="empty" colSpan={8}>loading…</td></tr>
             )}
             {sessions?.length === 0 && (
-              <tr><td className="empty" colSpan={7}>no sessions yet — pick an agent above and start one.</td></tr>
+              <tr><td className="empty" colSpan={8}>no sessions yet — pick an agent above and start one.</td></tr>
             )}
             {!!sessions?.length && filtered.length === 0 && (
-              <tr><td className="empty" colSpan={7}>no sessions match the current filters.</td></tr>
+              <tr><td className="empty" colSpan={8}>no sessions match the current filters.</td></tr>
             )}
             {filtered.map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
@@ -247,6 +259,14 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
                       checked={selected.has(s.id)}
                       onChange={() => toggle(s.id)}
                       aria-label={`select ${s.title ?? s.id}`}
+                    />
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()} style={{ width: 1 }}>
+                    <FavoriteStar
+                      type="session"
+                      id={s.id}
+                      favorites={favorites}
+                      onToggleFavorite={onToggleFavorite}
                     />
                   </td>
                   <td>{s.title ?? <span className="muted mono" title={s.id}>{shortId(s.id)}</span>}</td>

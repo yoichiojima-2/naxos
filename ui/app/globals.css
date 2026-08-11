@@ -110,6 +110,10 @@ body {
 }
 .icon-btn:hover { background: var(--neutral); color: var(--ink); }
 
+.icon-btn.star { padding: 4px 6px; display: inline-flex; align-items: center; }
+.icon-btn.star.on { color: var(--warn); }
+.icon-btn.star:hover { background: var(--neutral); color: var(--warn); }
+
 .content { max-width: 1080px; margin: 0 auto; padding: 24px 40px 96px; }
 
 .breadcrumbs { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
