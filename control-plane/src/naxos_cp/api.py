@@ -23,14 +23,16 @@ router = APIRouter(prefix="/v1")
 
 
 def create_app(manage_pool: bool = True) -> FastAPI:
-    from . import deployments, memory, vaults, workspace
+    from . import artifacts, deployments, memory, skills, vaults, workspace
 
     app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
     app.include_router(deployments.router)
     app.include_router(vaults.router)
     app.include_router(memory.router)
+    app.include_router(skills.router)
     app.include_router(workspace.router)
+    app.include_router(artifacts.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
@@ -50,6 +52,7 @@ class AgentIn(BaseModel):
     mcp_servers: dict[str, Any] = Field(default_factory=dict)
     vault_ids: list[str] = Field(default_factory=list)
     memory_store_ids: list[str] = Field(default_factory=list)
+    skill_ids: list[str] = Field(default_factory=list)
     default_budget_usd: float | None = None
     max_turns: int | None = None
 
@@ -94,9 +97,9 @@ async def create_agent_version(
 async def _insert_version(conn, agent_id: str, version: int, body: AgentIn, principal: str):
     await conn.execute(
         "INSERT INTO agent_versions (agent_id, version, instructions, model, tools, "
-        "  permission_policy, mcp_servers, vault_ids, memory_store_ids, default_budget_usd, "
-        "  max_turns, created_by) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        "  permission_policy, mcp_servers, vault_ids, memory_store_ids, skill_ids, "
+        "  default_budget_usd, max_turns, created_by) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         agent_id,
         version,
         body.instructions,
@@ -106,6 +109,7 @@ async def _insert_version(conn, agent_id: str, version: int, body: AgentIn, prin
         body.mcp_servers,
         body.vault_ids,
         body.memory_store_ids,
+        body.skill_ids,
         body.default_budget_usd,
         body.max_turns,
         principal,
@@ -115,7 +119,7 @@ async def _insert_version(conn, agent_id: str, version: int, body: AgentIn, prin
 async def _agent_with_version(conn, agent_id: str, version: int) -> dict:
     row = await conn.fetchrow(
         "SELECT a.*, v.instructions, v.model, v.tools, v.permission_policy, v.mcp_servers, "
-        "  v.vault_ids, v.memory_store_ids, v.default_budget_usd, v.max_turns "
+        "  v.vault_ids, v.memory_store_ids, v.skill_ids, v.default_budget_usd, v.max_turns "
         "FROM agents a JOIN agent_versions v ON v.agent_id = a.id AND v.version = $2 "
         "WHERE a.id = $1",
         agent_id,
@@ -230,6 +234,7 @@ class SessionIn(BaseModel):
     initial_events: list[EventIn] = Field(default_factory=list)
     vault_ids: list[str] = Field(default_factory=list)
     memory_store_ids: list[str] = Field(default_factory=list)
+    skill_ids: list[str] = Field(default_factory=list)
     resources: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -250,6 +255,7 @@ async def create_session(body: SessionIn, principal: str = Depends(principal_of)
             budget_usd=body.budget_usd,
             vault_ids=body.vault_ids or None,
             memory_store_ids=body.memory_store_ids or None,
+            skill_ids=body.skill_ids or None,
             resources=body.resources or None,
         )
     return dict(row)

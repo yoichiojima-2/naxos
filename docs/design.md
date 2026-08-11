@@ -32,7 +32,7 @@ Decisions fixed with the owner:
 | State | Cloud SQL Postgres `db-g1-small`, private IP, Direct VPC egress from Cloud Run | always-on (the one fixed cost) | — |
 | Workspaces | GCS bucket per environment `naxos2-sess-{env}` | — | env SA + `sa-api` only |
 | Audit | BigQuery `audit.runs` + `audit.tool_calls`, written **only by the control plane** | — | `sa-api` |
-| UI — agents, session chat/timeline, approval inbox, deployments, vaults, memory, kill switch | Next.js static export baked into the api image | — | — |
+| UI — agents, session chat/timeline, approval inbox, deployments, artifacts, vaults, memory, skills, kill switch | Next.js static export baked into the api image | — | — |
 
 The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json` (the v1 `roles.json` pattern, re-derived). Many agents can share an environment.
 
@@ -70,7 +70,7 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 **Permission pause (`always_ask`).** The gate is a **`PreToolUse` hook**, not `can_use_tool` — see §4.1 for why. On every tool call:
 
 1. Check the kill switch (`agents.disabled`; 15s cache + control-channel push).
-2. Match the tool against the agent version's permission policy. `always_allow` → allow, record the decision in audit.
+2. Match the tool against the agent version's permission policy — first matching rule wins; rules match exact tool names or fnmatch-style globs (e.g. `mcp__artifacts__*`). `always_allow` → allow, record the decision in audit.
 3. `always_ask` → look up `tool_confirmations` by `(session_id, call_hash)` where `call_hash = sha256(tool_name + canonical_json(input))`. Stored decision → return it. **The key is the call hash, not `tool_use_id`** — the SDK assigns a fresh `tool_use_id` when a pending call is replayed after resume (measured; §4.1).
 4. No decision → insert a pending row, emit `session.status_idle(stop_reason=requires_action)`, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, **checkpoint and exit** — a blocked container costs nothing.
 5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.
@@ -158,12 +158,83 @@ memories (id, store_id, path, UNIQUE (store_id, path),
         created_at, updated_at)
         -- mounted as ws/memory/{store}/…, written back at checkpoint
         -- versioning deferred (documented)
+
+artifacts (id, session_id, agent_id, environment_id,
+        name, UNIQUE (session_id, name),
+        description, content_type, size_bytes,
+        version,       -- re-publishing a name bumps it (content overwritten)
+        share_token UNIQUE, shared_at, shared_by,   -- NULL = not shared
+        created_by,    -- 'agent:{session_id}'
+        created_at, updated_at)
+        -- content in GCS at sessions/{session_id}/artifacts/{name}
+
+skills (id, name UNIQUE,      -- ^[a-z0-9][a-z0-9-]{0,63}$, the mount directory name
+        description, archived_at, created_by, created_at, updated_at)
+skill_files (id, skill_id, path, UNIQUE (skill_id, path),
+        content,              -- ≤64KB per file
+        updated_by, created_at, updated_at)
+        -- agent_versions.skill_ids / sessions.skill_ids reference these
 ```
+
+### Artifacts
+
+Artifacts are files an agent deliberately publishes as durable outputs — distinct from
+the workspace (an implementation detail that gets overwritten) and from memory (agent-
+private state). The mechanism:
+
+- The sandbox exposes an **in-process MCP server** (`artifacts`) with five tools:
+  `artifact_create` (publish a workspace file; same name = new version),
+  `artifact_list`, `artifact_delete`, `artifact_share`, `artifact_unshare`. Because
+  they are ordinary tool calls, they pass the `PreToolUse` permission gate — audited
+  in `audit.tool_calls`, subject to the agent's permission policy and the kill switch.
+- Content goes **directly from the sandbox to the environment's session bucket**
+  (the env SA already owns it); only metadata flows through `naxos-internal`, which
+  records the row, bumps the version, and appends an `agent.artifact` event
+  (`created | updated | deleted | shared | unshared`) to the session timeline.
+- **Sharing mints a stable token URL** (`/v1/artifacts/shared/{token}`) that resolves
+  independently of session or artifact ids — but it is served by `naxos-api` behind
+  IAP, so a "shared" artifact is reachable by anyone in the org and by no one outside
+  it. Content never leaves the data boundary; there are no public links by design.
+- Size cap `MAX_ARTIFACT_BYTES` (default 10MB), enforced in the sandbox and at
+  registration. Humans manage artifacts (download, describe, share, revoke, delete)
+  from the UI's Artifacts page or the `/v1/artifacts` API.
+
+### Skills (org-shared agent capabilities)
+
+A skill is the Agent Skills format — a folder with a `SKILL.md` entry file plus
+supporting files — stored org-wide in Postgres, shared by all environments the
+same way memory stores and vaults are. `agent_versions.skill_ids` attaches
+skills to an agent; sessions copy the list at creation (overridable per
+session, like vaults and memory).
+
+- **Mount**: the sandbox materialises the session's skills as a **local
+  plugin** (`--plugin-dir`; skill names surface as `naxos:{name}`) in a
+  directory *outside* the checkpointed workspace, fetched from internal `GET
+  /sessions/{id}/skills` on every wake. A skill is mounted only if it is
+  unarchived and has a `SKILL.md`.
+- **Settings isolation**: the harness always runs the SDK with
+  `setting_sources=[]`. The SDK's default loads `.claude/settings.json` from
+  the cwd — which is the agent-writable, checkpoint-persisted workspace — and
+  settings can register hooks that execute outside the tool gate. Isolation
+  mode closes that hole; skills mount via the plugin mechanism instead of
+  project settings for the same reason.
+- **Read-only from the sandbox** — deliberate deviation from memory: there is
+  no skill writeback path, the plugin tree is outside the workspace checkpoint,
+  and it is rebuilt before every SDK turn, so a prompt-injected agent cannot
+  poison a skill shared by every other agent — even within its own session.
+  Skills change only through the API, by a human principal. Skill file paths
+  are validated control-plane-side (relative, no `..`/empty segments) and the
+  sandbox skips any file that would land outside its skill directory.
+- **Governance unchanged**: `Skill` invocations pass through the same
+  `PreToolUse` gate as every other tool call — the permission policy and kill
+  switch apply, and the call lands in `audit.tool_calls`.
+- **Not versioned** (like memory, documented): editing a skill changes it for
+  every agent that references it, including pinned agent versions.
 
 ### Storage split
 
 - **Postgres** — all queryable control-plane state (above).
-- **GCS** (`naxos2-sess-{env}`) — `sessions/{id}/transcript.jsonl` (SDK session file) and `sessions/{id}/ws/**` (workspace).
+- **GCS** (`naxos2-sess-{env}`) — `sessions/{id}/transcript.jsonl` (SDK session file), `sessions/{id}/ws/**` (workspace), and `sessions/{id}/artifacts/**` (published artifact content).
 - **BigQuery `audit`** — append-only governance record:
 
 ```
@@ -215,11 +286,21 @@ DELETE /v1/vaults/{id}/credentials/{cid}
 
 POST   /v1/memory_stores · GET /v1/memory_stores[/{id}]
 POST   /v1/memory_stores/{id}/memories · GET (list) · GET/PUT/DELETE …/memories/{mid}
+
+GET    /v1/artifacts[?session_id&agent_id] · GET /v1/artifacts/{id}[/content]
+PATCH  /v1/artifacts/{id}                  description
+DELETE /v1/artifacts/{id}                  row + blob
+POST   /v1/artifacts/{id}/share · DELETE …/share    mint / revoke the share token
+GET    /v1/artifacts/shared/{token}[/content]       stable share URL (still behind IAP)
+
+POST   /v1/skills · GET /v1/skills[/{id}] · POST /v1/skills/{id}/archive
+POST   /v1/skills/{id}/files               upsert by path
+GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 ```
 
-Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / memory_writeback`, plus `deployments/{id}/fire` and `reconcile`.
+Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share)`, plus `deployments/{id}/fire` and `reconcile`.
 
-Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
+Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
 
 Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks in v1.
 

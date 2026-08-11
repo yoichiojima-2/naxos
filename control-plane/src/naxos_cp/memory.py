@@ -42,8 +42,9 @@ class MemoryIn(BaseModel):
 async def put_memory(store_id: str, body: MemoryIn, principal: str = Depends(principal_of)) -> dict:
     if len(body.content.encode()) > config.MAX_MEMORY_BYTES:
         raise HTTPException(413, "memory content exceeds 64KB")
-    if ".." in body.path.split("/"):
-        raise HTTPException(400, "path may not contain ..")
+    segments = body.path.split("/")
+    if ".." in segments or "" in segments:
+        raise HTTPException(400, "path must be relative with no empty or .. segments")
     async with db.transaction() as conn:
         store = await conn.fetchval("SELECT 1 FROM memory_stores WHERE id = $1", store_id)
         if not store:
@@ -66,7 +67,7 @@ async def put_memory(store_id: str, body: MemoryIn, principal: str = Depends(pri
 async def list_memories(store_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch(
-            "SELECT id, store_id, path, length(content) AS size, updated_by, updated_at "
+            "SELECT id, store_id, path, octet_length(content) AS size, updated_by, updated_at "
             "FROM memories WHERE store_id = $1 ORDER BY path",
             store_id,
         )

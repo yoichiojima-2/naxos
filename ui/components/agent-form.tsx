@@ -9,6 +9,7 @@ import {
   MemoryStore,
   PermissionMode,
   PermissionRule,
+  Skill,
   Vault,
 } from "@/lib/api";
 
@@ -65,13 +66,16 @@ export default function AgentForm({
   const [memoryStoreIds, setMemoryStoreIds] = useState<string[]>(
     initial?.memory_store_ids ?? [],
   );
+  const [skillIds, setSkillIds] = useState<string[]>(initial?.skill_ids ?? []);
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [stores, setStores] = useState<MemoryStore[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api<{ data: Vault[] }>("/v1/vaults").then((r) => setVaults(r.data));
     api<{ data: MemoryStore[] }>("/v1/memory_stores").then((r) => setStores(r.data));
+    api<{ data: Skill[] }>("/v1/skills").then((r) => setSkills(r.data));
   }, []);
 
   let mcpServers: Record<string, unknown> | null = null;
@@ -113,6 +117,7 @@ export default function AgentForm({
         mcp_servers: mcpServers ?? {},
         vault_ids: vaultIds,
         memory_store_ids: memoryStoreIds,
+        skill_ids: skillIds,
         default_budget_usd: budget === "" ? null : Number(budget),
         max_turns: maxTurns === "" ? null : Number(maxTurns),
       });
@@ -318,6 +323,25 @@ export default function AgentForm({
                 onClick={() => toggleId(memoryStoreIds, setMemoryStoreIds, s.id)}
               >
                 {s.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {skills.length > 0 && (
+        <>
+          <label>Skills</label>
+          <div className="chips">
+            {skills.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`chip ${skillIds.includes(s.id) ? "on" : ""}`}
+                title={s.description ?? undefined}
+                onClick={() => toggleId(skillIds, setSkillIds, s.id)}
+              >
+                {s.name}{s.ready ? "" : " (needs SKILL.md)"}
               </button>
             ))}
           </div>

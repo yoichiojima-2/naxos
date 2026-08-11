@@ -11,7 +11,8 @@ async def resolve_agent(
     conn: asyncpg.Connection, agent_id: str, version: int | None
 ) -> asyncpg.Record | None:
     return await conn.fetchrow(
-        "SELECT a.*, v.version, v.default_budget_usd, v.vault_ids, v.memory_store_ids "
+        "SELECT a.*, v.version, v.default_budget_usd, v.vault_ids, v.memory_store_ids, "
+        "  v.skill_ids "
         "FROM agents a JOIN agent_versions v ON v.agent_id = a.id "
         "  AND v.version = COALESCE($2, a.latest_version) "
         "WHERE a.id = $1 AND a.archived_at IS NULL",
@@ -30,13 +31,14 @@ async def create(
     budget_usd: float | None = None,
     vault_ids: list[str] | None = None,
     memory_store_ids: list[str] | None = None,
+    skill_ids: list[str] | None = None,
     resources: list[dict[str, Any]] | None = None,
 ) -> asyncpg.Record:
     session_id = new_id("session")
     await conn.execute(
         "INSERT INTO sessions (id, agent_id, agent_version, environment_id, title, "
-        "  budget_usd, vault_ids, memory_store_ids, resources, created_by) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        "  budget_usd, vault_ids, memory_store_ids, skill_ids, resources, created_by) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         session_id,
         agent["id"],
         agent["version"],
@@ -45,6 +47,7 @@ async def create(
         budget_usd if budget_usd is not None else agent["default_budget_usd"],
         vault_ids or list(agent["vault_ids"]),
         memory_store_ids or list(agent["memory_store_ids"]),
+        skill_ids or list(agent["skill_ids"]),
         resources or [],
         principal,
     )

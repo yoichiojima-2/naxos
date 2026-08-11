@@ -57,6 +57,7 @@ export const EVENT_TYPES = [
   "agent.thinking",
   "agent.tool_use",
   "agent.tool_result",
+  "agent.artifact",
   "session.status_running",
   "session.status_idle",
   "session.status_terminated",
@@ -92,6 +93,7 @@ export type AgentDetail = Agent & {
   mcp_servers: Record<string, unknown>;
   vault_ids: string[];
   memory_store_ids: string[];
+  skill_ids: string[];
   default_budget_usd: string | number | null;
   max_turns: number | null;
   created_by?: string;
@@ -108,6 +110,7 @@ export type AgentIn = {
   mcp_servers: Record<string, unknown>;
   vault_ids: string[];
   memory_store_ids: string[];
+  skill_ids: string[];
   default_budget_usd: number | null;
   max_turns: number | null;
 };
@@ -164,6 +167,24 @@ export type Credential = {
   target: Record<string, string>;
   created_at: string;
 };
+export type Artifact = {
+  id: string;
+  session_id: string;
+  agent_id: string;
+  name: string;
+  description: string | null;
+  content_type: string;
+  size_bytes: number;
+  version: number;
+  share_token: string | null;
+  share_url?: string;
+  shared_by: string | null;
+  created_by: string | null;
+  updated_at: string;
+};
+
 export type MemoryStore = { id: string; name: string };
 export type Memory = { id: string; path: string; size?: number; content?: string };
+export type Skill = { id: string; name: string; description: string | null; ready: boolean };
+export type SkillFile = { id: string; path: string; size?: number; content?: string };
 export type WorkspaceFile = { path: string; size: number };

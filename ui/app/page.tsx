@@ -8,17 +8,23 @@ import Sessions from "@/components/sessions";
 import Deployments from "@/components/deployments";
 import Vaults from "@/components/vaults";
 import MemoryStores from "@/components/memory";
+import Artifacts from "@/components/artifacts";
+import Skills from "@/components/skills";
 import Docs from "@/components/docs";
 import {
   AgentsIcon,
+  ArtifactsIcon,
   DeploymentsIcon,
   DocsIcon,
   MemoryIcon,
   SessionsIcon,
+  SkillsIcon,
   VaultsIcon,
 } from "@/components/icons";
 
-const PAGES = ["sessions", "agents", "deployments", "vaults", "memory", "docs"] as const;
+const PAGES = [
+  "sessions", "agents", "deployments", "artifacts", "vaults", "memory", "skills", "docs",
+] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page; id?: string };
 
@@ -26,8 +32,10 @@ const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
   { page: "sessions", label: "Sessions", icon: SessionsIcon },
   { page: "agents", label: "Agents", icon: AgentsIcon },
   { page: "deployments", label: "Deployments", icon: DeploymentsIcon },
+  { page: "artifacts", label: "Artifacts", icon: ArtifactsIcon },
   { page: "vaults", label: "Vaults", icon: VaultsIcon },
   { page: "memory", label: "Memory", icon: MemoryIcon },
+  { page: "skills", label: "Skills", icon: SkillsIcon },
   { page: "docs", label: "Docs", icon: DocsIcon },
 ];
 
@@ -38,10 +46,14 @@ const PAGE_INFO: Record<Page, string> = {
     "Define who your agents are: instructions, model, tools, and permission policy. Every edit creates a new version, and the kill switch to disable an agent instantly lives here.",
   deployments:
     "Unattended scheduled runs. A cron schedule wakes an agent with a fixed prompt — no human in the loop, results land as sessions.",
+  artifacts:
+    "Outputs agents chose to publish: reports, datasets, generated files. Download them, share a stable org-internal link, or delete them — sharing never leaves the IAP boundary.",
   vaults:
     "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
   memory:
     "What agents remember across sessions. Browse each memory store's files, open one to read or edit it.",
+  skills:
+    "Reusable know-how shared across the organization. A skill is a folder of instructions (SKILL.md plus supporting files) that any agent can be given; agents load it read-only — skills are edited only here.",
   docs:
     "How naxos works and how to run your first agent session — from environment to agent to session.",
 };
@@ -151,8 +163,10 @@ export default function Page() {
             />
           )}
           {route.page === "deployments" && <Deployments agents={agents} />}
+          {route.page === "artifacts" && <Artifacts agents={agents} />}
           {route.page === "vaults" && <Vaults />}
           {route.page === "memory" && <MemoryStores />}
+          {route.page === "skills" && <Skills />}
           {route.page === "docs" && <Docs />}
         </main>
         {toast && (
