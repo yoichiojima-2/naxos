@@ -348,6 +348,23 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
 .event .md tr:last-child td { border-bottom: 1px solid var(--panel2); }
 .event .md th { color: var(--muted); text-transform: none; letter-spacing: normal; }
 
+/* --- docs ----------------------------------------------------------------- */
+
+.docs p, .docs ul { font-size: 13.5px; line-height: 1.65; margin: 8px 0 0; max-width: 72ch; }
+.docs ul { padding-left: 22px; }
+.docs li { margin: 4px 0; }
+.docs code {
+  font-family: var(--mono); font-size: 0.85em;
+  background: var(--panel2); border-radius: 5px; padding: 1.5px 5px;
+}
+.docs pre {
+  background: var(--panel2); border-radius: var(--radius-sm); padding: 12px 14px;
+  margin-top: 10px; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+}
+.docs a { color: var(--accent); text-decoration: underline; }
+.docs .kv dd { max-width: 72ch; }
+
 .composer { display: flex; gap: 10px; margin-top: 16px; }
 .composer input { flex: 1; }
 

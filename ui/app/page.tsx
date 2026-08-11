@@ -6,14 +6,16 @@ import Sessions from "@/components/sessions";
 import Deployments from "@/components/deployments";
 import Vaults from "@/components/vaults";
 import MemoryStores from "@/components/memory";
+import Docs from "@/components/docs";
 import {
   DeploymentsIcon,
+  DocsIcon,
   MemoryIcon,
   SessionsIcon,
   VaultsIcon,
 } from "@/components/icons";
 
-const PAGES = ["sessions", "deployments", "vaults", "memory"] as const;
+const PAGES = ["sessions", "deployments", "vaults", "memory", "docs"] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page; id?: string };
 
@@ -22,6 +24,7 @@ const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
   { page: "deployments", label: "Deployments", icon: DeploymentsIcon },
   { page: "vaults", label: "Vaults", icon: VaultsIcon },
   { page: "memory", label: "Memory", icon: MemoryIcon },
+  { page: "docs", label: "Docs", icon: DocsIcon },
 ];
 
 const PAGE_INFO: Record<Page, string> = {
@@ -33,6 +36,8 @@ const PAGE_INFO: Record<Page, string> = {
     "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
   memory:
     "What agents remember across sessions. Browse each memory store's files, open one to read or edit it.",
+  docs:
+    "How naxos works and how to run your first agent session — from environment to agent to session.",
 };
 
 function parseHash(hash: string): Route {
@@ -124,6 +129,7 @@ export default function Page() {
           {route.page === "deployments" && <Deployments agents={agents} />}
           {route.page === "vaults" && <Vaults />}
           {route.page === "memory" && <MemoryStores />}
+          {route.page === "docs" && <Docs />}
         </main>
         {toast && (
           <div className="toast" role="alert" onClick={() => setToast(null)}>
