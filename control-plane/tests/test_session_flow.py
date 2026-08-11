@@ -148,6 +148,70 @@ async def test_sandbox_cap_counts_launched_but_unclaimed_sessions(client, launch
     assert [s for _, s in launched] == [first["id"], first["id"]]
 
 
+async def test_delete_session_removes_rows_and_workspace(client, launched, monkeypatch):
+    from naxos_cp import gcs
+
+    wiped = []
+
+    async def fake_delete_prefix(bucket, prefix):
+        wiped.append((bucket, prefix))
+
+    monkeypatch.setattr(gcs, "delete_prefix", fake_delete_prefix)
+    _, agent = await make_agent(client)
+    hello = {"type": "user.message", "content": [{"type": "text", "text": "hello"}]}
+    session = (
+        await client.post(
+            "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [hello]}
+        )
+    ).json()
+
+    assert (await client.delete(f"/v1/sessions/{session['id']}")).status_code == 200
+    assert (await client.get(f"/v1/sessions/{session['id']}")).status_code == 404
+    assert wiped == [("naxos2-sess-default", f"sessions/{session['id']}/")]
+
+
+async def test_delete_refuses_a_session_with_a_live_sandbox(client, launched):
+    from naxos_cp import db
+
+    _, agent = await make_agent(client)
+    session = (await client.post("/v1/sessions", json={"agent": {"id": agent["id"]}})).json()
+    async with db.transaction() as conn:
+        await conn.execute(
+            "UPDATE sessions SET lease_expires_at = now() + interval '5 minutes' WHERE id = $1",
+            session["id"],
+        )
+
+    assert (await client.delete(f"/v1/sessions/{session['id']}")).status_code == 409
+    assert (await client.get(f"/v1/sessions/{session['id']}")).status_code == 200
+
+
+async def test_delete_session_keeps_deployment_run_history(client, launched, monkeypatch):
+    from naxos_cp import db, gcs
+
+    async def fake_delete_prefix(bucket, prefix):
+        pass
+
+    monkeypatch.setattr(gcs, "delete_prefix", fake_delete_prefix)
+    _, agent = await make_agent(client)
+    session = (await client.post("/v1/sessions", json={"agent": {"id": agent["id"]}})).json()
+    async with db.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO deployments (id, agent_id, name, cron) "
+            "VALUES ('dep_1', $1, 'nightly', '0 0 * * *')",
+            agent["id"],
+        )
+        await conn.execute(
+            "INSERT INTO deployment_runs (id, deployment_id, session_id, status) "
+            "VALUES ('run_1', 'dep_1', $1, 'succeeded')",
+            session["id"],
+        )
+
+    assert (await client.delete(f"/v1/sessions/{session['id']}")).status_code == 200
+    async with db.transaction() as conn:
+        run = await conn.fetchrow("SELECT * FROM deployment_runs WHERE id = 'run_1'")
+    assert run["session_id"] is None
+
+
 async def test_event_sequence_is_per_session_and_monotonic(client, launched):
     _, agent = await make_agent(client)
     session = (await client.post("/v1/sessions", json={"agent": {"id": agent["id"]}})).json()

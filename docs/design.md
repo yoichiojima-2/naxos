@@ -270,6 +270,8 @@ POST   /v1/sessions                        {agent: {id, version?} | agent_with_o
 GET    /v1/sessions[?agent_id&status] · GET /v1/sessions/{id}
 PATCH  /v1/sessions/{id}                   raise budget
 POST   /v1/sessions/{id}/terminate
+DELETE /v1/sessions/{id}                   rows + GCS prefix; refused while a sandbox
+                                           holds a live lease (audit in BigQuery survives)
 POST   /v1/sessions/{id}/events            user.message | user.interrupt |
                                            user.tool_confirmation | user.custom_tool_result
 GET    /v1/sessions/{id}/events?after={seq}&limit=      list (cursor = seq)

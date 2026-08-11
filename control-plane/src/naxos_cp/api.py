@@ -16,7 +16,7 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import config, db, notify, sessions, store, wake
+from . import config, db, gcs, notify, sessions, store, wake
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
@@ -310,6 +310,23 @@ async def patch_session(
         if body.budget_usd is not None and row["stop_reason"] == "budget_reached":
             await wake.wake(conn, session_id)
     return dict(row)
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, _: str = Depends(principal_of)) -> dict:
+    async with db.transaction() as conn:
+        row = await conn.fetchrow(
+            "SELECT e.session_bucket FROM sessions s "
+            "JOIN environments e ON e.id = s.environment_id WHERE s.id = $1",
+            session_id,
+        )
+        if row is None:
+            raise HTTPException(404, "session not found")
+        if await store.has_live_lease(conn, session_id):
+            raise HTTPException(409, "session has a live sandbox — terminate it and retry")
+        await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
+    await gcs.delete_prefix(row["session_bucket"], f"sessions/{session_id}/")
+    return {"id": session_id, "deleted": True}
 
 
 @router.post("/sessions/{session_id}/terminate")
