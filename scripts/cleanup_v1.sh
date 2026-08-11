@@ -35,6 +35,14 @@ run() {
   fi
 }
 
+# Without working credentials every existence check below fails silently and
+# the dry run would falsely report "nothing to clean" — so fail loudly first.
+if ! gcloud projects describe "$PROJECT" >/dev/null 2>&1; then
+  echo "error: cannot access project $PROJECT with the current gcloud credentials" >&2
+  echo "       run 'gcloud auth login' (or set credentials) and retry" >&2
+  exit 1
+fi
+
 echo "project=$PROJECT region=$REGION mode=$([ "$DELETE" = 1 ] && echo DELETE || echo dry-run)"
 echo
 
