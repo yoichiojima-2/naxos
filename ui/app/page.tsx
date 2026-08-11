@@ -124,8 +124,23 @@ export default function Page() {
 
   return (
     <div className="shell">
+      <aside className="global-rail" aria-label="Global navigation">
+        <a className="rail-logo" href="#sessions" aria-label="Naxos home">N</a>
+        <div className="rail-actions">
+          <button className="rail-button" aria-label="Search">⌕</button>
+          <button className="rail-button rail-create" aria-label="Create">＋</button>
+        </div>
+        <div className="rail-bottom">
+          <button className="rail-button" onClick={toggleTheme} aria-label="Toggle dark mode">◐</button>
+          <span className="avatar" aria-label="Signed in user">YO</span>
+        </div>
+      </aside>
       <aside className="sidebar">
-        <a className="brand" href="#sessions"><span>naxos</span></a>
+        <a className="brand" href="#sessions">
+          <span className="brand-mark">N</span>
+          <span><strong>naxos</strong><small>Agent workspace</small></span>
+        </a>
+        <div className="nav-label">Workspace</div>
         <nav>
           {NAV.map(({ page, label, icon: Icon }) => (
             <a
@@ -141,15 +156,17 @@ export default function Page() {
       </aside>
       <div className="frame">
         <header className="topbar">
-          <span className="topbar-title">{current.label}</span>
-          <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
-            ☾
-          </button>
+          <div className="breadcrumbs"><span>naxos</span><b>/</b><span>{current.label}</span></div>
+          <div className="topbar-actions">
+            <div className="quick-search"><span>⌕</span><span>Search workspace</span><kbd>/</kbd></div>
+            <button className="icon-btn help-button" aria-label="Help">?</button>
+          </div>
         </header>
         <main className="content">
           {!agentDetail && !artifactDetail && (
             <div className="page-head">
-              <h2>{current.label}</h2>
+              <div className="eyebrow">Workspace</div>
+              <h1>{current.label}</h1>
               <p>{PAGE_INFO[route.page]}</p>
             </div>
           )}
