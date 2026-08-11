@@ -12,19 +12,22 @@ import Artifacts from "@/components/artifacts";
 import ArtifactViewer from "@/components/artifact-viewer";
 import Skills from "@/components/skills";
 import Docs from "@/components/docs";
+import Monitoring from "@/components/monitoring";
 import {
   AgentsIcon,
   ArtifactsIcon,
   DeploymentsIcon,
   DocsIcon,
   MemoryIcon,
+  MonitoringIcon,
   SessionsIcon,
   SkillsIcon,
   VaultsIcon,
 } from "@/components/icons";
 
 const PAGES = [
-  "sessions", "agents", "deployments", "artifacts", "vaults", "memory", "skills", "docs",
+  "sessions", "agents", "deployments", "artifacts", "monitoring", "vaults", "memory", "skills",
+  "docs",
 ] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page; id?: string };
@@ -34,6 +37,7 @@ const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
   { page: "agents", label: "Agents", icon: AgentsIcon },
   { page: "deployments", label: "Deployments", icon: DeploymentsIcon },
   { page: "artifacts", label: "Artifacts", icon: ArtifactsIcon },
+  { page: "monitoring", label: "Monitoring", icon: MonitoringIcon },
   { page: "vaults", label: "Vaults", icon: VaultsIcon },
   { page: "memory", label: "Memory", icon: MemoryIcon },
   { page: "skills", label: "Skills", icon: SkillsIcon },
@@ -41,7 +45,7 @@ const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
 ];
 
 const NAV_SECTIONS: { label: string; pages: Page[] }[] = [
-  { label: "Work", pages: ["sessions", "deployments", "artifacts"] },
+  { label: "Work", pages: ["sessions", "deployments", "artifacts", "monitoring"] },
   { label: "Configure", pages: ["agents", "skills", "vaults", "memory"] },
   { label: "Resources", pages: ["docs"] },
 ];
@@ -55,6 +59,8 @@ const PAGE_INFO: Record<Page, string> = {
     "Unattended scheduled runs. A cron schedule wakes an agent with a fixed prompt — no human in the loop, results land as sessions.",
   artifacts:
     "Outputs agents chose to publish: reports, datasets, generated files. Open them in the built-in viewer, download, share a stable org-internal link, or delete them — sharing never leaves the IAP boundary.",
+  monitoring:
+    "Cost and usage across the platform: spend over time and per agent and model, tool-call activity, and deployment outcomes — aggregated from every wake-to-idle run.",
   vaults:
     "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
   memory:
@@ -194,6 +200,7 @@ export default function Page() {
                 ? <ArtifactViewer token={route.id!.slice("shared/".length)} agents={agents} />
                 : <ArtifactViewer artifactId={route.id!} agents={agents} />
             )}
+            {route.page === "monitoring" && <Monitoring />}
             {route.page === "vaults" && <Vaults />}
             {route.page === "memory" && <MemoryStores />}
             {route.page === "skills" && <Skills />}

@@ -68,6 +68,13 @@ export const DocsIcon = () => (
   </svg>
 );
 
+export const MonitoringIcon = () => (
+  <svg {...base}>
+    <path d="M4 4.5v15h16" />
+    <path d="M7.5 14 11 10l3 3 4.5-5.5" />
+  </svg>
+);
+
 export const BackIcon = () => (
   <svg {...base}>
     <path d="M14.5 6 8.5 12l6 6" />
