@@ -12,6 +12,7 @@ import Artifacts from "@/components/artifacts";
 import ArtifactViewer from "@/components/artifact-viewer";
 import Skills from "@/components/skills";
 import Docs from "@/components/docs";
+import Dashboard from "@/components/dashboard";
 import {
   AgentsIcon,
   ArtifactsIcon,
@@ -21,15 +22,17 @@ import {
   SessionsIcon,
   SkillsIcon,
   VaultsIcon,
+  DashboardIcon,
 } from "@/components/icons";
 
 const PAGES = [
-  "sessions", "agents", "deployments", "artifacts", "vaults", "memory", "skills", "docs",
+  "dashboard", "sessions", "agents", "deployments", "artifacts", "vaults", "memory", "skills", "docs",
 ] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page; id?: string };
 
 const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
+  { page: "dashboard", label: "Dashboard", icon: DashboardIcon },
   { page: "sessions", label: "Sessions", icon: SessionsIcon },
   { page: "agents", label: "Agents", icon: AgentsIcon },
   { page: "deployments", label: "Deployments", icon: DeploymentsIcon },
@@ -41,6 +44,8 @@ const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
 ];
 
 const PAGE_INFO: Record<Page, string> = {
+  dashboard:
+    "A live overview of agent activity, approvals, workspace capacity, and recent sessions.",
   sessions:
     "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
   agents:
@@ -64,11 +69,11 @@ function parseHash(hash: string): Route {
   if ((PAGES as readonly string[]).includes(page)) {
     return { page: page as Page, id: rest.join("/") || undefined };
   }
-  return { page: "sessions" };
+  return { page: "dashboard" };
 }
 
 export default function Page() {
-  const [route, setRoute] = useState<Route>({ page: "sessions" });
+  const [route, setRoute] = useState<Route>({ page: "dashboard" });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -125,7 +130,7 @@ export default function Page() {
   return (
     <div className="shell">
       <aside className="global-rail" aria-label="Global navigation">
-        <a className="rail-logo" href="#sessions" aria-label="Naxos home">N</a>
+        <a className="rail-logo" href="#dashboard" aria-label="Naxos home">N</a>
         <div className="rail-actions">
           <button className="rail-button" aria-label="Search">⌕</button>
           <button className="rail-button rail-create" aria-label="Create">＋</button>
@@ -136,7 +141,7 @@ export default function Page() {
         </div>
       </aside>
       <aside className="sidebar">
-        <a className="brand" href="#sessions">
+        <a className="brand" href="#dashboard">
           <span className="brand-mark">N</span>
           <span><strong>naxos</strong><small>Agent workspace</small></span>
         </a>
@@ -170,6 +175,7 @@ export default function Page() {
               <p>{PAGE_INFO[route.page]}</p>
             </div>
           )}
+          {route.page === "dashboard" && <Dashboard agents={agents} environments={environments} />}
           {route.page === "sessions" && <Sessions agents={agents} />}
           {route.page === "agents" && !route.id && (
             <Agents agents={agents} environments={environments} onChange={refresh} />
