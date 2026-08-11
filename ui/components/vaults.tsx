@@ -14,7 +14,7 @@ function targetLabel(cred: Credential) {
 }
 
 export default function Vaults() {
-  const [vaults, setVaults] = useState<Vault[]>([]);
+  const [vaults, setVaults] = useState<Vault[] | null>(null);
   const [credentials, setCredentials] = useState<Record<string, Credential[]>>({});
   const [vaultName, setVaultName] = useState("");
   const [form, setForm] = useState({ vaultId: "", name: "", value: "", mcpServer: "" });
@@ -39,7 +39,7 @@ export default function Vaults() {
   }
 
   async function addCredential() {
-    await api(`/v1/vaults/${form.vaultId || vaults[0]?.id}/credentials`, {
+    await api(`/v1/vaults/${form.vaultId || vaults?.[0]?.id}/credentials`, {
       json: {
         name: form.name,
         type: "header",
@@ -58,7 +58,7 @@ export default function Vaults() {
         `/v1/vaults/${vault.id}/archive`,
       )
     ) {
-      setVaults((prev) => prev.filter((v) => v.id !== vault.id));
+      setVaults((prev) => prev && prev.filter((v) => v.id !== vault.id));
     }
   }
 
@@ -86,7 +86,13 @@ export default function Vaults() {
         <button className="primary" onClick={createVault} disabled={!vaultName}>Create vault</button>
       </div>
 
-      {vaults.map((vault) => (
+      {vaults === null && <div className="panel"><span className="muted">loading…</span></div>}
+      {vaults?.length === 0 && (
+        <div className="panel">
+          <span className="muted">no vaults yet — create one above to store credentials for agents.</span>
+        </div>
+      )}
+      {(vaults ?? []).map((vault) => (
         <div className="panel" key={vault.id}>
           <div className="row between">
             <strong>{vault.name}</strong>
@@ -126,7 +132,7 @@ export default function Vaults() {
         </div>
       ))}
 
-      {vaults.length > 0 && (
+      {!!vaults?.length && (
         <div className="panel">
           <strong>Add credential</strong>
           <div className="grid2">

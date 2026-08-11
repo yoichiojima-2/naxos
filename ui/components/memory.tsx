@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, listFor, Memory, MemoryStore } from "@/lib/api";
+import { fullTime, relativeTime } from "@/lib/format";
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
 
@@ -23,7 +24,7 @@ const pathValid = (path: string) => {
 };
 
 export default function MemoryStores() {
-  const [stores, setStores] = useState<MemoryStore[]>([]);
+  const [stores, setStores] = useState<MemoryStore[] | null>(null);
   const [memories, setMemories] = useState<Record<string, Memory[]>>({});
   const [storeName, setStoreName] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -172,7 +173,7 @@ export default function MemoryStores() {
 
   return (
     <>
-      <CountHeader count={stores.length} noun="store">
+      <CountHeader count={stores === null ? null : stores.length} noun="store">
         <input
           placeholder="new store name"
           value={storeName}
@@ -181,7 +182,13 @@ export default function MemoryStores() {
         />
         <button className="primary" onClick={createStore} disabled={!storeName}>Create</button>
       </CountHeader>
-      {stores.map((store) => (
+      {stores === null && <div className="panel"><span className="muted">loading…</span></div>}
+      {stores?.length === 0 && (
+        <div className="panel">
+          <span className="muted">no memory stores yet — create one above to give agents durable memory.</span>
+        </div>
+      )}
+      {(stores ?? []).map((store) => (
         <div className="panel" key={store.id}>
           <div className="row between">
             <div className="row">
@@ -237,36 +244,43 @@ export default function MemoryStores() {
               </button>
             </div>
           </div>
-          <div className="table-wrap">
-            <table>
-              <tbody>
-                {(memories[store.id] ?? []).length === 0 && (
-                  <tr><td className="empty" colSpan={4}>no files in this store yet.</td></tr>
-                )}
-                {(memories[store.id] ?? []).map((memory) => (
-                  <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
-                    <td className="mono">{memory.path}</td>
-                    <td className="muted">
-                      {memory.updated_at && new Date(memory.updated_at).toLocaleString()}
-                      {memory.updated_by && ` · ${memory.updated_by}`}
-                    </td>
-                    <td className="muted ta-right">{memory.size} B</td>
-                    <td className="ta-right" style={{ width: 1 }}>
-                      <button
-                        className="danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteMemory(store.id, memory);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {(memories[store.id] ?? []).length === 0 ? (
+            <p className="muted mt8">no files in this store yet.</p>
+          ) : (
+            <details className="filelist" open={(memories[store.id] ?? []).length <= 5}>
+              <summary>
+                {(memories[store.id] ?? []).length}{" "}
+                {(memories[store.id] ?? []).length === 1 ? "file" : "files"}
+              </summary>
+              <div className="table-wrap">
+                <table>
+                  <tbody>
+                    {(memories[store.id] ?? []).map((memory) => (
+                      <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
+                        <td className="mono">{memory.path}</td>
+                        <td className="muted" title={memory.updated_at ? fullTime(memory.updated_at) : undefined}>
+                          {memory.updated_at && relativeTime(memory.updated_at)}
+                          {memory.updated_by && ` · ${memory.updated_by}`}
+                        </td>
+                        <td className="muted ta-right">{memory.size} B</td>
+                        <td className="ta-right" style={{ width: 1 }}>
+                          <button
+                            className="danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteMemory(store.id, memory);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
         </div>
       ))}
     </>

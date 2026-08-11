@@ -171,6 +171,24 @@ a.back:hover { color: var(--accent); }
 input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 input[type="radio"] { width: auto; accent-color: var(--accent); }
 
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* --- collapsible file lists (skills, memory) ------------------------------- */
+
+details.filelist > summary {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 10px; cursor: pointer; user-select: none; list-style: none;
+  color: var(--muted); font-size: 13px; font-weight: 500;
+}
+details.filelist > summary::-webkit-details-marker { display: none; }
+details.filelist > summary::before {
+  content: "\25B8"; font-size: 11px; color: var(--faint); transition: transform 0.15s;
+}
+details.filelist[open] > summary::before { transform: rotate(90deg); }
+details.filelist > .table-wrap {
+  margin-top: 4px; max-height: 420px; overflow-y: auto;
+}
+
 /* --- controls ------------------------------------------------------------- */
 
 button.primary, button.ghost, button.danger {
@@ -365,8 +383,18 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
 .docs a { color: var(--accent); text-decoration: underline; }
 .docs .kv dd { max-width: 72ch; }
 
-.composer { display: flex; gap: 10px; margin-top: 16px; }
-.composer input { flex: 1; }
+.composer {
+  display: flex; gap: 10px; align-items: flex-end;
+  position: sticky; bottom: 0; margin-top: 16px; padding: 12px 0;
+  background: var(--panel);
+}
+.composer textarea {
+  flex: 1; font-family: var(--sans); font-size: 14px;
+  min-height: 0; max-height: 200px; resize: none; overflow-y: auto;
+}
+
+.event-time { color: var(--faint); font-size: 12px; }
+.stream-note { color: var(--faint); font-size: 12.5px; }
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }

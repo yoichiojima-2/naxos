@@ -8,8 +8,11 @@ import CountHeader from "@/components/list-header";
 const SKILL_MD_TEMPLATE = (name: string) =>
   `---\nname: ${name}\ndescription: When and how to use this skill.\n---\n\nInstructions the agent loads when it uses this skill.\n`;
 
+const byPath = (a: SkillFile, b: SkillFile) =>
+  Number(b.path === "SKILL.md") - Number(a.path === "SKILL.md") || a.path.localeCompare(b.path);
+
 export default function Skills() {
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skills, setSkills] = useState<Skill[] | null>(null);
   const [files, setFiles] = useState<Record<string, SkillFile[]>>({});
   const [skillName, setSkillName] = useState("");
   const [description, setDescription] = useState("");
@@ -119,7 +122,7 @@ export default function Skills() {
 
   return (
     <>
-      <CountHeader count={skills.length} noun="skill">
+      <CountHeader count={skills === null ? null : skills.length} noun="skill">
         <input
           placeholder="skill-name (lowercase, dashes)"
           value={skillName}
@@ -140,7 +143,13 @@ export default function Skills() {
           Create
         </button>
       </CountHeader>
-      {skills.map((skill) => (
+      {skills === null && <div className="panel"><span className="muted">loading…</span></div>}
+      {skills?.length === 0 && (
+        <div className="panel">
+          <span className="muted">no skills yet — create one above to share know-how across agents.</span>
+        </div>
+      )}
+      {(skills ?? []).map((skill) => (
         <div className="panel" key={skill.id}>
           <div className="row between">
             <div className="row">
@@ -170,29 +179,37 @@ export default function Skills() {
             </div>
           </div>
           {skill.description && <p className="muted">{skill.description}</p>}
-          <div className="table-wrap">
-            <table>
-              <tbody>
-                {(files[skill.id] ?? []).map((file) => (
-                  <tr key={file.id} className="click" onClick={() => openFile(skill.id, file)}>
-                    <td className="mono">{file.path}</td>
-                    <td className="muted ta-right">{file.size} B</td>
-                    <td className="ta-right" style={{ width: 1 }}>
-                      <button
-                        className="danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteFile(skill.id, file);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {(files[skill.id] ?? []).length > 0 && (
+            <details className="filelist" open={(files[skill.id] ?? []).length <= 5}>
+              <summary>
+                {(files[skill.id] ?? []).length}{" "}
+                {(files[skill.id] ?? []).length === 1 ? "file" : "files"}
+              </summary>
+              <div className="table-wrap">
+                <table>
+                  <tbody>
+                    {[...(files[skill.id] ?? [])].sort(byPath).map((file) => (
+                      <tr key={file.id} className="click" onClick={() => openFile(skill.id, file)}>
+                        <td className="mono">{file.path}</td>
+                        <td className="muted ta-right">{file.size} B</td>
+                        <td className="ta-right" style={{ width: 1 }}>
+                          <button
+                            className="danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteFile(skill.id, file);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
         </div>
       ))}
     </>

@@ -127,6 +127,11 @@ export default function Page() {
   const current = NAV.find((n) => n.page === route.page) ?? NAV[0];
   const agentDetail = route.page === "agents" && route.id;
   const artifactDetail = route.page === "artifacts" && route.id;
+  const sessionDetail = route.page === "sessions" && route.id;
+
+  useEffect(() => {
+    document.title = `naxos · ${current.label}`;
+  }, [current.label]);
 
   return (
     <div className="shell">
@@ -141,7 +146,7 @@ export default function Page() {
         </a>
         <div className="appbar-spacer" />
         <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
-          ☾
+          {(theme ?? "system") === "dark" ? "☀" : "☾"}
         </button>
       </header>
       <div className="body">
@@ -167,7 +172,7 @@ export default function Page() {
         </aside>
         <div className="frame">
           <main className="content">
-            {!agentDetail && !artifactDetail && (
+            {!agentDetail && !artifactDetail && !sessionDetail && (
               <div className="page-head">
                 <div className="breadcrumbs">
                   naxos<span className="sep">/</span>{current.label}
@@ -176,7 +181,7 @@ export default function Page() {
                 <p>{PAGE_INFO[route.page]}</p>
               </div>
             )}
-            {route.page === "sessions" && <Sessions agents={agents} />}
+            {route.page === "sessions" && <Sessions agents={agents} sessionId={route.id} />}
             {route.page === "agents" && !route.id && (
               <Agents agents={agents} environments={environments} onChange={refresh} />
             )}

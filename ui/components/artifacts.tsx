@@ -12,7 +12,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function Artifacts({ agents }: { agents: Agent[] }) {
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
@@ -53,7 +53,7 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
   }
 
   const q = query.trim().toLowerCase();
-  const filtered = artifacts.filter(
+  const filtered = (artifacts ?? []).filter(
     (a) =>
       !q ||
       `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
@@ -63,18 +63,23 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
 
   return (
     <>
-      <CountHeader count={filtered.length} of={artifacts.length} noun="artifact">
-        {artifacts.length > 0 && (
+      <CountHeader
+        count={artifacts === null ? null : filtered.length}
+        of={artifacts?.length}
+        noun="artifact"
+      >
+        {!!artifacts?.length && (
           <FilterInput placeholder="Filter artifacts…" value={query} onChange={setQuery} />
         )}
       </CountHeader>
       <div className="panel">
-        {artifacts.length === 0 && (
+        {artifacts === null && <span className="muted">loading…</span>}
+        {artifacts?.length === 0 && (
           <span className="muted">
             no artifacts yet — agents publish them with the artifact_create tool.
           </span>
         )}
-        {artifacts.length > 0 && filtered.length === 0 && (
+        {!!artifacts?.length && filtered.length === 0 && (
           <span className="muted">no artifacts match the current filter.</span>
         )}
         {filtered.length > 0 && (

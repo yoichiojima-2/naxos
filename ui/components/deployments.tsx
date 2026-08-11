@@ -6,7 +6,7 @@ import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
 
 export default function Deployments({ agents }: { agents: Agent[] }) {
-  const [deployments, setDeployments] = useState<Deployment[]>([]);
+  const [deployments, setDeployments] = useState<Deployment[] | null>(null);
   const [runs, setRuns] = useState<Record<string, DeploymentRun[]>>({});
   const [openId, setOpenId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -66,14 +66,18 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
   }
 
   const q = query.trim().toLowerCase();
-  const filtered = deployments.filter(
+  const filtered = (deployments ?? []).filter(
     (d) => !q || `${d.name} ${d.cron} ${agentName(agents, d.agent_id)}`.toLowerCase().includes(q),
   );
 
   return (
     <>
-      <CountHeader count={filtered.length} of={deployments.length} noun="deployment">
-        {deployments.length > 0 && (
+      <CountHeader
+        count={deployments === null ? null : filtered.length}
+        of={deployments?.length}
+        noun="deployment"
+      >
+        {!!deployments?.length && (
           <FilterInput placeholder="Filter deployments…" value={query} onChange={setQuery} />
         )}
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
@@ -112,10 +116,13 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
             <tr><th>name</th><th>cron</th><th>state</th><th /></tr>
           </thead>
           <tbody>
-            {deployments.length === 0 && (
+            {deployments === null && (
+              <tr><td className="empty" colSpan={4}>loading…</td></tr>
+            )}
+            {deployments?.length === 0 && (
               <tr><td className="empty" colSpan={4}>no deployments yet — schedule an agent to run unattended.</td></tr>
             )}
-            {deployments.length > 0 && filtered.length === 0 && (
+            {!!deployments?.length && filtered.length === 0 && (
               <tr><td className="empty" colSpan={4}>no deployments match the current filter.</td></tr>
             )}
             {filtered.map((d) => (
