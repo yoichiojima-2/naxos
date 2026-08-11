@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
@@ -17,6 +18,7 @@ from claude_agent_sdk.types import (
 from naxos_shared.events import EventType, SessionConfig, StopReason
 from naxos_shared.ids import call_hash
 
+from . import artifacts
 from .control import ControlChannel
 
 log = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ class Harness:
         self.interrupted = False
         self.killed = False
         self.num_turns = 0
+        self.artifact_server = artifacts.build_server(channel, config, Path(cwd))
 
     async def interrupt(self) -> None:
         """Stop the in-flight turn. Called by the queue watcher mid-run."""
@@ -156,7 +159,7 @@ class Harness:
             cwd=self.cwd,
             system_prompt=self.config.instructions,
             model=self.config.model,
-            mcp_servers=self.config.mcp_servers,
+            mcp_servers={**self.config.mcp_servers, "artifacts": self.artifact_server},
             allowed_tools=self.config.tools,
             max_turns=self.config.max_turns,
             resume=self.sdk_session_id,

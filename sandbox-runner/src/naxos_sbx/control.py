@@ -63,11 +63,41 @@ class ControlChannel:
     async def config(self) -> SessionConfig:
         return SessionConfig.model_validate(await self._get("/config"))
 
+    async def _delete(self, path: str) -> dict[str, Any]:
+        response = await self._client.delete(
+            f"{self.base_url}/internal/sessions/{self.session_id}{path}",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def fetch_memory(self) -> dict[str, Any]:
         return await self._get("/memory")
 
     async def writeback_memory(self, stores: dict[str, Any]) -> None:
         await self._post("/memory", {"stores": stores})
+
+    async def list_artifacts(self) -> dict[str, Any]:
+        return await self._get("/artifacts")
+
+    async def register_artifact(
+        self, name: str, content_type: str, size_bytes: int, description: str | None
+    ) -> dict[str, Any]:
+        return await self._post(
+            "/artifacts",
+            {
+                "name": name,
+                "content_type": content_type,
+                "size_bytes": size_bytes,
+                "description": description,
+            },
+        )
+
+    async def delete_artifact(self, name: str) -> dict[str, Any]:
+        return await self._delete(f"/artifacts/{name}")
+
+    async def share_artifact(self, name: str, shared: bool) -> dict[str, Any]:
+        return await self._post("/artifacts/share", {"name": name, "shared": shared})
 
     async def poll_queue(self, wait: int = 25) -> dict[str, Any]:
         return await self._get("/queue", {"wait": wait})

@@ -16,7 +16,7 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import audit, config, db, deployments, store, wake
+from . import artifacts, audit, config, db, deployments, store, wake
 from .auth import caller_service_account
 
 log = logging.getLogger(__name__)
@@ -362,6 +362,137 @@ async def session_memory_writeback(
                 )
                 written += 1
     return {"written": written}
+
+
+class ArtifactIn(BaseModel):
+    name: str = Field(pattern=r"^[a-zA-Z0-9._/ -]{1,200}$")
+    content_type: str = "application/octet-stream"
+    size_bytes: int = Field(0, ge=0)
+    description: str | None = None
+
+
+async def _emit_artifact_event(conn, session_id: str, action: str, row: Any) -> None:
+    payload = {
+        "artifact_id": row["id"],
+        "name": row["name"],
+        "action": action,
+        "version": row["version"],
+        "size_bytes": row["size_bytes"],
+        "content_type": row["content_type"],
+    }
+    if row["share_token"]:
+        payload["share_url"] = artifacts.share_url(row["share_token"])
+    await store.append_event(
+        conn,
+        session_id,
+        EventType.AGENT_ARTIFACT,
+        payload,
+        principal=f"agent:{session_id}",
+        processed=True,
+    )
+
+
+@router.get("/sessions/{session_id}/artifacts")
+async def session_artifacts(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
+    async with db.transaction() as conn:
+        await _authorize(conn, session_id, caller)
+        rows = await conn.fetch(
+            "SELECT * FROM artifacts WHERE session_id = $1 ORDER BY name", session_id
+        )
+    return {"data": [artifacts.serialize(r) for r in rows]}
+
+
+@router.post("/sessions/{session_id}/artifacts", status_code=201)
+async def register_artifact(
+    session_id: str, body: ArtifactIn, caller: str = Depends(caller_service_account)
+) -> dict:
+    """Record an artifact the sandbox uploaded to the session bucket.
+
+    Upsert by (session_id, name): publishing an existing name bumps its version.
+    """
+    artifacts.validate_name(body.name)
+    if body.size_bytes > config.MAX_ARTIFACT_BYTES:
+        raise HTTPException(413, "artifact exceeds size limit")
+    async with db.transaction() as conn:
+        row = await _authorize(conn, session_id, caller)
+        record = await conn.fetchrow(
+            "INSERT INTO artifacts (id, session_id, agent_id, environment_id, name, "
+            "  description, content_type, size_bytes, created_by) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) "
+            "ON CONFLICT (session_id, name) DO UPDATE SET "
+            "  content_type = EXCLUDED.content_type, size_bytes = EXCLUDED.size_bytes, "
+            "  description = COALESCE(EXCLUDED.description, artifacts.description), "
+            "  version = artifacts.version + 1, updated_at = now() "
+            "RETURNING *, (xmax = 0) AS inserted",
+            new_id("artifact"),
+            session_id,
+            row["agent_id"],
+            row["environment_id"],
+            body.name,
+            body.description,
+            body.content_type,
+            body.size_bytes,
+            f"agent:{session_id}",
+        )
+        action = "created" if record["inserted"] else "updated"
+        await _emit_artifact_event(conn, session_id, action, record)
+    out = artifacts.serialize(record)
+    out.pop("inserted", None)
+    return out
+
+
+@router.delete("/sessions/{session_id}/artifacts/{name:path}")
+async def delete_session_artifact(
+    session_id: str, name: str, caller: str = Depends(caller_service_account)
+) -> dict:
+    async with db.transaction() as conn:
+        await _authorize(conn, session_id, caller)
+        record = await conn.fetchrow(
+            "DELETE FROM artifacts WHERE session_id = $1 AND name = $2 RETURNING *",
+            session_id,
+            name,
+        )
+        if record is None:
+            raise HTTPException(404, "artifact not found")
+        await _emit_artifact_event(conn, session_id, "deleted", record)
+    return {"id": record["id"], "deleted": True}
+
+
+class ArtifactShare(BaseModel):
+    name: str
+    shared: bool
+
+
+@router.post("/sessions/{session_id}/artifacts/share")
+async def share_session_artifact(
+    session_id: str, body: ArtifactShare, caller: str = Depends(caller_service_account)
+) -> dict:
+    async with db.transaction() as conn:
+        await _authorize(conn, session_id, caller)
+        if body.shared:
+            record = await conn.fetchrow(
+                "UPDATE artifacts SET share_token = COALESCE(share_token, $3), "
+                "  shared_at = COALESCE(shared_at, now()), "
+                "  shared_by = COALESCE(shared_by, $4), updated_at = now() "
+                "WHERE session_id = $1 AND name = $2 RETURNING *",
+                session_id,
+                body.name,
+                secrets.token_urlsafe(24),
+                f"agent:{session_id}",
+            )
+        else:
+            record = await conn.fetchrow(
+                "UPDATE artifacts SET share_token = NULL, shared_at = NULL, shared_by = NULL, "
+                "  updated_at = now() WHERE session_id = $1 AND name = $2 RETURNING *",
+                session_id,
+                body.name,
+            )
+        if record is None:
+            raise HTTPException(404, "artifact not found")
+        await _emit_artifact_event(
+            conn, session_id, "shared" if body.shared else "unshared", record
+        )
+    return artifacts.serialize(record)
 
 
 @router.get("/egress/routes/{token}")

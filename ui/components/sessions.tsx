@@ -242,7 +242,38 @@ function Event({
   ) {
     return <FoldedEvent event={event} />;
   }
+  if (event.type === "agent.artifact") {
+    return <ArtifactEvent event={event} />;
+  }
   return <MessageEvent event={event} />;
+}
+
+function ArtifactEvent({ event }: { event: SessionEvent }) {
+  const { artifact_id, name, action, version, share_url } = event.payload as {
+    artifact_id?: string;
+    name?: string;
+    action?: string;
+    version?: number;
+    share_url?: string;
+  };
+  return (
+    <div className="event agent fold">
+      <span className="fold-line">
+        artifact {action}
+        {action === "deleted" ? (
+          <span className="mono">{name}</span>
+        ) : (
+          <a className="mono" href={`/v1/artifacts/${artifact_id}/content`} target="_blank" rel="noreferrer">
+            {name}
+          </a>
+        )}
+        {version != null && action !== "deleted" && <span className="muted">v{version}</span>}
+        {share_url && action === "shared" && (
+          <a href={share_url} target="_blank" rel="noreferrer">link</a>
+        )}
+      </span>
+    </div>
+  );
 }
 
 function ApprovalEvent({

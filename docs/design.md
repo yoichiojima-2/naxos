@@ -32,7 +32,7 @@ Decisions fixed with the owner:
 | State | Cloud SQL Postgres `db-g1-small`, private IP, Direct VPC egress from Cloud Run | always-on (the one fixed cost) | — |
 | Workspaces | GCS bucket per environment `naxos2-sess-{env}` | — | env SA + `sa-api` only |
 | Audit | BigQuery `audit.runs` + `audit.tool_calls`, written **only by the control plane** | — | `sa-api` |
-| UI — agents, session chat/timeline, approval inbox, deployments, vaults, memory, kill switch | Next.js static export baked into the api image | — | — |
+| UI — agents, session chat/timeline, approval inbox, deployments, artifacts, vaults, memory, kill switch | Next.js static export baked into the api image | — | — |
 
 The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json` (the v1 `roles.json` pattern, re-derived). Many agents can share an environment.
 
@@ -158,12 +158,44 @@ memories (id, store_id, path, UNIQUE (store_id, path),
         created_at, updated_at)
         -- mounted as ws/memory/{store}/…, written back at checkpoint
         -- versioning deferred (documented)
+
+artifacts (id, session_id, agent_id, environment_id,
+        name, UNIQUE (session_id, name),
+        description, content_type, size_bytes,
+        version,       -- re-publishing a name bumps it (content overwritten)
+        share_token UNIQUE, shared_at, shared_by,   -- NULL = not shared
+        created_by,    -- 'agent:{session_id}'
+        created_at, updated_at)
+        -- content in GCS at sessions/{session_id}/artifacts/{name}
 ```
+
+### Artifacts
+
+Artifacts are files an agent deliberately publishes as durable outputs — distinct from
+the workspace (an implementation detail that gets overwritten) and from memory (agent-
+private state). The mechanism:
+
+- The sandbox exposes an **in-process MCP server** (`artifacts`) with five tools:
+  `artifact_create` (publish a workspace file; same name = new version),
+  `artifact_list`, `artifact_delete`, `artifact_share`, `artifact_unshare`. Because
+  they are ordinary tool calls, they pass the `PreToolUse` permission gate — audited
+  in `audit.tool_calls`, subject to the agent's permission policy and the kill switch.
+- Content goes **directly from the sandbox to the environment's session bucket**
+  (the env SA already owns it); only metadata flows through `naxos-internal`, which
+  records the row, bumps the version, and appends an `agent.artifact` event
+  (`created | updated | deleted | shared | unshared`) to the session timeline.
+- **Sharing mints a stable token URL** (`/v1/artifacts/shared/{token}`) that resolves
+  independently of session or artifact ids — but it is served by `naxos-api` behind
+  IAP, so a "shared" artifact is reachable by anyone in the org and by no one outside
+  it. Content never leaves the data boundary; there are no public links by design.
+- Size cap `MAX_ARTIFACT_BYTES` (default 10MB), enforced in the sandbox and at
+  registration. Humans manage artifacts (download, describe, share, revoke, delete)
+  from the UI's Artifacts page or the `/v1/artifacts` API.
 
 ### Storage split
 
 - **Postgres** — all queryable control-plane state (above).
-- **GCS** (`naxos2-sess-{env}`) — `sessions/{id}/transcript.jsonl` (SDK session file) and `sessions/{id}/ws/**` (workspace).
+- **GCS** (`naxos2-sess-{env}`) — `sessions/{id}/transcript.jsonl` (SDK session file), `sessions/{id}/ws/**` (workspace), and `sessions/{id}/artifacts/**` (published artifact content).
 - **BigQuery `audit`** — append-only governance record:
 
 ```
@@ -215,11 +247,17 @@ DELETE /v1/vaults/{id}/credentials/{cid}
 
 POST   /v1/memory_stores · GET /v1/memory_stores[/{id}]
 POST   /v1/memory_stores/{id}/memories · GET (list) · GET/PUT/DELETE …/memories/{mid}
+
+GET    /v1/artifacts[?session_id&agent_id] · GET /v1/artifacts/{id}[/content]
+PATCH  /v1/artifacts/{id}                  description
+DELETE /v1/artifacts/{id}                  row + blob
+POST   /v1/artifacts/{id}/share · DELETE …/share    mint / revoke the share token
+GET    /v1/artifacts/shared/{token}[/content]       stable share URL (still behind IAP)
 ```
 
-Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / memory_writeback`, plus `deployments/{id}/fire` and `reconcile`.
+Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / memory_writeback / artifacts (list·register·delete·share)`, plus `deployments/{id}/fire` and `reconcile`.
 
-Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
+Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
 
 Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks in v1.
 
