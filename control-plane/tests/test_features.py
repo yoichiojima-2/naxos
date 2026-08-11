@@ -46,7 +46,9 @@ async def test_deployment_run_now_creates_a_session(client, launched):
     assert [r["id"] for r in runs] == [run["id"]]
 
 
-async def test_deployment_fire_inherits_agent_vaults(client, internal_client, launched, monkeypatch):
+async def test_deployment_fire_inherits_agent_vaults(
+    client, internal_client, launched, monkeypatch
+):
     from naxos_cp import config as cp_config
 
     monkeypatch.setattr(cp_config, "EGRESS_URL", "https://egress.example")

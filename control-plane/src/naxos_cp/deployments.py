@@ -242,7 +242,9 @@ async def fire(deployment_id: str, trigger: str) -> dict[str, Any]:
             session = await sessions.create(
                 conn,
                 agent,
-                initial_events=[EventIn.model_validate(raw) for raw in deployment["initial_events"]],
+                initial_events=[
+                    EventIn.model_validate(raw) for raw in deployment["initial_events"]
+                ],
                 principal=f"deployment:{deployment_id}",
                 title=f"{deployment['name']} ({trigger})",
                 budget_usd=deployment["budget_usd"],
