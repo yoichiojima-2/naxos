@@ -29,10 +29,15 @@ def test_main_module_imports():
 
 
 def test_options_passes_tools_as_allowlist():
-    options = _harness(_config(tools=["Bash", "Read"], max_turns=7)).options()
+    options = _harness(_config(tools=["Bash", "Read"], max_turns=7, effort="high")).options()
     assert options.allowed_tools == ["Bash", "Read"]
     assert options.model == "claude-sonnet-5"
     assert options.max_turns == 7
+    assert options.effort == "high"
+
+
+def test_options_effort_defaults_to_none():
+    assert _harness(_config()).options().effort is None
 
 
 def test_options_empty_tools_means_unrestricted():

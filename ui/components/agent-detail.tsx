@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, AgentDetail as Detail, AgentIn, Environment } from "@/lib/api";
-import AgentForm, { MODELS } from "@/components/agent-form";
+import AgentForm, { EFFORT_LEVELS, MODELS } from "@/components/agent-form";
 import { BackIcon } from "@/components/icons";
 
 export default function AgentDetail({
@@ -131,6 +131,12 @@ export default function AgentDetail({
               <dd className="mono">{detail.id}</dd>
               <dt>Model</dt>
               <dd>{modelLabel}</dd>
+              <dt>Effort</dt>
+              <dd>
+                {detail.effort
+                  ? EFFORT_LEVELS.find((l) => l.id === detail.effort)?.label ?? detail.effort
+                  : <span className="muted">model default</span>}
+              </dd>
               <dt>Environment</dt>
               <dd>{environment?.name ?? detail.environment_id}</dd>
               <dt>Version</dt>

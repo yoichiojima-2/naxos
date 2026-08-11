@@ -46,6 +46,9 @@ USER_EVENT_TYPES = {
 }
 
 
+EffortLevel = Literal["low", "medium", "high", "xhigh", "max"]
+
+
 class PermissionMode(StrEnum):
     ALWAYS_ALLOW = "always_allow"
     ALWAYS_ASK = "always_ask"
@@ -115,4 +118,5 @@ class SessionConfig(BaseModel):
     budget_usd: float | None = None
     cost_usd: float = 0.0
     max_turns: int | None = None
+    effort: EffortLevel | None = None
     disabled: bool = False

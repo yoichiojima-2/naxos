@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from naxos_shared.events import (
     Decision,
+    EffortLevel,
     EventIn,
     EventType,
     PermissionPolicy,
@@ -58,6 +59,7 @@ class AgentIn(BaseModel):
     skill_ids: list[str] = Field(default_factory=list)
     default_budget_usd: float | None = None
     max_turns: int | None = None
+    effort: EffortLevel | None = None
 
 
 @router.post("/agents", status_code=201)
@@ -101,8 +103,8 @@ async def _insert_version(conn, agent_id: str, version: int, body: AgentIn, prin
     await conn.execute(
         "INSERT INTO agent_versions (agent_id, version, instructions, model, tools, "
         "  permission_policy, mcp_servers, vault_ids, memory_store_ids, skill_ids, "
-        "  default_budget_usd, max_turns, created_by) "
-        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+        "  default_budget_usd, max_turns, effort, created_by) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         agent_id,
         version,
         body.instructions,
@@ -115,6 +117,7 @@ async def _insert_version(conn, agent_id: str, version: int, body: AgentIn, prin
         body.skill_ids,
         body.default_budget_usd,
         body.max_turns,
+        body.effort,
         principal,
     )
 
@@ -122,7 +125,8 @@ async def _insert_version(conn, agent_id: str, version: int, body: AgentIn, prin
 async def _agent_with_version(conn, agent_id: str, version: int) -> dict:
     row = await conn.fetchrow(
         "SELECT a.*, v.instructions, v.model, v.tools, v.permission_policy, v.mcp_servers, "
-        "  v.vault_ids, v.memory_store_ids, v.skill_ids, v.default_budget_usd, v.max_turns "
+        "  v.vault_ids, v.memory_store_ids, v.skill_ids, v.default_budget_usd, v.max_turns, "
+        "  v.effort "
         "FROM agents a JOIN agent_versions v ON v.agent_id = a.id AND v.version = $2 "
         "WHERE a.id = $1",
         agent_id,
