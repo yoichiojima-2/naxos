@@ -72,12 +72,16 @@ export default function Agents({
               </select>
             </div>
           </div>
-          <label>environment</label>
-          <select value={environmentId} onChange={(e) => setEnvironmentId(e.target.value)}>
-            {environments.map((env) => (
-              <option key={env.id} value={env.id}>{env.name}</option>
-            ))}
-          </select>
+          {environments.length > 1 && (
+            <>
+              <label>environment</label>
+              <select value={environmentId} onChange={(e) => setEnvironmentId(e.target.value)}>
+                {environments.map((env) => (
+                  <option key={env.id} value={env.id}>{env.name}</option>
+                ))}
+              </select>
+            </>
+          )}
           <label>instructions</label>
           <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} />
           <label className="row" style={{ marginTop: 10 }}>
