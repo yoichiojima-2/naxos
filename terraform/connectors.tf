@@ -29,9 +29,16 @@ locals {
       }
     }
   ]...)
+  # Connector access is a declarative per-environment opt-in, like
+  # bigquery_datasets: a `connectors` list in environments.json. It is not
+  # implied by declaring the server in mcp_servers, because run.invoker is
+  # network reach, not a tool grant — see the note above the binding.
+  environment_connectors = {
+    for env, cfg in local.environments : env => try(cfg.connectors, [])
+  }
   connector_env_grants = merge([
-    for name, cfg in local.connectors : {
-      for env in keys(local.environments) : "${name}-${env}" => {
+    for env, names in local.environment_connectors : {
+      for name in names : "${name}-${env}" => {
         connector   = name
         environment = env
       }
@@ -139,12 +146,25 @@ resource "google_cloud_run_v2_service" "connector" {
   ]
 }
 
+# Granting this is granting network reach, not a tool: the connector services
+# disable their own request auth (Cloud Run IAM is the gate), and a sandbox can
+# mint an ID token for any audience from the metadata server. So an environment
+# holding run.invoker can curl the connector from bash — outside mcp_servers,
+# the permission policy, the approval gate and audit.tool_calls. Grant it only
+# to tenants that are meant to reach that system with its shared credential.
 resource "google_cloud_run_v2_service_iam_member" "connector_env_invoker" {
   for_each = local.connector_env_grants
   name     = google_cloud_run_v2_service.connector[each.value.connector].name
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.environment[each.value.environment].email}"
+
+  lifecycle {
+    precondition {
+      condition     = contains(keys(local.connectors), each.value.connector)
+      error_message = "environments.json grants unknown connector '${each.value.connector}'; it must be a key in connectors.json."
+    }
+  }
 }
 
 output "connector_urls" {

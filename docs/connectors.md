@@ -64,9 +64,18 @@ the approval gate. Widen the globs deliberately.
 
 Deployment is three steps, in order:
 
-1. **Provision.** Add or edit the entry in `terraform/connectors.json`, then
-   `terraform apply`. This creates the service account, the secret shells, the Cloud Run
-   service and the per-environment `run.invoker` bindings.
+1. **Provision.** Add or edit the entry in `terraform/connectors.json`, then list the
+   connector under `connectors` for each environment that may use it in
+   `terraform/environments.json`, then `terraform apply`. This creates the service
+   account, the secret shells, the Cloud Run service and the `run.invoker` bindings for
+   exactly those environments.
+
+   ```json
+   { "default": { "cpu": "1", "memory": "2Gi", "connectors": ["slack", "atlassian"] } }
+   ```
+
+   An environment with no `connectors` list reaches no hosted connector. Grant
+   deliberately — see [Governance](#governance) for why this is not a formality.
 2. **Set the secret values** (Terraform owns shells, never values):
    ```bash
    printf '%s' "$TOKEN" | gcloud secrets versions add mcp-slack-slack-mcp-xoxp-token --data-file=-
@@ -116,6 +125,15 @@ A connector tool is an ordinary tool call. `mcp__{server}__{tool}` names go thro
 same permission policy globs, the same `PreToolUse` approval gate, the same kill switch,
 and land in `audit.tool_calls` like any other call. Nothing about attaching a connector
 widens what an agent may do without an explicit policy rule.
+
+**The IAM grant is the real boundary, not the tool list.** `run.invoker` on a connector
+service is network reach, not a tool grant. The hosted servers disable their own request
+auth because Cloud Run IAM is the gate, and any sandbox can mint an ID token for any
+audience from the metadata server — so an agent with `Bash` in a granted environment can
+call the connector directly, bypassing `mcp_servers`, the permission globs, the approval
+gate and `audit.tool_calls`. No amount of sandbox-side governance closes that; only the
+grant does. Treat listing a connector under an environment as "this tenant may use this
+system with its shared credential", and leave it off otherwise.
 
 **Known limitation.** Connectors run as a single service identity: there is no OAuth
 authorization-code flow and no per-end-user identity. Slack, Jira and Notion will attribute
