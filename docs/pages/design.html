@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>naxos — Design</title>
+<style>
+:root {
+  --bg: #fafbfb;
+  --surface: #f1f4f4;
+  --ink: #1d2528;
+  --muted: #5d6a6f;
+  --accent: #0d6a63;
+  --accent-ink: #0a544f;
+  --border: #dce3e4;
+  --code-bg: #eef2f2;
+  --good-bg: #e3f0e8; --good-ink: #1e6b3a;
+  --warn-bg: #f7ecd8; --warn-ink: #8a5a12;
+  --m-get: #1d6fa5; --m-post: #0d6a63; --m-patch: #8a5a12; --m-del: #a33d3d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15191b;
+    --surface: #1c2225;
+    --ink: #dbe2e4;
+    --muted: #93a0a5;
+    --accent: #4fb8ad;
+    --accent-ink: #6fcabf;
+    --border: #2b3437;
+    --code-bg: #1b2124;
+    --good-bg: #1b2f23; --good-ink: #7fc79a;
+    --warn-bg: #33290f; --warn-ink: #d8ab55;
+    --m-get: #6ab3e3; --m-post: #4fb8ad; --m-patch: #d8ab55; --m-del: #e08b8b;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15191b;
+  --surface: #1c2225;
+  --ink: #dbe2e4;
+  --muted: #93a0a5;
+  --accent: #4fb8ad;
+  --accent-ink: #6fcabf;
+  --border: #2b3437;
+  --code-bg: #1b2124;
+  --good-bg: #1b2f23; --good-ink: #7fc79a;
+  --warn-bg: #33290f; --warn-ink: #d8ab55;
+  --m-get: #6ab3e3; --m-post: #4fb8ad; --m-patch: #d8ab55; --m-del: #e08b8b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Charter, Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+.page {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem 6rem;
+}
+header.doc { margin-bottom: 2.5rem; }
+.eyebrow {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 0.75rem;
+}
+h1 {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.75rem;
+  text-wrap: balance;
+}
+.doc-meta { color: var(--muted); font-size: 0.95rem; margin: 0; }
+h2 {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 1.3rem;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  margin: 3rem 0 1rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  text-wrap: balance;
+  scroll-margin-top: 1.5rem;
+}
+h2 .num, h3 .num { color: var(--accent); margin-right: 0.5em; font-variant-numeric: tabular-nums; }
+h3 {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 650;
+  margin: 2rem 0 0.75rem;
+  scroll-margin-top: 1.5rem;
+}
+h4 {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  margin: 1.75rem 0 0.5rem;
+}
+p { margin: 0 0 1rem; }
+ul, ol { margin: 0 0 1rem; padding-left: 1.4rem; }
+li { margin-bottom: 0.4rem; }
+li > ol, li > p { margin-top: 0.4rem; }
+strong { font-weight: 700; }
+a { color: var(--accent-ink); text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+  line-height: 1.5;
+}
+pre code { background: none; border: none; padding: 0; font-size: 0.8rem; }
+.table-wrap { overflow-x: auto; margin: 0 0 1.25rem; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 650;
+  border-bottom: 2px solid var(--border);
+}
+td.num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
+
+/* table of contents: card on narrow, fixed sidebar on wide */
+.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.25rem 1.5rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+.toc-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+  font-weight: 650;
+}
+.toc ol {
+  margin: 0;
+  padding-left: 1.5rem;
+  columns: 2;
+  column-gap: 2.5rem;
+}
+.toc li { margin-bottom: 0.25rem; break-inside: avoid; }
+.toc a { text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+@media (max-width: 540px) { .toc ol { columns: 1; } }
+@media (min-width: 1280px) {
+  .toc {
+    position: fixed;
+    top: 3.5rem;
+    left: calc(50% - 23rem - 15.5rem);
+    width: 13.5rem;
+    font-size: 0.82rem;
+    background: none;
+    border: none;
+    border-left: 2px solid var(--border);
+    border-radius: 0;
+    padding: 0.25rem 0 0.25rem 1.25rem;
+    max-height: calc(100vh - 6rem);
+    overflow-y: auto;
+  }
+  .toc ol { columns: 1; padding-left: 1.2rem; }
+  .toc a { color: var(--muted); }
+  .toc a:hover { color: var(--accent-ink); }
+}
+
+/* badges & chips */
+.badge {
+  display: inline-block;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 0.15em 0.7em;
+  vertical-align: 0.1em;
+}
+.badge.good { background: var(--good-bg); color: var(--good-ink); }
+.badge.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.chip {
+  display: inline-block;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  border-radius: 999px;
+  padding: 0.12em 0.7em;
+  margin: 0.12rem 0.15rem 0.12rem 0;
+  white-space: nowrap;
+}
+.chip-row { margin: 0 0 0.5rem; }
+.chip-row .lbl {
+  display: inline-block;
+  min-width: 4.5rem;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.9rem 1.25rem;
+  margin: 0 0 1.25rem;
+}
+.callout p:last-child { margin-bottom: 0; }
+
+/* lifecycle figure */
+figure { margin: 0 0 1.5rem; }
+figure svg { max-width: 100%; height: auto; display: block; }
+.fig-scroll { overflow-x: auto; }
+.fig-scroll svg { min-width: 620px; }
+figcaption {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+.lifecycle { color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+.lifecycle .state { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.lifecycle .state-end { stroke-dasharray: 4 3; }
+.lifecycle .edge { stroke: currentColor; stroke-width: 1.3; fill: none; }
+.lifecycle .edge-warm { stroke-dasharray: 5 4; }
+.lifecycle .edge-accent { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+.lifecycle text { fill: currentColor; font-size: 11.5px; }
+.lifecycle .t-title { font-size: 13px; font-weight: 650; }
+.lifecycle .t-sub, .lifecycle .t-lbl { fill: var(--muted); font-size: 10.5px; }
+.lifecycle .t-accent { fill: var(--accent-ink); font-size: 10.5px; }
+.lifecycle .arr-fill { fill: currentColor; }
+.lifecycle .arr-fill-accent { fill: var(--accent); }
+
+/* API reference */
+.api-group { margin: 0 0 0.5rem; }
+table.api { font-size: 0.82rem; }
+table.api td { padding: 0.4rem 0.6rem; }
+table.api td.m { width: 3.8rem; white-space: nowrap; }
+table.api td.p { white-space: nowrap; font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 0.78rem; }
+table.api td.d { color: var(--muted); min-width: 12rem; }
+table.api td.d code { font-size: 0.9em; }
+.mb {
+  display: inline-block;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border-radius: 4px;
+  padding: 0.2em 0;
+  width: 3.4rem;
+  text-align: center;
+}
+.mb.get { color: var(--m-get); background: color-mix(in srgb, var(--m-get) 13%, transparent); }
+.mb.post { color: var(--m-post); background: color-mix(in srgb, var(--m-post) 13%, transparent); }
+.mb.patch { color: var(--m-patch); background: color-mix(in srgb, var(--m-patch) 15%, transparent); }
+.mb.del { color: var(--m-del); background: color-mix(in srgb, var(--m-del) 13%, transparent); }
+
+/* schema cards */
+.tbl {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 0 1rem;
+  overflow: hidden;
+}
+.tbl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 1rem;
+}
+.tbl-name {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+.tbl-key {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.tbl-key code { font-size: 0.95em; background: none; border: none; padding: 0; }
+.tbl table { font-size: 0.8rem; }
+.tbl td { border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); padding: 0.35rem 1rem; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl td.c { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 0.76rem; }
+.tbl td.n { color: var(--muted); width: 42%; }
+.tbl-foot {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  padding: 0.4rem 1rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+</head>
+<body>
+<nav style="max-width:46rem;margin:0 auto;padding:1.5rem 1.5rem 0;display:flex;gap:1.25rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:0.88rem">
+  <a href="./" style="color:var(--muted);text-decoration:none">Overview</a>
+  <a href="design.html" style="color:var(--accent);text-decoration:none">Design document</a>
+  <a href="https://github.com/yoichiojima-2/naxos" style="color:var(--muted);text-decoration:none">GitHub</a>
+</nav>
+<div class="page">
+<header class="doc">
+  <p class="eyebrow">naxos · design document</p>
+  <h1>naxos — Claude Managed Agents on Google Cloud</h1>
+  <p class="doc-meta">HTML rendering of <code>docs/design.md</code> (living document) · last synced 2026-08-11 · All project documentation is written in English.</p>
+</header>
+
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><a href="#s1">Context and goal</a></li>
+    <li><a href="#s2">Core design stance</a></li>
+    <li><a href="#s3">Components</a></li>
+    <li><a href="#s4">Session lifecycle</a></li>
+    <li><a href="#s5">Vault egress proxy</a></li>
+    <li><a href="#s6">Data model</a></li>
+    <li><a href="#s7">API surface (v1)</a></li>
+    <li><a href="#s8">Security model</a></li>
+    <li><a href="#s9">Cost model</a></li>
+    <li><a href="#s10">Repo layout</a></li>
+    <li><a href="#s11">Build order</a></li>
+    <li><a href="#s12">Verification</a></li>
+    <li><a href="#s13">GCP verification</a></li>
+    <li><a href="#s14">Risks and open items</a></li>
+  </ol>
+</nav>
+
+<h2 id="s1"><span class="num">1</span>Context and goal</h2>
+
+<p>naxos is a <strong>faithful Google Cloud implementation of Claude Managed Agents (CMA)</strong> — the same object model, REST surface, and event vocabulary as <code>platform.claude.com/docs/en/managed-agents</code>, running entirely inside your own GCP boundary. The platform's reason to exist (see CLAUDE.md): the data boundary (Vertex-only model exit), internal-system integration inside that boundary, and execution-level governance that a hosted platform cannot provide.</p>
+
+<p>Fixed design decisions:</p>
+
+<ul>
+  <li><strong>Faithful API clone</strong> of the CMA REST surface and <code>{domain}.{action}</code> event types.</li>
+  <li><strong>Container per session</strong>: each session's agent loop + tools run in an isolated container.</li>
+  <li><strong>Initial scope</strong>: agents / environments / sessions / events core, scheduled deployments, permission policies (<code>always_ask</code> approval), vaults <strong>with a real egress proxy</strong> (full CMA credential fidelity — credentials never enter the sandbox), memory stores. Outcomes, multiagent, and webhooks are deferred.</li>
+  <li><strong>Cold resume accepted</strong>: idle sessions release their container; the next event relaunches it (CMA's <code>rescheduling</code> status). UI shows a "waking up" state.</li>
+  <li><strong>Environments are Terraform-provisioned</strong>: the API only registers rows; the per-environment SA / sandbox Job / bucket come from a <code>for_each</code> over <code>terraform/environments.json</code>. The control plane never holds IAM-admin.</li>
+</ul>
+
+<h2 id="s2"><span class="num">2</span>Core design stance</h2>
+
+<div class="callout">
+<p><strong>Sessions are durable state, not processes.</strong> A session lives in Postgres (metadata, event log) and GCS (SDK transcript, workspace). A container — one Cloud Run Job execution — exists only while the session is actively processing events. When the queue drains, the sandbox checkpoints to GCS and exits; the next incoming event relaunches it. This is the only shape that satisfies both CMA-style per-session isolation and scale-to-zero within the cost envelope of §9.</p>
+</div>
+
+<h2 id="s3"><span class="num">3</span>Components</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Component</th><th>GCP resource</th><th>Scaling</th><th>SA</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>naxos-api</code> — /v1 REST + SSE, serves the UI static export</td><td>Cloud Run Service, IAP directly on Cloud Run (no LB)</td><td>min=0, request timeout 3600s (SSE)</td><td><code>sa-api</code></td></tr>
+    <tr><td><code>naxos-internal</code> — sandbox↔control-plane channel, scheduler targets, reconciler (same image as api, entrypoint flag)</td><td>Cloud Run Service, internal ingress, IAM auth</td><td>min=0</td><td><code>sa-api</code></td></tr>
+    <tr><td><code>naxos-egress</code> — credential-substituting proxy for MCP/HTTP egress</td><td>Cloud Run Service, internal ingress, IAM auth</td><td>min=0</td><td><code>sa-egress</code> (sole secretAccessor on vault secrets)</td></tr>
+    <tr><td><code>naxos-sbx-{env}</code> — session sandbox: Claude Agent SDK loop + tools; one Job per environment, one execution per session wake</td><td>Cloud Run Job (<code>max_retries=0</code>, task timeout 3600s, self-checkpoint at ~55 min)</td><td>zero when idle</td><td><code>sa-env-{env}</code></td></tr>
+    <tr><td>Deployment cron <code>naxos-deploy-{id}</code>; reconciler tick (1/min)</td><td>Cloud Scheduler</td><td>—</td><td><code>sa-scheduler</code></td></tr>
+    <tr><td>State</td><td>Cloud SQL Postgres <code>db-g1-small</code>, private IP, Direct VPC egress from Cloud Run</td><td>always-on (the one fixed cost)</td><td>—</td></tr>
+    <tr><td>Workspaces</td><td>GCS bucket per environment <code>naxos2-sess-{env}</code></td><td>—</td><td>env SA + <code>sa-api</code> only</td></tr>
+    <tr><td>Audit</td><td>BigQuery <code>audit.runs</code> + <code>audit.tool_calls</code>, written <strong>only by the control plane</strong></td><td>—</td><td><code>sa-api</code></td></tr>
+    <tr><td>UI — agents, session chat/timeline, approval inbox, deployments, artifacts, vaults, memory, skills, kill switch</td><td>Next.js static export baked into the api image</td><td>—</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>The <strong>environment is the tenant/isolation boundary</strong> (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from <code>environments.json</code>. Many agents can share an environment.</p>
+
+<h2 id="s4"><span class="num">4</span>Session lifecycle and event flow</h2>
+
+<p>Statuses:
+<span class="chip">idle</span><span class="chip">running</span><span class="chip">rescheduling</span><span class="chip">terminated</span>
+— with <code>stop_reason</code> on idle:
+<span class="chip">end_turn</span><span class="chip">requires_action</span><span class="chip">budget_reached</span><span class="chip">retries_exhausted</span></p>
+
+<p>A user event is an <code>INSERT</code> into <code>session_events</code> (per-session <code>seq</code>; <code>processed_at IS NULL</code> means still queued). If the session has no live lease, the control plane launches the sandbox: <code>jobs.run(naxos-sbx-{env}, args=["--session", id])</code>.</p>
+
+<figure>
+<div class="fig-scroll">
+<svg class="lifecycle" viewBox="0 0 800 320" role="img" aria-label="Session lifecycle state diagram: idle to rescheduling on a user event, to running after claim and restore, back to idle when the queue drains via checkpoint and exit at zero cost; a dashed warm re-entry skips the relaunch; terminate leads to the terminated state.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="arr-fill"/>
+    </marker>
+    <marker id="arrA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="arr-fill-accent"/>
+    </marker>
+  </defs>
+
+  <!-- entry -->
+  <circle cx="16" cy="104" r="4" class="arr-fill"/>
+  <line x1="22" y1="104" x2="44" y2="104" class="edge" marker-end="url(#arr)"/>
+
+  <!-- states -->
+  <rect x="50" y="72" width="160" height="64" rx="8" class="state"/>
+  <text x="130" y="99" text-anchor="middle" class="t-title">idle</text>
+  <text x="130" y="117" text-anchor="middle" class="t-sub">no container · cost 0</text>
+
+  <rect x="310" y="72" width="180" height="64" rx="8" class="state"/>
+  <text x="400" y="99" text-anchor="middle" class="t-title">rescheduling</text>
+  <text x="400" y="117" text-anchor="middle" class="t-sub">cold resume ~10–40s</text>
+
+  <rect x="590" y="72" width="160" height="64" rx="8" class="state"/>
+  <text x="670" y="99" text-anchor="middle" class="t-title">running</text>
+  <text x="670" y="117" text-anchor="middle" class="t-sub">one Job execution · SDK loop</text>
+
+  <rect x="590" y="250" width="160" height="48" rx="8" class="state state-end"/>
+  <text x="670" y="279" text-anchor="middle" class="t-title">terminated</text>
+
+  <!-- idle -> rescheduling -->
+  <line x1="210" y1="104" x2="304" y2="104" class="edge" marker-end="url(#arr)"/>
+  <text x="257" y="92" text-anchor="middle" class="t-lbl">user event →</text>
+  <text x="257" y="122" text-anchor="middle" class="t-lbl">jobs.run(sbx-{env})</text>
+
+  <!-- rescheduling -> running -->
+  <line x1="490" y1="104" x2="584" y2="104" class="edge" marker-end="url(#arr)"/>
+  <text x="537" y="92" text-anchor="middle" class="t-lbl">claim · restore ·</text>
+  <text x="537" y="122" text-anchor="middle" class="t-lbl">resume SDK</text>
+
+  <!-- warm re-entry arc (idle -> running) -->
+  <path d="M 130,72 C 130,16 670,16 670,72" class="edge edge-warm" marker-end="url(#arr)"/>
+  <text x="400" y="48" text-anchor="middle" class="t-lbl">new event during linger → warm re-entry (no relaunch)</text>
+
+  <!-- running -> idle (checkpoint loop, accent) -->
+  <path d="M 630,136 L 630,196 L 130,196 L 130,142" class="edge-accent" marker-end="url(#arrA)"/>
+  <text x="380" y="188" text-anchor="middle" class="t-accent">queue drained → session.status_idle(stop_reason) · linger ≈120s</text>
+  <text x="380" y="212" text-anchor="middle" class="t-accent">checkpoint (transcript · ws delta · memory) → release lease → exit → cost 0</text>
+
+  <!-- running -> terminated -->
+  <line x1="710" y1="136" x2="710" y2="244" class="edge" marker-end="url(#arr)"/>
+  <text x="718" y="196" text-anchor="start" class="t-lbl">terminate</text>
+</svg>
+</div>
+<figcaption>One wake-to-idle burst: an event launches a Job execution, the SDK loop drains the queue, and the container checkpoints and exits — the highlighted return edge is the design stance of §2 (idle sessions cost nothing). Explicit terminate reaches a live sandbox over the control channel.</figcaption>
+</figure>
+
+<h4>Sandbox boot (rescheduling → running)</h4>
+<ol>
+  <li>OIDC ID token → <code>POST /internal/sessions/{id}/claim</code> — take the lease.</li>
+  <li><code>GET /internal/sessions/{id}/config</code> — resolved agent version, tools, permission policies, egress routes, memory snapshot.</li>
+  <li>Restore <code>gs://…/{id}/transcript.jsonl</code> + <code>ws/</code>; write memory files.</li>
+  <li><code>ClaudeSDKClient(resume=sdk_session_id, cwd=ws, mcp_servers=…, can_use_tool=permission_hook)</code> — Vertex AI backend.</li>
+</ol>
+<p>Then the processing loop: long-poll <code>/internal/sessions/{id}/queue?wait=25</code> (queued events + control signals: interrupt / kill / terminate) → SDK turn → batch-POST <code>agent.*</code>/<code>span.*</code> events to <code>/internal</code>.</p>
+
+<p><strong>Client-facing streaming.</strong> <code>GET /v1/sessions/{id}/events?stream=sse&amp;after={seq}</code> — the API polls <code>session_events</code> every 1s, emits SSE frames with <code>id:{seq}</code>, honors <code>Last-Event-ID</code> for reconnect replay, sends a ping comment every 15s. This is v1's <code>EventStream</code> re-derived but DB-backed: replay survives instance loss, so no Cloud Run session affinity is needed anywhere. LISTEN/NOTIFY is a later latency optimization, deliberately not built in v1.</p>
+
+<p><strong>Interrupt.</strong> <code>user.interrupt</code> is inserted as an event and surfaced immediately on the control channel; the sandbox calls <code>client.interrupt()</code>. Jumps the queue, per CMA.</p>
+
+<p><strong>Permission pause (<code>always_ask</code>).</strong> The gate is a <strong><code>PreToolUse</code> hook</strong>, not <code>can_use_tool</code> — see §4.1 for why. On every tool call:</p>
+
+<ol>
+  <li>Check the kill switch (<code>agents.disabled</code>; 15s cache + control-channel push).</li>
+  <li>Match the tool against the agent version's permission policy. <code>always_allow</code> → allow, record the decision in audit.</li>
+  <li><code>always_ask</code> → look up <code>tool_confirmations</code> by <code>(session_id, call_hash)</code> where <code>call_hash = sha256(tool_name + canonical_json(input))</code>. Stored decision → return it. <strong>The key is the call hash, not <code>tool_use_id</code></strong> — the SDK assigns a fresh <code>tool_use_id</code> when a pending call is replayed after resume (measured; §4.1).</li>
+  <li>No decision → insert a pending row, emit <code>session.status_idle(stop_reason=requires_action)</code>, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, <strong>checkpoint and exit</strong> — a blocked container costs nothing.</li>
+  <li>A later <code>user.tool_confirmation</code> stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.</li>
+</ol>
+
+<h3 id="s4-1"><span class="num">4.1</span>Measured SDK resume semantics (<code>claude-agent-sdk</code> 0.2.134)</h3>
+
+<p>Measured findings, all load-bearing:</p>
+
+<ul>
+  <li><strong>Resume replays the pending tool call — R1 is resolved.</strong> Killing the process inside the permission callback (mid-decision) and then resuming with <code>resume=&lt;session_id&gt;</code> plus a continuation prompt made the model re-issue the <em>same tool with the same input</em>, and the callback fired again. The pause/release/resume design works as specified.</li>
+  <li><strong><code>tool_use_id</code> is not stable across resume.</strong> The replayed call carried a new <code>toolu_…</code> id. Confirmation records must therefore be keyed on a canonical hash of <code>(tool_name, input)</code>, not on <code>tool_use_id</code>. (<code>tool_use_id</code> is still recorded for audit.)</li>
+  <li><strong><code>can_use_tool</code> is not a complete gate; use a <code>PreToolUse</code> hook.</strong> Two shadowing behaviors: any whole-tool entry in <code>allowed_tools</code> auto-approves before the callback runs (the SDK warns about this explicitly), and under the default permission mode the CLI auto-approves calls it judges read-only — a read-only <code>echo</code> never reached the callback while a file-writing <code>bash</code> did. A permission policy that claims "every <code>always_ask</code> call is gated" cannot be built on <code>can_use_tool</code>; the <code>PreToolUse</code> hook fires for every call and is the correct mechanism.</li>
+  <li><strong>Resume needs a nudge.</strong> A resumed session does not continue on its own; the sandbox sends a synthetic continuation user message after restoring. This is internal and is not persisted as a <code>user.message</code> event.</li>
+</ul>
+
+<p><strong>Budget.</strong> The harness checks <code>cost_usd + accrued &gt;= budget_usd</code> before dispatching each queued user event and after each model response; on breach it interrupts, emits <code>session.status_idle(stop_reason=budget_reached)</code>, checkpoints, exits. Deviation from CMA: this is a post-response check (the SDK has no pre-request hook), so worst-case overshoot is one model call. <code>PATCH /v1/sessions/{id}</code> raises the budget; the next event resumes the session.</p>
+
+<p><strong>Crash safety.</strong> The sandbox heartbeats its lease every 30s. A 1-minute reconciler relaunches sessions that have queued events and an expired lease, up to <code>MAX_RETRIES=3</code> per batch, then emits <code>session.error</code> + <code>session.status_idle(stop_reason=retries_exhausted)</code>. The Job never self-retries (<code>max_retries=0</code>); the sandbox self-checkpoints at ~55 min and exits cleanly so a fresh execution can continue.</p>
+
+<h2 id="s5"><span class="num">5</span>Vault egress proxy (full CMA fidelity)</h2>
+
+<p>Credentials never enter the sandbox:</p>
+
+<ul>
+  <li><code>POST /v1/vaults/{id}/credentials</code> writes the secret value straight to Secret Manager. Postgres stores metadata and the secret ref only; values are write-only and never returned by the API.</li>
+  <li>Agent config declares MCP servers by their real URL. The sandbox's resolved config rewrites MCP URLs to <code>naxos-egress</code> with an opaque route token. The proxy authenticates the caller (OIDC; the SA must match the session's environment), resolves session → vault_ids → credential matched by target URL, injects the Authorization/header, and forwards to the real server.</li>
+  <li>Env-var-style credentials for CLIs: the sandbox env carries an opaque placeholder; the proxy substitutes it in request headers for declared HTTP targets routed through it. Transparent interception of arbitrary egress is out of scope — bash traffic not routed through the proxy simply has no credential. This limitation is documented, not hidden.</li>
+  <li>Only <code>sa-egress</code> holds <code>secretAccessor</code> on vault secrets. Environment SAs hold none.</li>
+</ul>
+
+<h2 id="s6"><span class="num">6</span>Data model</h2>
+
+<h3>Postgres (control-plane state)</h3>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">environments</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id, name, service_account_email, sandbox_job_name, session_bucket</td><td class="n">provisioned by Terraform; API registers rows only</td></tr>
+    <tr><td class="c">cpu, memory, archived_at, created_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">agents</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id, name, environment_id, latest_version, disabled</td><td class="n"><code>disabled</code> is the kill switch</td></tr>
+    <tr><td class="c">archived_at, created_at, updated_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">agent_versions</span><span class="tbl-key">PRIMARY KEY <code>(agent_id, version)</code></span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">agent_id, version</td><td class="n">immutable; update = new version</td></tr>
+    <tr><td class="c">instructions, model, tools jsonb, permission_policy jsonb</td><td class="n"></td></tr>
+    <tr><td class="c">vault_ids text[], memory_store_ids text[]</td><td class="n"></td></tr>
+    <tr><td class="c">default_budget_usd numeric, max_turns int, created_by, created_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">sessions</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id, agent_id, agent_version, overrides jsonb, environment_id</td><td class="n"></td></tr>
+    <tr><td class="c">status</td><td class="n">CHECK IN <code>idle · running · rescheduling · terminated</code></td></tr>
+    <tr><td class="c">stop_reason, budget_usd, cost_usd DEFAULT 0</td><td class="n"></td></tr>
+    <tr><td class="c">vault_ids text[], memory_store_ids text[], resources jsonb</td><td class="n"></td></tr>
+    <tr><td class="c">sdk_session_id, lease_id uuid, lease_expires_at, execution_name</td><td class="n">lease = the live-container claim</td></tr>
+    <tr><td class="c">retry_count DEFAULT 0, last_event_seq DEFAULT 0</td><td class="n"></td></tr>
+    <tr><td class="c">created_by, created_at, updated_at, terminated_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">session_events</span><span class="tbl-key">UNIQUE <code>(session_id, seq)</code></span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id bigserial, session_id, seq</td><td class="n">seq assigned under <code>SELECT … FOR UPDATE</code> on the session row</td></tr>
+    <tr><td class="c">type, payload jsonb</td><td class="n">≤64KB; oversize truncated, full copy in transcript</td></tr>
+    <tr><td class="c">principal, processed_at</td><td class="n">NULL on <code>user.*</code> rows = still queued</td></tr>
+    <tr><td class="c">created_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">tool_confirmations</span><span class="tbl-key">UNIQUE <code>(session_id, call_hash)</code></span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id, session_id, call_hash</td><td class="n"><code>sha256(tool_name + canonical_json(input))</code></td></tr>
+    <tr><td class="c">tool_use_id</td><td class="n">audit only; not stable across resume</td></tr>
+    <tr><td class="c">tool_name, input jsonb</td><td class="n"></td></tr>
+    <tr><td class="c">status</td><td class="n">CHECK IN <code>pending · allowed · denied · expired</code></td></tr>
+    <tr><td class="c">requested_at, expires_at, decided_by, decided_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">deployments</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id, agent_id, agent_version</td><td class="n">version NULL = latest at fire time</td></tr>
+    <tr><td class="c">name, cron, timezone DEFAULT 'Asia/Tokyo', initial_events jsonb</td><td class="n"></td></tr>
+    <tr><td class="c">budget_usd, paused DEFAULT false, archived_at, scheduler_job_name</td><td class="n"></td></tr>
+    <tr><td class="c">created_by, created_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">deployment_runs</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id, deployment_id, session_id</td><td class="n"></td></tr>
+    <tr><td class="c">status</td><td class="n">CHECK IN <code>queued · running · succeeded · failed</code></td></tr>
+    <tr><td class="c">error_type</td><td class="n"><code>session_error · budget_reached · timeout · retries_exhausted · infra_error</code></td></tr>
+    <tr><td class="c">fired_at, finished_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">vaults · vault_credentials</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">vaults: id, name, archived_at, created_at</td><td class="n"></td></tr>
+    <tr><td class="c">vault_credentials: id, vault_id, name</td><td class="n"></td></tr>
+    <tr><td class="c">type</td><td class="n"><code>'env'</code> | <code>'header'</code></td></tr>
+    <tr><td class="c">secret_ref</td><td class="n">Secret Manager resource name; value NEVER in Postgres</td></tr>
+    <tr><td class="c">target jsonb</td><td class="n">e.g. <code>{"mcp_server": "github"}</code> or <code>{"host": "api.example.com"}</code></td></tr>
+    <tr><td class="c">created_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">memory_stores · memories</span><span class="tbl-key">UNIQUE <code>(store_id, path)</code></span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">memory_stores: id, name, created_at</td><td class="n"></td></tr>
+    <tr><td class="c">memories: id, store_id, path</td><td class="n"></td></tr>
+    <tr><td class="c">content</td><td class="n">≤64KB; Postgres is source of truth</td></tr>
+    <tr><td class="c">updated_by</td><td class="n">principal or <code>agent:{session_id}</code></td></tr>
+    <tr><td class="c">created_at, updated_at</td><td class="n"></td></tr>
+  </table></div>
+  <div class="tbl-foot">Mounted as <code>ws/memory/{store}/…</code>, written back at checkpoint. Versioning deferred (documented).</div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">artifacts</span><span class="tbl-key">UNIQUE <code>(session_id, name)</code></span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id, session_id, agent_id, environment_id, name</td><td class="n"></td></tr>
+    <tr><td class="c">description, content_type, size_bytes</td><td class="n"></td></tr>
+    <tr><td class="c">version</td><td class="n">re-publishing a name bumps it (content overwritten)</td></tr>
+    <tr><td class="c">share_token UNIQUE, shared_at, shared_by</td><td class="n">NULL = not shared</td></tr>
+    <tr><td class="c">created_by, created_at, updated_at</td><td class="n"><code>created_by = 'agent:{session_id}'</code></td></tr>
+  </table></div>
+  <div class="tbl-foot">Content in GCS at <code>sessions/{session_id}/artifacts/{name}</code>.</div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">skills · skill_files</span><span class="tbl-key">UNIQUE <code>(skill_id, path)</code></span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">skills: id, name UNIQUE, description, archived_at, created_by, …</td><td class="n"><code>name</code> is the mount directory name</td></tr>
+    <tr><td class="c">skill_files: id, skill_id, path, content</td><td class="n">≤64KB per file</td></tr>
+    <tr><td class="c">updated_by, created_at, updated_at</td><td class="n"></td></tr>
+  </table></div>
+  <div class="tbl-foot"><code>agent_versions.skill_ids</code> / <code>sessions.skill_ids</code> reference these.</div>
+</div>
+
+<h3>Artifacts</h3>
+
+<p>Artifacts are files an agent deliberately publishes as durable outputs — distinct from the workspace (an implementation detail that gets overwritten) and from memory (agent-private state).</p>
+
+<ul>
+  <li>The sandbox exposes an <strong>in-process MCP server</strong> (<code>artifacts</code>) with five tools: <code>artifact_create</code> (publish a workspace file; same name = new version), <code>artifact_list</code>, <code>artifact_delete</code>, <code>artifact_share</code>, <code>artifact_unshare</code>. Ordinary tool calls — they pass the <code>PreToolUse</code> permission gate, land in <code>audit.tool_calls</code>, and obey the permission policy and kill switch.</li>
+  <li>Content goes <strong>directly from the sandbox to the environment's session bucket</strong> (the env SA already owns it); only metadata flows through <code>naxos-internal</code>, which records the row, bumps the version, and appends an <code>agent.artifact</code> event (<code>created | updated | deleted | shared | unshared</code>) to the session timeline.</li>
+  <li><strong>Sharing mints a stable token URL</strong> (<code>/v1/artifacts/shared/{token}</code>) served by <code>naxos-api</code> behind IAP — a "shared" artifact is reachable by anyone in the org and by no one outside it. No public links by design.</li>
+  <li>Size cap <code>MAX_ARTIFACT_BYTES</code> (default 10MB), enforced in the sandbox and at registration. Humans manage artifacts (view in the built-in viewer, download, describe, share, revoke, delete) from the UI's Artifacts page or the <code>/v1/artifacts</code> API.</li>
+</ul>
+
+<h3>Agent-created deployments (scheduling from inside a session)</h3>
+
+<p>When a user asks an agent to "do this every morning", the durable answer is a deployment, not a timer in the sandbox. The mechanism mirrors artifacts:</p>
+
+<ul>
+  <li>An <strong>in-process MCP server</strong> (<code>schedules</code>) with <code>schedule_create</code> (name, cron, standalone prompt, optional timezone/budget), <code>schedule_list</code>, <code>schedule_delete</code>. <code>naxos-internal</code> creates the deployment for the session's agent, unpinned (<code>agent_version</code> NULL = latest at fire time), attributed <code>created_by = agent:{session_id}</code>; it appears on the Deployments page like any other deployment.</li>
+  <li><strong>Scope</strong>: agents list every unarchived deployment of their agent but can archive only agent-created ones — operator-created deployments are read-only from the sandbox. Runaway protection: <code>MAX_AGENT_DEPLOYMENTS</code> (default 20) per agent, and an agent-chosen budget is capped so it cannot disable budget governance.</li>
+  <li><strong>The CLI's session-local scheduling tools are disallowed</strong> (<code>CronCreate</code> / <code>CronDelete</code> / <code>CronList</code> / <code>ScheduleWakeup</code> via <code>disallowed_tools</code>): they schedule in container memory, and anything they schedule dies unfired at the next idle checkpoint — invisible to audit, pause, and the kill switch.</li>
+</ul>
+
+<h3>Skills (org-shared agent capabilities)</h3>
+
+<p>A skill is the Agent Skills format — a folder with a <code>SKILL.md</code> entry file plus supporting files — stored org-wide in Postgres and attached via <code>agent_versions.skill_ids</code>; sessions copy the list at creation (overridable per session, like vaults and memory).</p>
+
+<ul>
+  <li><strong>Mount</strong>: the sandbox materialises the session's skills as a <strong>local plugin</strong> (<code>--plugin-dir</code>; skill names surface as <code>naxos:{name}</code>) in a directory <em>outside</em> the checkpointed workspace, fetched from internal <code>GET /sessions/{id}/skills</code> on every wake.</li>
+  <li><strong>Settings isolation</strong>: the harness always runs the SDK with <code>setting_sources=[]</code> — the SDK's default would load <code>.claude/settings.json</code> from the agent-writable workspace, where settings can register hooks that execute outside the tool gate.</li>
+  <li><strong>Read-only from the sandbox</strong> — deliberate deviation from memory: no skill writeback path, the plugin tree lives outside the workspace checkpoint and is rebuilt before every SDK turn, so a prompt-injected agent cannot poison a skill shared by every other agent. Skills change only through the API, by a human principal.</li>
+  <li><strong>Governance unchanged</strong>: <code>Skill</code> invocations pass the same <code>PreToolUse</code> gate as every other tool call. <strong>Not versioned</strong> (like memory, documented): editing a skill changes it for every agent that references it, including pinned agent versions.</li>
+</ul>
+
+<h3>Storage split</h3>
+
+<ul>
+  <li><strong>Postgres</strong> — all queryable control-plane state (above).</li>
+  <li><strong>GCS</strong> (<code>naxos2-sess-{env}</code>) — <code>sessions/{id}/transcript.jsonl</code> (SDK session file), <code>sessions/{id}/ws/**</code> (workspace), and <code>sessions/{id}/artifacts/**</code> (published artifact content).</li>
+  <li><strong>BigQuery <code>audit</code></strong> — append-only governance record:</li>
+</ul>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">audit.runs</span><span class="tbl-key">a "run" = one wake-to-idle processing burst of a session</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">run_id, session_id, agent_id, environment_id, deployment_run_id</td><td class="n"></td></tr>
+    <tr><td class="c">trigger_type</td><td class="n"><code>interactive · deployment · api</code></td></tr>
+    <tr><td class="c">principal, started_at, ended_at, status, stop_reason</td><td class="n"></td></tr>
+    <tr><td class="c">num_turns, input_tokens, output_tokens, cost_usd, approx_cost_jpy, model</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">audit.tool_calls</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">run_id, session_id, agent_id, principal, ts, tool_use_id</td><td class="n"></td></tr>
+    <tr><td class="c">tool_name, args_redacted</td><td class="n"></td></tr>
+    <tr><td class="c">decision</td><td class="n"><code>auto_allowed · user_allowed · user_denied · killed</code></td></tr>
+    <tr><td class="c">result_status, latency_ms, error</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<h2 id="s7"><span class="num">7</span>API surface (v1)</h2>
+
+<p>All under IAP; the principal is the verified IAP JWT email. Programmatic clients authenticate as IAP-authorized service accounts (ID token). Deliberate deviation: no API keys.</p>
+
+<h4>Agents</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/agents</td><td class="d">create (version 1)</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/agents · /v1/agents/{id}</td><td class="d">list / get (<code>?version=</code>)</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/agents/{id}/versions</td><td class="d">new immutable version (CMA "update = new version")</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/agents/{id}/archive</td><td class="d">archive</td></tr>
+  <tr><td class="m"><span class="mb patch">PATCH</span></td><td class="p">/v1/agents/{id}</td><td class="d"><code>{disabled: bool}</code> — kill switch (explicit deviation)</td></tr>
+</table></div>
+
+<h4>Environments</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/environments</td><td class="d">register; 409 until Terraform-provisioned (deviation)</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/environments · /v1/environments/{id}</td><td class="d">list / get</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/environments/{id}/archive</td><td class="d">archive</td></tr>
+</table></div>
+
+<h4>Sessions &amp; events</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/sessions</td><td class="d"><code>{agent: {id, version?} | agent_with_overrides, initial_events?, budget?, vault_ids?, memory_store_ids?, resources?}</code></td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/sessions · /v1/sessions/{id}</td><td class="d">list (<code>?agent_id&amp;status</code>) / get</td></tr>
+  <tr><td class="m"><span class="mb patch">PATCH</span></td><td class="p">/v1/sessions/{id}</td><td class="d">raise budget</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/sessions/{id}/terminate</td><td class="d">terminate</td></tr>
+  <tr><td class="m"><span class="mb del">DELETE</span></td><td class="p">/v1/sessions/{id}</td><td class="d">rows + GCS prefix; refused while a sandbox holds a live lease (audit in BigQuery survives)</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/sessions/{id}/events</td><td class="d"><code>user.message</code> | <code>user.interrupt</code> | <code>user.tool_confirmation</code> | <code>user.custom_tool_result</code></td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/sessions/{id}/events?after={seq}&amp;limit=</td><td class="d">list (cursor = <code>seq</code>)</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/sessions/{id}/events?stream=sse&amp;after={seq}</td><td class="d">SSE (<code>Last-Event-ID</code> honored)</td></tr>
+</table></div>
+
+<h4>Deployments</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/deployments</td><td class="d">create</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments · /v1/deployments/{id}</td><td class="d">list / get</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/deployments/{id}/pause | /unpause | /archive | /run</td><td class="d">lifecycle + run-now</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments/{id}/runs</td><td class="d">run history</td></tr>
+</table></div>
+
+<h4>Vaults</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/vaults</td><td class="d">create</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/vaults · /v1/vaults/{id}</td><td class="d">list / get</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/vaults/{id}/archive</td><td class="d">archive</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/vaults/{id}/credentials</td><td class="d">write-only; value → Secret Manager directly</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/vaults/{id}/credentials</td><td class="d">metadata only</td></tr>
+  <tr><td class="m"><span class="mb del">DELETE</span></td><td class="p">/v1/vaults/{id}/credentials/{cid}</td><td class="d">delete credential</td></tr>
+</table></div>
+
+<h4>Memory stores</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/memory_stores</td><td class="d">create</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/memory_stores · /v1/memory_stores/{id}</td><td class="d">list / get (list includes <code>file_count</code> + <code>used_by</code> agent names)</td></tr>
+  <tr><td class="m"><span class="mb patch">PATCH</span></td><td class="p">/v1/memory_stores/{id}</td><td class="d">rename (409 on duplicate name)</td></tr>
+  <tr><td class="m"><span class="mb del">DELETE</span></td><td class="p">/v1/memory_stores/{id}</td><td class="d">store + files; refuses (409) while attached to an agent's latest version or referenced by a non-terminated session</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/memory_stores/{id}/memories</td><td class="d">create memory</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/memory_stores/{id}/memories[/{mid}]</td><td class="d">list / get (also <span class="mb patch" style="width:auto;padding:0.2em 0.5em;">PUT</span> / <span class="mb del" style="width:auto;padding:0.2em 0.5em;">DELETE</span> on <code>/{mid}</code>)</td></tr>
+</table></div>
+
+<h4>Artifacts</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/artifacts[?session_id&amp;agent_id] · /v1/artifacts/{id}[/content]</td><td class="d">list / get metadata or content</td></tr>
+  <tr><td class="m"><span class="mb patch">PATCH</span></td><td class="p">/v1/artifacts/{id}</td><td class="d">description</td></tr>
+  <tr><td class="m"><span class="mb del">DELETE</span></td><td class="p">/v1/artifacts/{id}</td><td class="d">row + blob</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/artifacts/{id}/share · <span class="mb del" style="width:auto;padding:0.2em 0.5em;">DELETE</span> …/share</td><td class="d">mint / revoke the share token</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/artifacts/shared/{token}[/content]</td><td class="d">stable share URL (still behind IAP)</td></tr>
+</table></div>
+
+<h4>Skills</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/skills</td><td class="d">create</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/skills · /v1/skills/{id}</td><td class="d">list / get</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/skills/{id}/archive</td><td class="d">archive</td></tr>
+  <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/skills/{id}/files</td><td class="d">upsert by path</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/skills/{id}/files[/{fid}]</td><td class="d">list / get (also <span class="mb del" style="width:auto;padding:0.2em 0.5em;">DELETE</span> on <code>/{fid}</code>)</td></tr>
+</table></div>
+
+<p>Internal surface (<code>naxos-internal</code>, IAM-only): per-session <code>claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)</code>, plus <code>deployments/{id}/fire</code> and <code>reconcile</code>.</p>
+
+<h4>Event types (CMA vocabulary)</h4>
+<div class="chip-row"><span class="lbl">user.</span><span class="chip">message</span><span class="chip">interrupt</span><span class="chip">tool_confirmation</span><span class="chip">custom_tool_result</span></div>
+<div class="chip-row"><span class="lbl">agent.</span><span class="chip">message</span><span class="chip">thinking</span><span class="chip">tool_use</span><span class="chip">tool_result</span><span class="chip">artifact</span></div>
+<div class="chip-row"><span class="lbl">session.</span><span class="chip">status_running</span><span class="chip">status_idle</span><span class="chip">status_terminated</span><span class="chip">error</span></div>
+<div class="chip-row"><span class="lbl">span.</span><span class="chip">model_request_start</span><span class="chip">model_request_end</span></div>
+
+<p style="margin-top: 1rem;">Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; <code>span.*</code> approximated from the SDK stream; <code>agent.artifact</code> puts the artifact lifecycle in the timeline; no outcomes / multiagent / webhooks initially.</p>
+
+<h2 id="s8"><span class="num">8</span>Security model</h2>
+
+<ul>
+  <li><strong>Per-environment SA is the isolation boundary.</strong> <code>sa-env-{env}</code> gets <code>aiplatform.user</code> (the only model exit), objectAdmin on its own session bucket, and <code>run.invoker</code> on <code>naxos-internal</code> + <code>naxos-egress</code> — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a <code>bigquery_datasets</code> list in <code>environments.json</code> grants the SA <code>bigquery.jobUser</code> plus <code>dataViewer</code> on exactly the listed datasets (the audit dataset is never grantable), so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.</li>
+  <li><strong>Sandbox ↔ control-plane auth</strong>: OIDC ID token of the env SA → Cloud Run IAM on <code>naxos-internal</code>, then an app-level check that the token's SA equals <code>environments.service_account_email</code> for the session being touched. No bearer tokens to mint or leak.</li>
+  <li><strong>Tool restriction</strong>: tools not in the agent version's <code>tools</code> list are never passed to the SDK. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.</li>
+  <li><strong>Kill switch, three levels</strong>: <code>agents.disabled</code> (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.</li>
+  <li><strong>Audit</strong>: all agent events flow through <code>naxos-internal</code>, so the control plane is the single audit writer — the sandbox cannot forge or skip audit rows. <code>principal</code> is the IAP email for user-triggered turns, <code>deployment:{id}</code> for cron.</li>
+  <li><strong>IAP</strong> directly on Cloud Run with the custom OAuth client (no-org project); the app verifies the IAP JWT.</li>
+</ul>
+
+<h2 id="s9"><span class="num">9</span>Cost model (reference sizing: ¥100k/month cap, ¥70k target)</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Item</th><th>Sizing</th><th>¥/month</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Cloud SQL Postgres</td><td>db-g1-small, 10GB SSD, no HA, private IP</td><td class="num-cell">~5,500</td></tr>
+    <tr><td>naxos-api / internal / egress</td><td>all min=0</td><td class="num-cell">~1,000–2,000</td></tr>
+    <tr><td>Sandbox executions</td><td>1 vCPU / 2GiB ≈ ¥15 per active-hour; generous 150h/mo</td><td class="num-cell">~2,500</td></tr>
+    <tr><td>Scheduler / GCS / BQ streaming / Secret Manager / logs</td><td></td><td class="num-cell">~1,000</td></tr>
+    <tr class="total"><td><strong>Infra total</strong></td><td></td><td class="num-cell"><strong>≈ ¥10k</strong></td></tr>
+    <tr><td>Model (Vertex) headroom</td><td></td><td class="num-cell">~¥60–90k</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Runaway protection: a control-plane global cap on concurrent sandbox executions (default 5). The idle-linger window (~120s) is the main sandbox cost knob. If cold-resume chat UX hurts, <code>naxos-api</code> min=1 adds ~¥4k — still inside target.</p>
+
+<h2 id="s10"><span class="num">10</span>Repo layout</h2>
+
+<pre><code>control-plane/     Python 3.13 + uv + FastAPI; entrypoints: api | internal; alembic migrations
+sandbox-runner/    Python + claude-agent-sdk: main, harness, permissions, budget,
+                   workspace, control_channel, memory_sync
+egress-proxy/      credential-substituting proxy (FastAPI/httpx)
+shared/            pydantic event/config models used by all three
+ui/                Next.js static export, baked into the control-plane image
+terraform/         one root module; environments.json → for_each (SA, Job, bucket, IAM)
+docs/              design docs (English)
+.github/workflows/ lint/test + WIF deploy loop</code></pre>
+
+<h2 id="s11"><span class="num">11</span>Build order</h2>
+
+<p>Each phase ends deployed and demoable.</p>
+
+<ol start="0">
+  <li><strong>This document</strong>; old code moved to the <code>poc</code> branch.</li>
+  <li><strong>Spike (blocking)</strong>: Agent SDK resume semantics — pending tool_use replay through <code>can_use_tool</code>, transcript restore from a relocated directory, Vertex backend availability in asia-northeast1/global (resolves the model-region open issue).</li>
+  <li><strong>Walking skeleton</strong>: Terraform base (SQL, buckets, BQ, SAs, services, one <code>default</code> environment Job) + agents CRUD (versioned) + sessions + events + the full loop: create session → job launch → SDK turn on Vertex → events → SSE → idle checkpoint → resume. Audit (<code>runs</code> + <code>tool_calls</code>) and kill switch from day one. Reconciler.</li>
+  <li><strong>Permissions + budget + interrupt</strong>: <code>always_ask</code> round-trip including pause/release/resume, budget enforcement, minimal UI (session timeline + approval inbox).</li>
+  <li><strong>Deployments</strong>: Scheduler-per-deployment, <code>deployment_runs</code> with error types, pause/unpause/run-now, UI tab.</li>
+  <li><strong>Vaults + egress proxy</strong>: Secret Manager write path, MCP URL rewriting, header substitution, per-vault IAM.</li>
+  <li><strong>Memory stores</strong>: CRUD + mount/writeback + UI.</li>
+  <li><strong>Hardening</strong>: second environment (proves the fan-out), budget alerts, cost review at the phase gate.</li>
+</ol>
+
+<h2 id="s12"><span class="num">12</span>Verification</h2>
+
+<ul>
+  <li>Phase 1 spike has an explicit pass/fail: resume replays the pending tool_use, or the fallback is adopted and documented here.</li>
+  <li>Every phase ships to the project and runs its end-to-end demo (Phase 2: curl create agent → session → SSE shows <code>agent.message</code> → <code>audit.runs</code> row exists → flip <code>disabled</code> → event rejected).</li>
+  <li>Approval flow: <code>always_ask</code> tool → container exits during the pause (verify zero cost while pending) → confirm via UI → session resumes and completes.</li>
+  <li>Deployments: cron fires → <code>deployment_runs</code> row → session completes; error path exercised by archiving the agent.</li>
+  <li>Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.</li>
+</ul>
+
+<h2 id="s13"><span class="num">13</span>GCP verification</h2>
+
+<p>The end-to-end system was deployed to a live project and verified:</p>
+
+<ul>
+  <li><strong>Plain session</strong>: create agent → session with <code>initial_events</code> → sandbox Job execution boots → SDK turn (Anthropic API) → <code>agent.message</code> → <code>session.status_idle(end_turn)</code> → cost and <code>sdk_session_id</code> checkpointed. Model reply round-trip ≈ 40s including cold start.</li>
+  <li><strong>Approval cycle</strong>: <code>always_ask</code> agent paused at <code>agent.tool_use(awaiting_confirmation)</code> → <code>session.status_idle(requires_action)</code> → <strong>the sandbox execution exited while waiting</strong> (zero cost while pending) → <code>user.tool_confirmation(allow)</code> → fresh execution resumed the SDK session → the model re-issued the same call under a new <code>tool_use_id</code> → the stored decision (keyed by call hash) allowed it → command ran and completed. This validates the load-bearing design decision end to end.</li>
+  <li><strong>Audit</strong>: <code>naxos_audit.runs</code> (one row per wake-to-idle burst) and <code>naxos_audit.tool_calls</code> (per-call decisions) populated by the control plane.</li>
+  <li><strong>Deviation found on GCP</strong>: exceptions raised inside a <code>PreToolUse</code> hook are swallowed by the SDK (the CLI falls back to its own permission system). The pause is therefore implemented as deny + interrupt, with <code>paused_call</code> state driving <code>requires_action</code> — §4 updated accordingly by the code.</li>
+</ul>
+
+<p>Known issues (non-blocking): per-run <code>cost_usd</code> delta can go negative on resume bursts (the SDK cost counter resets per burst while the session accumulates; per-burst baseline accounting needed).</p>
+
+<h2 id="s14"><span class="num">14</span>Risks and open items</h2>
+
+<ul>
+  <li><strong>R1</strong> <span class="badge good">Resolved</span> — Resume does replay the pending tool call; see §4.1. The design stands, with confirmations keyed on the call hash and the gate implemented as a <code>PreToolUse</code> hook.</li>
+  <li><strong>R2</strong> <span class="badge warn">Open</span> — and it now has a hard finding. Claude models are <strong>not available in <code>asia-northeast1</code></strong> on Vertex: <code>getPublisherModel</code> returns "not found" for <code>claude-sonnet-5</code> / <code>claude-opus-5</code> in both <code>asia-northeast1</code> and <code>us-east5</code>, and resolves only on the <strong><code>global</code></strong> endpoint. A live <code>rawPredict</code> against <code>global</code> then returned <strong>429 <code>RESOURCE_EXHAUSTED</code></strong> — the project's <code>global_online_prediction_requests_per_base_model</code> quota for <code>anthropic-claude-sonnet</code> is zero, so a quota-increase request is required before Vertex can serve any traffic.
+    <p style="margin-top: 0.6rem;">Two decisions this forces, both for the deployment operator (per the hard constraint against silently deciding region questions):</p>
+    <ol>
+      <li><strong>Data residency</strong>: using Vertex at all means using the <code>global</code> endpoint — inference is not pinned to <code>asia-northeast1</code>. Accept, or keep model traffic off Vertex until a regional endpoint exists.</li>
+      <li><strong>Unblocking</strong>: file the Vertex quota-increase request now, since it gates the removal of the Anthropic API-key exception. Until then the key exception stays, and no real internal data may be connected.</li>
+    </ol>
+  </li>
+  <li>Egress proxy covers MCP + declared HTTP targets only; arbitrary bash egress is credential-less (documented limitation).</li>
+  <li>Memory versioning, outcomes, multiagent, webhooks: deferred; schema leaves room.</li>
+</ul>
+
+</div>
+
+</body>
+</html>
