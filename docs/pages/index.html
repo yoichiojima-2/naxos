@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>naxos — Claude Managed Agents on Google Cloud</title>
+<style>
+  :root {
+    --bg: #FAFBFC;
+    --surface: #F0F3F5;
+    --ink: #1A212E;
+    --muted: #5B6674;
+    --line: #D8DEE3;
+    --accent: #28618F;
+    --accent-soft: #E3EDF4;
+    --warn: #9A6A1B;
+    --warn-soft: #F6EEDD;
+    --good: #2E7D5B;
+    --code-bg: #131A24;
+    --code-ink: #D7DFE8;
+    --code-accent: #7FB2DC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161C;
+      --surface: #1A2029;
+      --ink: #E6EAEF;
+      --muted: #93A0AE;
+      --line: #2C3542;
+      --accent: #6FA9D6;
+      --accent-soft: #1C2B3A;
+      --warn: #D8A54E;
+      --warn-soft: #2E2617;
+      --good: #5CB08D;
+      --code-bg: #0C1117;
+      --code-ink: #CBD5DF;
+      --code-accent: #7FB2DC;
+    }
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Charter, Georgia, "Times New Roman", serif;
+    font-size: 1.02rem;
+    line-height: 1.8;
+    margin: 0;
+  }
+  main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 6rem; }
+  h1, h2, h3, .eyebrow, .chip, th, .card h3, .tag, .dek, .edge-note, nav.site {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  nav.site { display: flex; gap: 1.25rem; font-size: 0.88rem; padding-bottom: 2rem; }
+  nav.site a { color: var(--muted); text-decoration: none; }
+  nav.site a:hover, nav.site a.here { color: var(--accent); }
+  h1 { font-size: 2.1rem; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; text-wrap: balance; margin: 0.5rem 0 1rem; }
+  h2 { font-size: 1.35rem; font-weight: 650; text-wrap: balance; margin: 0 0 0.75rem; }
+  h3 { font-size: 1.0rem; font-weight: 650; margin: 1.6rem 0 0.4rem; }
+  p { margin: 0 0 1rem; }
+  section { margin-top: 3.25rem; }
+  .eyebrow { font-size: 0.72rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.14em; color: var(--accent); margin: 0 0 0.5rem; }
+  .dek { font-size: 1.05rem; line-height: 1.75; color: var(--muted); margin: 0; font-weight: 500; }
+  a { color: var(--accent); }
+
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
+  code { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0.08em 0.35em; white-space: nowrap; }
+  pre { background: var(--code-bg); color: var(--code-ink); border-radius: 8px; padding: 1rem 1.2rem; overflow-x: auto; line-height: 1.55; margin: 1rem 0 1.25rem; }
+  pre code { background: none; border: none; padding: 0; white-space: pre; color: inherit; }
+  pre .k { color: var(--code-accent); }
+  pre .c { color: #7C8896; }
+
+  .tablewrap { overflow-x: auto; margin: 1rem 0 1.25rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th { text-align: left; font-size: 0.71rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); border-bottom: 1px solid var(--line); padding: 0.4rem 1rem 0.4rem 0; }
+  td { border-bottom: 1px solid var(--line); padding: 0.55rem 1rem 0.55rem 0; vertical-align: top; line-height: 1.65; }
+  td:first-child { white-space: nowrap; }
+
+  .lane { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: stretch; margin-bottom: 0.6rem; }
+  .boundary {
+    border: 2px dashed var(--accent);
+    border-radius: 12px;
+    padding: 1rem;
+    background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg));
+    margin: 1.5rem 0;
+  }
+  .tag { display: block; font-size: 0.68rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 0.6rem; color: var(--accent); }
+  .card {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    flex: 1 1 150px;
+    min-width: 140px;
+  }
+  .card h3 { margin: 0 0 0.2rem; font-size: 0.85rem; font-weight: 650; }
+  .card h3 code { background: none; border: none; padding: 0; font-size: 0.95em; }
+  .card p { margin: 0; font-size: 0.78rem; line-height: 1.55; color: var(--muted); }
+  .card.store { background: var(--surface); }
+
+  .note { background: var(--surface); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 0.8rem 1.1rem; font-size: 0.93rem; margin: 1.25rem 0; }
+  .note p { margin: 0; }
+
+  footer { margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--muted); }
+  footer p { margin: 0.2rem 0; }
+</style>
+</head>
+<body>
+<main>
+  <nav class="site" aria-label="Site">
+    <a class="here" href="./">Overview</a>
+    <a href="design.html">Design document</a>
+    <a href="https://github.com/yoichiojima-2/naxos">GitHub</a>
+  </nav>
+
+  <header>
+    <p class="eyebrow">naxos · technical documentation</p>
+    <h1>A managed-agent platform that runs entirely inside your own GCP boundary</h1>
+    <p class="dek">naxos is a Google Cloud implementation of the Claude Managed Agents (CMA) object model — Agent → Environment → Session → Events — in roughly 10,700 lines of Python, TypeScript, and Terraform, all inside a single GCP project. Always <em>available</em> rather than always running: everything except Postgres scales to zero.</p>
+  </header>
+
+  <section>
+    <p class="eyebrow">Why</p>
+    <h2>The only reasons this platform exists</h2>
+    <p>Hosted CMA runs the agent loop and the sandbox on Anthropic's cloud. naxos exists for the cases that structurally cannot leave the organization: the <strong>data boundary</strong> (model access via Vertex AI only), <strong>internal-system integration inside that boundary</strong> (self-hosted MCP to closed-network systems), and <strong>execution-level governance</strong> (per-tool-call audit, human approval gates, an instant kill switch, per-tenant IAM). A task that fits none of these axes belongs in the Claude app or hosted CMA — this platform deliberately does not compete on UX or feature velocity.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">System</p>
+    <h2>Everything inside one project</h2>
+    <div class="boundary">
+      <span class="tag">GCP project · asia-northeast1</span>
+      <div class="lane">
+        <div class="card"><h3><code>naxos-api</code></h3><p>Cloud Run Service, min 0. /v1 REST + SSE + static UI. IAP directly on Cloud Run — every request carries an IAP principal.</p></div>
+        <div class="card"><h3><code>naxos-internal</code></h3><p>Second entrypoint of the same image. Sandbox↔control-plane channel, Cloud Scheduler targets, the 1-minute reconciler.</p></div>
+        <div class="card"><h3><code>naxos-egress</code></h3><p>Credential-substituting proxy. Vault secrets never enter the sandbox.</p></div>
+        <div class="card"><h3><code>naxos-sbx-{env}</code></h3><p>One Cloud Run Job per environment; one execution per session wake runs the Claude Agent SDK loop.</p></div>
+      </div>
+      <div class="lane">
+        <div class="card store"><h3>Cloud SQL · Postgres</h3><p>All control-plane state. 16 tables, in-process migrations. The only always-on cost.</p></div>
+        <div class="card store"><h3>GCS · per-environment buckets</h3><p>Session workspaces, SDK transcripts, published artifacts. Restored on wake, written back at checkpoint.</p></div>
+        <div class="card store"><h3>BigQuery · <code>naxos_audit</code></h3><p><code>runs</code> + <code>tool_calls</code>, written only by the control plane. Read access to <em>other</em> datasets is a per-environment opt-in; the audit dataset is never grantable.</p></div>
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <tr><th>Directory</th><th>Role</th></tr>
+        <tr><td><code>control-plane/</code></td><td>FastAPI, entrypoints <code>api</code> / <code>internal</code>. Postgres stores, BigQuery audit, Job launches; artifact / skill / deployment / memory-store management; seeds bundled skills at startup</td></tr>
+        <tr><td><code>sandbox-runner/</code></td><td><code>claude-agent-sdk</code> harness inside the per-environment Cloud Run Job, plus built-in MCP servers (artifacts / schedules) and skill sync</td></tr>
+        <tr><td><code>egress-proxy/</code></td><td>99-line forward proxy that injects credentials into MCP/HTTP traffic</td></tr>
+        <tr><td><code>shared/</code></td><td>Pydantic event/config models, ID · hash · path helpers (<code>naxos_shared</code>)</td></tr>
+        <tr><td><code>ui/</code></td><td>Next.js static export. Atlassian-style console — Sessions / Agents / Deployments / Artifacts / Vaults / Memory / Skills / Docs — served by <code>naxos-api</code></td></tr>
+        <tr><td><code>terraform/</code></td><td>One root module, GCS state backend. Owns all topology</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Object model</p>
+    <h2>Agent → Environment → Session → Events</h2>
+    <p>An <strong>Agent</strong> is a versioned DB row (<code>agent_versions</code>, PK <code>(agent_id, version)</code>): instructions, model, tools, permission policy, vault / memory / skill references. Updates append immutable versions; each session pins one. An <strong>Environment</strong> is the tenant/isolation boundary — a per-environment service account, sandbox Job, and GCS bucket, fanned out by Terraform from <code>terraform/environments.json</code>. The API only registers rows; adding a tenant is one JSON entry plus <code>terraform apply</code>, never a new app.</p>
+    <p>A <strong>Session</strong> is durable state, not a process: metadata and an append-only event log (per-session <code>seq</code>) in Postgres; workspace and transcript in GCS. A container exists only while the session is actively processing. <strong>Events</strong> use the CMA vocabulary — 15 types, of which clients may send only <code>user.message</code>, <code>user.interrupt</code>, <code>user.tool_confirmation</code>, and <code>user.custom_tool_result</code>. <code>GET /v1/sessions/{id}/events?stream=sse</code> streams them with <code>Last-Event-ID</code> replay.</p>
+    <p><strong>Memory stores</strong> are Postgres-backed, mounted as <code>ws/memory/{store}/…</code> on wake and written back at checkpoint. Stores can be renamed (<code>PATCH</code>) and deleted (<code>DELETE</code> refuses with 409 while attached to an agent's latest version or referenced by a non-terminated session, protecting sandbox writeback); listings report file counts and which agents use each store.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Governance</p>
+    <h2>Built into the platform, not retrofitted</h2>
+    <p><strong>Audit</strong> — every tool call streams to <code>audit.tool_calls</code> with its decision (<code>auto_allowed | user_allowed | user_denied | killed</code>); every wake-to-idle burst lands in <code>audit.runs</code> with principal and cost. Only the control plane writes audit rows — the sandbox cannot forge or skip them.</p>
+    <p><strong>Approval gate</strong> — the <code>always_ask</code> policy is enforced by a <code>PreToolUse</code> hook (not <code>can_use_tool</code>, which is shadowed by <code>allowed_tools</code> entries and the CLI's read-only auto-approval). Confirmations are keyed on <code>sha256(tool_name + canonical input)</code> because <code>tool_use_id</code> changes across resume. While a confirmation is pending the session idles with <code>requires_action</code> and the container is released — a blocked agent costs nothing, no matter how long the human takes.</p>
+    <p><strong>Kill switch</strong> — <code>agents.disabled</code> is checked at session creation, event accept, wake, permission resolution, heartbeat, queue long-poll, and deployment fire. <strong>Budget</strong> — a per-session hard cap; on breach the session idles with <code>budget_reached</code>, and raising the budget is itself the resume signal.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Sandbox subsystems</p>
+    <h2>Artifacts, schedules, skills</h2>
+    <p>Three subsystems ride on the core objects as <strong>built-in MCP servers</strong> inside the sandbox — ordinary tool calls, so the permission gate, kill switch, and audit apply unchanged.</p>
+    <p><strong>Artifacts</strong> (<code>artifact_create/list/delete/share/unshare</code>) are files an agent deliberately publishes: content goes straight to the environment's session bucket (10&nbsp;MB cap), metadata is versioned through <code>naxos-internal</code>, and sharing mints a stable token URL that stays behind IAP — nothing ever becomes public. <strong>Schedules</strong> (<code>schedule_create/list/delete</code>) let an agent create durable Cloud Scheduler deployments for itself (<code>created_by = agent:{session}</code>, capped per agent) — the CLI's session-local cron tools are disallowed because in-container timers die at the next idle checkpoint. <strong>Skills</strong> are org-shared Agent Skills folders stored in Postgres, rebuilt into a read-only local plugin on every wake, with no writeback path — a prompt-injected agent cannot poison skills shared by every other agent. The control-plane image bundles sample skills plus <a href="https://github.com/anthropics/skills">Anthropic's official skills</a> (docx, pptx, xlsx, pdf, mcp-builder, …) and seeds them create-once at startup.</p>
+    <p><strong>BigQuery analysis</strong> is a declarative per-environment opt-in: a <code>bigquery_datasets</code> list in <code>environments.json</code> grants that environment's SA <code>bigquery.jobUser</code> plus <code>dataViewer</code> on exactly the listed datasets. A Terraform precondition makes the audit dataset permanently ungrantable.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Egress</p>
+    <h2>Secrets the sandbox never sees</h2>
+    <p>Vault credentials are stored as Secret Manager references. When a session's agent uses an MCP server with a matching credential, the control plane mints an opaque route token and rewrites the server URL handed to the sandbox to <code>{egress}/r/{token}</code>. The 99-line proxy verifies the caller's OIDC identity (its SA must equal the session's environment SA), resolves the token through <code>naxos-internal</code>, reads the secret (only <code>sa-egress</code> can), strips the incoming <code>Authorization</code> header and injects the real one, then forwards. A fully compromised agent can <em>use</em> a credential but can never read or exfiltrate it.</p>
+    <div class="note"><p>Hard constraints: Vertex AI is the only model exit (a Secret-Manager-held Anthropic API key remains a documented temporary exception until Vertex quota lands — open issue R2); governance lives in the control plane and harness where agent config cannot bypass it; the control plane never holds IAM-admin; everything scales to zero.</p></div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Read more</p>
+    <h2>The full design document</h2>
+    <p>The complete design — components, session lifecycle, measured SDK resume semantics, data model, API surface, security and cost models — lives in <a href="design.html">the design document</a> (canonical source: <code>docs/design.md</code> in the repository).</p>
+  </section>
+
+  <footer>
+    <p>Repository: <a href="https://github.com/yoichiojima-2/naxos">github.com/yoichiojima-2/naxos</a> (MIT) · This site is generated from <code>docs/pages/</code> by GitHub Actions.</p>
+  </footer>
+</main>
+</body>
+</html>
