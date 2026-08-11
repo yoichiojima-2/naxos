@@ -17,15 +17,6 @@ export const SessionsIcon = () => (
   </svg>
 );
 
-export const DashboardIcon = () => (
-  <svg {...base}>
-    <rect x="4" y="4" width="6" height="6" rx="1" />
-    <rect x="14" y="4" width="6" height="6" rx="1" />
-    <rect x="4" y="14" width="6" height="6" rx="1" />
-    <rect x="14" y="14" width="6" height="6" rx="1" />
-  </svg>
-);
-
 export const AgentsIcon = () => (
   <svg {...base}>
     <rect x="5" y="8" width="14" height="11" rx="2" />
