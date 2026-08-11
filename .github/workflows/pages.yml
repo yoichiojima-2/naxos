@@ -9,23 +9,30 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
+# Never cancel a deployment already in flight: a half-applied Pages
+# deployment would leave the live site on an indeterminate commit.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # Deploy via the gh-pages branch: creating that branch auto-enables
-      # Pages, unlike the "GitHub Actions" source, which requires a repo
-      # admin to enable the site once in Settings → Pages (creating it needs
-      # administration:write, which GITHUB_TOKEN can never hold).
-      - uses: peaceiris/actions-gh-pages@v4
+      # Pages must be enabled once by a repo admin (Settings → Pages → Source:
+      # "GitHub Actions"): creating the site needs administration:write, which
+      # GITHUB_TOKEN can never hold, so `enablement: true` always fails here.
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/pages
-          force_orphan: true
+          path: docs/pages
+      - id: deployment
+        uses: actions/deploy-pages@v4
