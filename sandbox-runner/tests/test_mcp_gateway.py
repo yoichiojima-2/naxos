@@ -117,6 +117,23 @@ async def test_forwards_and_streams_sse(gateway, monkeypatch):
         await asyncio.wait_for(task, timeout=TIMEOUT)
 
 
+async def test_redirects_are_kept_on_the_gateway(gateway):
+    """A Location the client followed itself would reach Cloud Run without an ID
+    token, so in-path redirects are mapped back here."""
+    await gateway.rewrite({"github": {"url": "https://egress-1.a.run.app/r/tok"}})
+    base = f"http://127.0.0.1:{gateway.port}/github"
+    target = "https://egress-1.a.run.app/r/tok"
+
+    assert gateway._local_location(f"{target}/", "github", target) == f"{base}/"
+    assert (
+        gateway._local_location(f"{target}/messages?s=1", "github", target)
+        == f"{base}/messages?s=1"
+    )
+    # Nothing to map: left alone rather than pointed somewhere wrong.
+    for untouched in ("/relative", "https://elsewhere.example.com/x"):
+        assert gateway._local_location(untouched, "github", target) == untouched
+
+
 async def test_unknown_server_is_404(gateway):
     await gateway.rewrite({"github": {"url": "https://x-123.a.run.app/r/tok"}})
     async with httpx.AsyncClient() as client:
