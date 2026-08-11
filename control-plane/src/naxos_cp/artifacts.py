@@ -23,7 +23,9 @@ def blob_path(session_id: str, name: str) -> str:
 
 
 def share_url(token: str) -> str:
-    path = f"/v1/artifacts/shared/{token}"
+    # The in-app viewer route: share_url is handed to humans (agent chat
+    # messages, the UI); raw content stays at /v1/artifacts/shared/{token}/content.
+    path = f"/#artifacts/shared/{token}"
     return f"{config.PUBLIC_URL.rstrip('/')}{path}" if config.PUBLIC_URL else path
 
 

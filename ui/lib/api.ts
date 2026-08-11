@@ -1,7 +1,7 @@
-export async function api<T = unknown>(
+async function request(
   path: string,
   init?: RequestInit & { json?: unknown },
-): Promise<T> {
+): Promise<Response> {
   const options: RequestInit = { ...init };
   if (init?.json !== undefined) {
     options.method = init.method ?? "POST";
@@ -26,7 +26,18 @@ export async function api<T = unknown>(
     window.dispatchEvent(new CustomEvent("api-error", { detail: message }));
     throw new Error(message);
   }
-  return response.json();
+  return response;
+}
+
+export async function api<T = unknown>(
+  path: string,
+  init?: RequestInit & { json?: unknown },
+): Promise<T> {
+  return (await request(path, init)).json();
+}
+
+export async function apiBlob(path: string): Promise<Blob> {
+  return (await request(path)).blob();
 }
 
 export async function listFor<T>(

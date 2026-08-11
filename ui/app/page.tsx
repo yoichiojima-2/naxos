@@ -9,6 +9,7 @@ import Deployments from "@/components/deployments";
 import Vaults from "@/components/vaults";
 import MemoryStores from "@/components/memory";
 import Artifacts from "@/components/artifacts";
+import ArtifactViewer from "@/components/artifact-viewer";
 import Skills from "@/components/skills";
 import Docs from "@/components/docs";
 import {
@@ -47,7 +48,7 @@ const PAGE_INFO: Record<Page, string> = {
   deployments:
     "Unattended scheduled runs. A cron schedule wakes an agent with a fixed prompt — no human in the loop, results land as sessions.",
   artifacts:
-    "Outputs agents chose to publish: reports, datasets, generated files. Download them, share a stable org-internal link, or delete them — sharing never leaves the IAP boundary.",
+    "Outputs agents chose to publish: reports, datasets, generated files. Open them in the built-in viewer, download, share a stable org-internal link, or delete them — sharing never leaves the IAP boundary.",
   vaults:
     "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
   memory:
@@ -59,9 +60,9 @@ const PAGE_INFO: Record<Page, string> = {
 };
 
 function parseHash(hash: string): Route {
-  const [page, id] = hash.replace(/^#/, "").split("/");
+  const [page, ...rest] = hash.replace(/^#/, "").split("/");
   if ((PAGES as readonly string[]).includes(page)) {
-    return { page: page as Page, id: id || undefined };
+    return { page: page as Page, id: rest.join("/") || undefined };
   }
   return { page: "sessions" };
 }
@@ -119,6 +120,7 @@ export default function Page() {
 
   const current = NAV.find((n) => n.page === route.page) ?? NAV[0];
   const agentDetail = route.page === "agents" && route.id;
+  const artifactDetail = route.page === "artifacts" && route.id;
 
   return (
     <div className="shell">
@@ -145,7 +147,7 @@ export default function Page() {
           </button>
         </header>
         <main className="content">
-          {!agentDetail && (
+          {!agentDetail && !artifactDetail && (
             <div className="page-head">
               <h2>{current.label}</h2>
               <p>{PAGE_INFO[route.page]}</p>
@@ -163,7 +165,12 @@ export default function Page() {
             />
           )}
           {route.page === "deployments" && <Deployments agents={agents} />}
-          {route.page === "artifacts" && <Artifacts agents={agents} />}
+          {route.page === "artifacts" && !route.id && <Artifacts agents={agents} />}
+          {artifactDetail && (
+            route.id!.startsWith("shared/")
+              ? <ArtifactViewer token={route.id!.slice("shared/".length)} agents={agents} />
+              : <ArtifactViewer artifactId={route.id!} agents={agents} />
+          )}
           {route.page === "vaults" && <Vaults />}
           {route.page === "memory" && <MemoryStores />}
           {route.page === "skills" && <Skills />}
