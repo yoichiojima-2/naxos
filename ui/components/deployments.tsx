@@ -4,10 +4,30 @@ import { useCallback, useEffect, useState } from "react";
 import { agentName, api, apiConfirm, Agent, Deployment, DeploymentRun } from "@/lib/api";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
-import { fullTime } from "@/lib/format";
+import { formatDuration, fullTime } from "@/lib/format";
 import TableStates from "@/components/table-states";
+import DeploymentRuns from "@/components/deployment-runs";
+import { RUN_STATUS } from "@/lib/runs";
 
-export default function Deployments({ agents }: { agents: Agent[] }) {
+export default function Deployments({ agents, view }: { agents: Agent[]; view?: string }) {
+  const [tab, focusedId] = (view ?? "").split("/");
+  const onRuns = tab === "runs";
+  return (
+    <>
+      <div className="tabs">
+        <a className={onRuns ? "" : "on"} href="#deployments">Schedules</a>
+        <a className={onRuns ? "on" : ""} href="#deployments/runs">Runs</a>
+      </div>
+      {onRuns ? (
+        <DeploymentRuns agents={agents} deploymentId={focusedId || undefined} />
+      ) : (
+        <Schedules agents={agents} />
+      )}
+    </>
+  );
+}
+
+function Schedules({ agents }: { agents: Agent[] }) {
   const [deployments, setDeployments] = useState<Deployment[] | null>(null);
   const [runs, setRuns] = useState<Record<string, DeploymentRun[]>>({});
   const [openId, setOpenId] = useState<string | null>(null);
@@ -176,6 +196,7 @@ function DeploymentRow({
         </td>
         <td className="ta-right" onClick={(e) => e.stopPropagation()}>
           <span className="row end">
+            <a className="button-link" href={`#deployments/runs/${deployment.id}`}>Runs</a>
             <button className="ghost" onClick={() => onAction(deployment.id, "run")}>Run now</button>
             <button className="ghost" onClick={() => onAction(deployment.id, deployment.paused ? "unpause" : "pause")}>
               {deployment.paused ? "Unpause" : "Pause"}
@@ -200,15 +221,25 @@ function DeploymentRow({
             <label>recent runs</label>
             {!runs && <span className="muted">loading…</span>}
             {runs?.length === 0 && <span className="muted">no runs yet</span>}
-            {runs?.map((run) => (
+            {runs?.slice(0, 5).map((run) => (
               <div key={run.id} className="row muted" style={{ gap: 16 }}>
                 <span>{fullTime(run.fired_at)}</span>
-                <span className={`badge ${run.status === "failed" ? "terminated" : "running"}`}>
+                <span className={`badge ${RUN_STATUS[run.status].badge}`}>
                   {run.status}{run.error_type ? `: ${run.error_type}` : ""}
                 </span>
-                {run.session_id && <span className="mono">{run.session_id}</span>}
+                <span className="mono">{formatDuration(run.duration_seconds)}</span>
+                {run.session_id && (
+                  <a className="mono" href={`#sessions/${run.session_id}`}>{run.session_id}</a>
+                )}
               </div>
             ))}
+            {!!runs?.length && (
+              <div className="mt8">
+                <a className="mono" href={`#deployments/runs/${deployment.id}`}>
+                  all runs for this deployment →
+                </a>
+              </div>
+            )}
           </td>
         </tr>
       )}

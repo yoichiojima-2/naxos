@@ -1,9 +1,10 @@
 import functools
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from naxos_shared.events import EventIn
+from fastapi import APIRouter, Depends, HTTPException, Query
+from naxos_shared.events import EventIn, StopReason
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,12 @@ from .auth import principal_of
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
+
+RUN_STATUSES = ("queued", "running", "succeeded", "failed", "cancelled")
+
+# A burst that stopped for one of these is over for an unattended run: nobody is
+# going to answer, so the run failed rather than merely paused.
+FAILING_STOP_REASONS = {StopReason.BUDGET_REACHED, StopReason.RETRIES_EXHAUSTED}
 
 
 @functools.cache
@@ -159,6 +166,85 @@ async def list_deployments(_: str = Depends(principal_of)) -> dict:
     return {"data": [dict(r) for r in rows]}
 
 
+RUN_COLUMNS = (
+    "r.id, r.deployment_id, r.session_id, r.status, r.error_type, r.error_message, "
+    "r.stop_reason, r.cost_usd, r.num_turns, r.fired_at, r.started_at, r.finished_at, "
+    "extract(epoch FROM (r.finished_at - r.fired_at)) AS duration_seconds, "
+    "extract(epoch FROM (COALESCE(r.started_at, r.finished_at) - r.fired_at)) AS queued_seconds"
+)
+
+
+def _serialize_run(row: Any) -> dict[str, Any]:
+    out = dict(row)
+    out["cost_usd"] = float(out["cost_usd"])
+    for key in ("duration_seconds", "queued_seconds"):
+        out[key] = float(out[key]) if out[key] is not None else None
+    return out
+
+
+@router.get("/deployments/runs")
+async def runs_overview(
+    days: int = Query(30, ge=1, le=365),
+    deployment_id: str | None = None,
+    status: str | None = None,
+    limit: int = Query(400, ge=1, le=2000),
+    _: str = Depends(principal_of),
+) -> dict:
+    """Run history across deployments: the rows the runs view charts and tables.
+
+    Runs of archived deployments stay visible — the history is the point.
+    """
+    if status is not None and status not in RUN_STATUSES:
+        raise HTTPException(422, f"status must be one of {', '.join(RUN_STATUSES)}")
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    async with db.transaction() as conn:
+        runs = await conn.fetch(
+            f"SELECT {RUN_COLUMNS}, d.name AS deployment_name, d.agent_id, s.status "
+            "  AS session_status FROM deployment_runs r "
+            "JOIN deployments d ON d.id = r.deployment_id "
+            "LEFT JOIN sessions s ON s.id = r.session_id "
+            "WHERE r.fired_at >= $1 AND ($2::text IS NULL OR r.deployment_id = $2) "
+            "  AND ($3::text IS NULL OR r.status = $3) "
+            "ORDER BY r.fired_at DESC LIMIT $4",
+            since,
+            deployment_id,
+            status,
+            limit,
+        )
+        totals = await conn.fetch(
+            "SELECT d.id, d.name, d.cron, d.timezone, d.agent_id, d.paused, "
+            "  d.archived_at IS NOT NULL AS archived, "
+            "  count(r.id) AS runs, "
+            "  count(r.id) FILTER (WHERE r.status = 'succeeded') AS succeeded, "
+            "  count(r.id) FILTER (WHERE r.status = 'failed') AS failed, "
+            "  count(r.id) FILTER (WHERE r.status = 'cancelled') AS cancelled, "
+            "  count(r.id) FILTER (WHERE r.status IN ('queued', 'running')) AS active, "
+            "  count(r.id) FILTER (WHERE r.finished_at IS NOT NULL) AS finished, "
+            "  COALESCE(sum(r.cost_usd), 0) AS cost_usd, "
+            "  COALESCE(sum(extract(epoch FROM (r.finished_at - r.fired_at))), 0) "
+            "    AS duration_seconds, "
+            "  max(r.fired_at) AS last_fired_at "
+            "FROM deployments d "
+            "LEFT JOIN deployment_runs r ON r.deployment_id = d.id AND r.fired_at >= $1 "
+            "WHERE (d.archived_at IS NULL OR r.id IS NOT NULL) "
+            "  AND ($2::text IS NULL OR d.id = $2) "
+            "GROUP BY d.id ORDER BY count(r.id) DESC, d.name",
+            since,
+            deployment_id,
+        )
+    return {
+        "window_days": days,
+        "now": now.isoformat(),
+        "runs": [_serialize_run(r) for r in runs],
+        "deployments": [
+            dict(r)
+            | {"cost_usd": float(r["cost_usd"]), "duration_seconds": float(r["duration_seconds"])}
+            for r in totals
+        ],
+    }
+
+
 @router.get("/deployments/{deployment_id}")
 async def get_deployment(deployment_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
@@ -214,11 +300,62 @@ async def run_deployment(deployment_id: str, principal: str = Depends(principal_
 async def list_runs(deployment_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM deployment_runs WHERE deployment_id = $1 ORDER BY fired_at DESC "
-            "LIMIT 100",
+            f"SELECT {RUN_COLUMNS} FROM deployment_runs r "
+            "WHERE r.deployment_id = $1 ORDER BY r.fired_at DESC LIMIT 100",
             deployment_id,
         )
-    return {"data": [dict(r) for r in rows]}
+    return {"data": [_serialize_run(r) for r in rows]}
+
+
+async def record_burst(
+    conn,
+    session_id: str,
+    *,
+    stop_reason: StopReason,
+    terminated: bool,
+    cost_delta: float,
+    num_turns: int,
+    started_at: datetime,
+) -> None:
+    """Fold one wake-to-idle burst into the open deployment run of this session.
+
+    An unattended run has no one to answer a confirmation prompt, so only
+    `requires_action` leaves the run open — every other stop is its outcome.
+    """
+    waiting = stop_reason is StopReason.REQUIRES_ACTION and not terminated
+    failed = stop_reason in FAILING_STOP_REASONS
+    status = "running" if waiting else "failed" if failed else "succeeded"
+    await conn.execute(
+        "UPDATE deployment_runs SET "
+        "  started_at = COALESCE(started_at, $2), "
+        "  cost_usd = cost_usd + $3, num_turns = num_turns + $4, stop_reason = $5, "
+        "  status = $6, error_type = COALESCE($7, error_type), "
+        "  error_message = COALESCE($8, error_message), "
+        "  finished_at = CASE WHEN $9 THEN now() ELSE finished_at END "
+        "WHERE session_id = $1 AND finished_at IS NULL",
+        session_id,
+        started_at,
+        cost_delta,
+        num_turns,
+        str(stop_reason),
+        status,
+        str(stop_reason) if failed else None,
+        f"the run stopped: {stop_reason}" if failed else None,
+        not waiting,
+    )
+
+
+async def cancel_open_runs(conn, session_id: str, reason: str) -> None:
+    """Close the run of a session an operator terminated or deleted, so it does
+    not read as still running forever."""
+    await conn.execute(
+        "UPDATE deployment_runs SET status = 'cancelled', finished_at = now(), "
+        "  error_type = COALESCE(error_type, 'cancelled'), "
+        "  error_message = COALESCE(error_message, $2) "
+        "WHERE session_id = $1 AND finished_at IS NULL",
+        session_id,
+        reason,
+    )
 
 
 async def _record_failure(

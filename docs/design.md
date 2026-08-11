@@ -163,9 +163,13 @@ deployments (id, agent_id, agent_version,   -- NULL = latest at fire time
         created_by, created_at)
 
 deployment_runs (id, deployment_id, session_id,
-        status CHECK IN ('queued','running','succeeded','failed'),
+        status CHECK IN ('queued','running','succeeded','failed','cancelled'),
         error_type,    -- session_error|budget_reached|timeout|retries_exhausted|infra_error
-        fired_at, finished_at)
+        stop_reason, cost_usd, num_turns,
+        fired_at, started_at, finished_at)
+        -- closed at the fired session's checkpoint: an unattended run has nobody
+        -- to answer a confirmation, so only requires_action leaves it open.
+        -- 'cancelled' is an operator terminating or deleting the session.
 
 session_runs (id, session_id, agent_id, environment_id,
         trigger_type, principal, model, status, stop_reason,
@@ -381,6 +385,7 @@ GET    /v1/sessions/{id}/events?stream=sse&after={seq}  SSE (Last-Event-ID honor
 POST   /v1/deployments · GET /v1/deployments[/{id}]
 POST   /v1/deployments/{id}/pause | /unpause | /archive | /run
 GET    /v1/deployments/{id}/runs
+GET    /v1/deployments/runs?days=&deployment_id=&status=   -- run history + per-deployment rollup
 
 POST   /v1/vaults · GET /v1/vaults[/{id}] · POST /v1/vaults/{id}/archive
 POST   /v1/vaults/{id}/credentials         write-only; value → Secret Manager directly
@@ -402,6 +407,8 @@ POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 
 GET    /v1/monitoring/summary?days=N       cost/usage aggregates from session_runs
+                                           (the deployments runs view reads
+                                            /v1/deployments/runs, not this)
 
 GET    /v1/favorites · POST /v1/favorites  per-principal stars on agents / sessions /
 DELETE /v1/favorites/{type}/{id}           artifacts / skills, surfaced first in UI lists
@@ -461,7 +468,7 @@ Each phase ends deployed and demoable.
 1. **Spike (blocking)**: Agent SDK resume semantics — pending tool_use replay through `can_use_tool`, transcript restore from a relocated directory, Vertex backend availability in asia-northeast1/global (resolves the model-region open issue).
 2. **Walking skeleton**: Terraform base (SQL, buckets, BQ, SAs, services, one `default` environment Job) + agents CRUD (versioned) + sessions + events + the full loop: create session → job launch → SDK turn on Vertex → events → SSE → idle checkpoint → resume. Audit (`runs` + `tool_calls`) and kill switch from day one. Reconciler.
 3. **Permissions + budget + interrupt**: `always_ask` round-trip including pause/release/resume, budget enforcement, minimal UI (session timeline + approval inbox).
-4. **Deployments**: Scheduler-per-deployment, `deployment_runs` with error types, pause/unpause/run-now, UI tab.
+4. **Deployments**: Scheduler-per-deployment, `deployment_runs` with error types, outcome and duration closed at checkpoint, pause/unpause/run-now, UI tab with a runs view (duration chart, per-deployment success rate and run history).
 5. **Vaults + egress proxy**: Secret Manager write path, MCP URL rewriting, header substitution, per-vault IAM.
 6. **Memory stores**: CRUD + mount/writeback + UI.
 7. **Hardening**: second environment (proves the fan-out), budget alerts, cost review at the phase gate.
@@ -471,7 +478,7 @@ Each phase ends deployed and demoable.
 - Phase 1 spike has an explicit pass/fail: resume replays the pending tool_use, or the fallback is adopted and documented here.
 - Every phase ships to the project and runs its end-to-end demo (Phase 2: curl create agent → session → SSE shows `agent.message` → `audit.runs` row exists → flip `disabled` → event rejected).
 - Approval flow: `always_ask` tool → container exits during the pause (verify zero cost while pending) → confirm via UI → session resumes and completes.
-- Deployments: cron fires → `deployment_runs` row → session completes; error path exercised by archiving the agent.
+- Deployments: cron fires → `deployment_runs` row → session completes and the run closes with its outcome, duration and cost; error path exercised by archiving the agent, and the budget/terminate paths by stopping a fired session.
 - Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.
 
 ## 13. GCP verification
