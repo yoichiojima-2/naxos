@@ -706,13 +706,43 @@ resource "google_project_iam_member" "deployer" {
   member  = "serviceAccount:${google_service_account.deployer[0].email}"
 }
 
-# `gcloud builds submit` stages the source tarball in this bucket, which
-# Cloud Build creates outside Terraform on first use.
+# Explicit staging bucket for `gcloud builds submit --gcs-source-staging-dir`;
+# the default {project}_cloudbuild bucket is auto-created outside Terraform and
+# its access rules are opaque to IAM here.
+resource "google_storage_bucket" "build_staging" {
+  count                       = var.github_repository != "" ? 1 : 0
+  name                        = "${var.project_id}-build-staging"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+
+  lifecycle_rule {
+    action {
+      type = "Delete"
+    }
+    condition {
+      age = 7
+    }
+  }
+}
+
 resource "google_storage_bucket_iam_member" "deployer_build_staging" {
   count  = var.github_repository != "" ? 1 : 0
-  bucket = "${var.project_id}_cloudbuild"
+  bucket = google_storage_bucket.build_staging[0].name
   role   = "roles/storage.admin"
   member = "serviceAccount:${google_service_account.deployer[0].email}"
+}
+
+# Cloud Build fetches the staged source with its own runtime identity; which
+# SA that is depends on project age, so cover both defaults.
+resource "google_storage_bucket_iam_member" "build_staging_readers" {
+  for_each = var.github_repository != "" ? toset([
+    "serviceAccount:${data.google_project.this.number}@cloudbuild.gserviceaccount.com",
+    "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com",
+  ]) : toset([])
+  bucket = google_storage_bucket.build_staging[0].name
+  role   = "roles/storage.objectViewer"
+  member = each.value
 }
 
 # --- budget (optional) ------------------------------------------------------

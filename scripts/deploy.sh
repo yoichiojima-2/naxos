@@ -7,10 +7,11 @@ REGION=${REGION:-asia-northeast1}
 REPO="$REGION-docker.pkg.dev/$PROJECT/naxos"
 TAG=${TAG:-$(git rev-parse --short HEAD)}
 
-# Explicit staging dir: the default path verifies bucket ownership via a
-# project-level storage.buckets.list, which the CI deployer SA does not have.
+# Stage in the Terraform-owned bucket: the default path verifies bucket
+# ownership via a project-level storage.buckets.list, which the CI deployer SA
+# does not have, and the default _cloudbuild bucket's ACLs are unmanageable.
 gcloud builds submit --project "$PROJECT" --config cloudbuild.yaml \
-  --gcs-source-staging-dir "gs://${PROJECT}_cloudbuild/source" \
+  --gcs-source-staging-dir "gs://$PROJECT-build-staging/source" \
   --substitutions "_REPO=$REPO,_TAG=$TAG" .
 
 gcloud run services update naxos-api --project "$PROJECT" --region "$REGION" \
