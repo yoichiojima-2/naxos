@@ -2,6 +2,7 @@
 
 A Google Cloud implementation of Claude Managed Agents: versioned agents, isolated per-session sandboxes on Cloud Run, an event-sourced session API with SSE streaming, approval gates, vaults with an egress credential proxy, scheduled deployments, and full execution-level audit — inside a single GCP project with Vertex AI as the only model exit.
 
+- Docs site: [yoichiojima-2.github.io/naxos](https://yoichiojima-2.github.io/naxos/)
 - Design: [`docs/design.md`](docs/design.md)
 - Constraints and conventions: [`CLAUDE.md`](CLAUDE.md)
 
