@@ -17,7 +17,6 @@ import { RUN_STATUS } from "@/lib/runs";
 import LoadingPanel from "@/components/loading-panel";
 
 const RANGES = [7, 30, 90] as const;
-const STRIP_LENGTH = 20;
 
 const fmtUsd = (v: number) =>
   v >= 1 ? `$${v.toFixed(2)}` : v > 0 ? `$${v.toFixed(4)}` : "$0";
@@ -115,14 +114,18 @@ export default function DeploymentRuns({
         ))}
       </div>
 
-      {focused && (
+      {/* The way back must not depend on the rollup finding the deployment: an
+          archived one with no runs in the window is absent from it. */}
+      {deploymentId && (
         <div className="row between mb16">
           <div>
-            <span className="run-focus-name">{focused.name}</span>
-            <span className="muted">
-              {" "}<span className="mono">{focused.cron}</span> {focused.timezone} ·{" "}
-              {agentName(agents, focused.agent_id)}
-            </span>
+            <span className="run-focus-name">{focused?.name ?? "This deployment"}</span>
+            {focused && (
+              <span className="muted">
+                {" "}<span className="mono">{focused.cron}</span> {focused.timezone} ·{" "}
+                {agentName(agents, focused.agent_id)}
+              </span>
+            )}
           </div>
           <a className="back" href="#deployments/runs">← all deployments</a>
         </div>
@@ -176,7 +179,7 @@ export default function DeploymentRuns({
       </div>
 
       {!deploymentId && (
-        <DeploymentHealth deployments={data.deployments} runs={data.runs} agents={agents} />
+        <DeploymentHealth deployments={data.deployments} agents={agents} />
       )}
 
       <RunTable runs={data.runs} skewMs={skewMs} showDeployment={!deploymentId} />
@@ -210,6 +213,7 @@ function DurationChart({ runs, skewMs }: { runs: DeploymentRunRow[]; skewMs: num
   const barWidth = Math.min(26, Math.max(2, band - 2));
   const durations = series.map((r) => durationOf(r, skewMs));
   const { top, ticks } = durationScale(Math.max(...durations, 0));
+  const baseline = padTop + plotHeight;
   const y = (v: number) => padTop + plotHeight * (1 - v / top);
   const mean = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
   // One label per distinct day, thinned to at most six: repeating "08-11" five
@@ -270,7 +274,7 @@ function DurationChart({ runs, skewMs }: { runs: DeploymentRunRow[]; skewMs: num
                   </text>
                 )}
                 <path
-                  d={barPath(x, barWidth, y(duration), padTop + plotHeight)}
+                  d={barPath(x, barWidth, Math.min(y(duration), baseline - 2), baseline)}
                   className={`run-bar ${kind} ${hot ? "hot" : ""}`}
                   tabIndex={0}
                   aria-label={
@@ -314,11 +318,9 @@ function DurationChart({ runs, skewMs }: { runs: DeploymentRunRow[]; skewMs: num
 
 function DeploymentHealth({
   deployments,
-  runs,
   agents,
 }: {
   deployments: DeploymentRunTotals[];
-  runs: DeploymentRunRow[];
   agents: Agent[];
 }) {
   if (!deployments.length) {
@@ -331,10 +333,6 @@ function DeploymentHealth({
   return (
     <div className="run-cards">
       {deployments.map((d) => {
-        const strip = runs
-          .filter((r) => r.deployment_id === d.id)
-          .slice(0, STRIP_LENGTH)
-          .reverse();
         const settled = d.succeeded + d.failed + d.cancelled;
         return (
           <a className="panel run-card" key={d.id} href={`#deployments/runs/${d.id}`}>
@@ -352,14 +350,14 @@ function DeploymentHealth({
               <span className="mono">{d.cron}</span> · {agentName(agents, d.agent_id)}
             </div>
             <div className="run-strip" aria-hidden>
-              {strip.map((r) => (
+              {d.recent.map((r) => (
                 <span
                   key={r.id}
                   className={`run-cell ${RUN_STATUS[r.status].kind}`}
                   title={`${r.status} — ${fullTime(r.fired_at)}`}
                 />
               ))}
-              {strip.length === 0 && <span className="muted">no runs</span>}
+              {d.recent.length === 0 && <span className="muted">no runs</span>}
             </div>
             <div className="run-card-stats">
               <span>

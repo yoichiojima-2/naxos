@@ -86,6 +86,7 @@ async def _finalize(
     gateway: McpGateway | None,
     started_at: str,
     stop_reason: StopReason,
+    errored: bool,
 ) -> None:
     """Best-effort teardown: every step runs even when earlier ones fail."""
     if gateway is not None:
@@ -111,6 +112,7 @@ async def _finalize(
             run_id=harness.run_id if harness else None,
             started_at=started_at,
             num_turns=harness.num_turns if harness else 0,
+            errored=errored,
         )
     except Exception:
         log.exception("control-plane checkpoint failed")
@@ -127,6 +129,9 @@ async def run_session(session_id: str) -> None:
     stop_reason = StopReason.END_TURN
     harness: Harness | None = None
     gateway: McpGateway | None = None
+    # A burst that dies on an exception still stops at `end_turn`, so without this
+    # the control plane would record the crash as a completed run.
+    errored = False
     try:
         await channel.claim()
         config = await channel.config()
@@ -173,11 +178,16 @@ async def run_session(session_id: str) -> None:
                 watcher.cancel()
             if stop_reason in (StopReason.REQUIRES_ACTION, StopReason.BUDGET_REACHED):
                 break
+    except Exception:
+        errored = True
+        raise
     finally:
         stop.set()
         if heartbeat_task is not None:
             heartbeat_task.cancel()
-        await _finalize(channel, harness, workspace, memory, gateway, started_at, stop_reason)
+        await _finalize(
+            channel, harness, workspace, memory, gateway, started_at, stop_reason, errored
+        )
 
 
 def main() -> None:

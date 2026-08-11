@@ -616,9 +616,9 @@ table.api td.d code { font-size: 0.9em; }
   <div class="table-wrap"><table>
     <tr><td class="c">id, deployment_id, session_id</td><td class="n"></td></tr>
     <tr><td class="c">status</td><td class="n">CHECK IN <code>queued · running · succeeded · failed · cancelled</code></td></tr>
-    <tr><td class="c">error_type</td><td class="n"><code>session_error · budget_reached · timeout · retries_exhausted · infra_error</code></td></tr>
+    <tr><td class="c">error_type</td><td class="n"><code>session_error · budget_reached · timeout · retries_exhausted · infra_error · agent_disabled · cancelled</code></td></tr>
     <tr><td class="c">stop_reason, cost_usd, num_turns</td><td class="n">folded in at the fired session's checkpoint</td></tr>
-    <tr><td class="c">fired_at, started_at, finished_at</td><td class="n">only <code>requires_action</code> leaves a run open — an unattended run has nobody to answer a confirmation</td></tr>
+    <tr><td class="c">fired_at, started_at, finished_at</td><td class="n">a run blocked on an operator (<code>requires_action</code>, <code>budget_reached</code> — raising the budget resumes) stays open and keeps accumulating; terminal failures come from the control plane, since a crashed burst still reports <code>end_turn</code> and exhausted wake retries never reach a checkpoint</td></tr>
   </table></div>
 </div>
 

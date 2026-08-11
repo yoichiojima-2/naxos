@@ -204,6 +204,8 @@ export type DeploymentRunTotals = {
   cost_usd: number;
   duration_seconds: number;
   last_fired_at: string | null;
+  // Oldest first, independent of the run list's status filter and its cap.
+  recent: { id: string; status: RunStatus; fired_at: string }[];
 };
 
 export type RunsOverview = {

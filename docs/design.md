@@ -165,11 +165,16 @@ deployments (id, agent_id, agent_version,   -- NULL = latest at fire time
 deployment_runs (id, deployment_id, session_id,
         status CHECK IN ('queued','running','succeeded','failed','cancelled'),
         error_type,    -- session_error|budget_reached|timeout|retries_exhausted|infra_error
+        error_type,    -- + session_error|agent_disabled|cancelled for a closed run
         stop_reason, cost_usd, num_turns,
         fired_at, started_at, finished_at)
-        -- closed at the fired session's checkpoint: an unattended run has nobody
-        -- to answer a confirmation, so only requires_action leaves it open.
-        -- 'cancelled' is an operator terminating or deleting the session.
+        -- Closed at the fired session's checkpoint. A run blocked on an operator
+        -- (requires_action, budget_reached — raising the budget resumes) stays
+        -- open and keeps accumulating; anything else ends it. Terminal failures
+        -- come from the control plane, which is where they are known: a crashed
+        -- burst still reports end_turn (the sandbox flags it with `errored`),
+        -- wake retries exhausted never reaches a checkpoint at all, and the kill
+        -- switch / terminate / delete cancel the run.
 
 session_runs (id, session_id, agent_id, environment_id,
         trigger_type, principal, model, status, stop_reason,

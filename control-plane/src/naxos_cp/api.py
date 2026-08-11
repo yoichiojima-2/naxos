@@ -209,6 +209,10 @@ async def patch_agent(agent_id: str, body: AgentPatch, _: str = Depends(principa
         )
         if db.rowcount(result) != 1:
             raise HTTPException(404, "agent not found")
+        if body.disabled:
+            await deployments.cancel_agent_runs(
+                conn, agent_id, "the agent was disabled (kill switch)"
+            )
     return {"id": agent_id, "disabled": body.disabled}
 
 

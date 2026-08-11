@@ -174,17 +174,94 @@ async def test_deployment_run_stays_open_while_it_awaits_approval(
     assert closed["finished_at"] is not None
 
 
-async def test_deployment_run_fails_when_the_budget_stops_it(client, internal_client, launched):
+async def test_budget_leaves_the_run_open_because_raising_it_resumes(
+    client, internal_client, launched
+):
     deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
     await internal_client.post(
         f"/internal/sessions/{run['session_id']}/checkpoint",
-        json={"lease_id": lease, "stop_reason": "budget_reached"},
+        json={"lease_id": lease, "cost_usd": 0.5, "stop_reason": "budget_reached"},
     )
 
-    stopped = await _only_run(client, deployment["id"])
-    assert stopped["status"] == "failed"
-    assert stopped["error_type"] == "budget_reached"
-    assert stopped["finished_at"] is not None
+    blocked = await _only_run(client, deployment["id"])
+    assert blocked["status"] == "running"
+    assert blocked["stop_reason"] == "budget_reached"
+    assert blocked["finished_at"] is None
+
+    # Raising the budget is the resume signal, and the rest of the run's cost
+    # still lands on the same row.
+    await client.patch(f"/v1/sessions/{run['session_id']}", json={"budget_usd": 10})
+    lease = (await internal_client.post(f"/internal/sessions/{run['session_id']}/claim")).json()[
+        "lease_id"
+    ]
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 3.0},
+    )
+
+    done = await _only_run(client, deployment["id"])
+    assert done["status"] == "succeeded"
+    assert done["cost_usd"] == 3.0
+    assert done["finished_at"] is not None
+
+
+async def test_crashed_burst_is_a_failed_run_not_a_successful_one(
+    client, internal_client, launched
+):
+    """The sandbox stops at end_turn however it died, so it flags the crash."""
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "errored": True, "num_turns": 0},
+    )
+
+    crashed = await _only_run(client, deployment["id"])
+    assert crashed["status"] == "failed"
+    assert crashed["error_type"] == "session_error"
+    assert crashed["finished_at"] is not None
+
+
+async def test_kill_switch_cancels_a_run_instead_of_recording_a_success(
+    client, internal_client, launched
+):
+    """The sandbox stops on the kill signal but reports an ordinary end_turn."""
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    agent_id = (await client.get(f"/v1/deployments/{deployment['id']}")).json()["agent_id"]
+
+    await client.patch(f"/v1/agents/{agent_id}", json={"disabled": True})
+    killed = await _only_run(client, deployment["id"])
+    assert killed["status"] == "cancelled"
+    assert killed["error_type"] == "agent_disabled"
+
+    # The killed sandbox's own checkpoint must not reopen or overwrite it.
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 0.1},
+    )
+    assert (await _only_run(client, deployment["id"]))["status"] == "cancelled"
+
+
+async def test_run_fails_when_the_sandbox_cannot_be_started(client, internal_client, launched):
+    from naxos_cp import config as cp_config
+    from naxos_cp import db
+
+    deployment, run, _ = await _fire_and_claim(client, internal_client, launched)
+    async with db.transaction() as conn:
+        await conn.execute(
+            "UPDATE sessions SET retry_count = $2, lease_expires_at = NULL WHERE id = $1",
+            run["session_id"],
+            cp_config.MAX_WAKE_RETRIES,
+        )
+
+    await client.post(
+        f"/v1/sessions/{run['session_id']}/events",
+        json={"events": [{"type": "user.message", "content": [{"type": "text", "text": "go"}]}]},
+    )
+
+    stuck = await _only_run(client, deployment["id"])
+    assert stuck["status"] == "failed"
+    assert stuck["error_type"] == "retries_exhausted"
+    assert stuck["finished_at"] is not None
 
 
 async def test_terminating_the_session_cancels_its_deployment_run(

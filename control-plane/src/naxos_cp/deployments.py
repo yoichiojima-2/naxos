@@ -16,9 +16,11 @@ router = APIRouter(prefix="/v1")
 
 RUN_STATUSES = ("queued", "running", "succeeded", "failed", "cancelled")
 
-# A burst that stopped for one of these is over for an unattended run: nobody is
-# going to answer, so the run failed rather than merely paused.
-FAILING_STOP_REASONS = {StopReason.BUDGET_REACHED, StopReason.RETRIES_EXHAUSTED}
+# A blocked run is not a finished one. Both of these wait on an operator —
+# answering the confirmation, or raising the budget, which is itself the resume
+# signal — and the session then carries on where it stopped, so the run stays
+# open and keeps accumulating cost instead of freezing at a wrong outcome.
+BLOCKING_STOP_REASONS = {StopReason.REQUIRES_ACTION, StopReason.BUDGET_REACHED}
 
 
 @functools.cache
@@ -224,7 +226,13 @@ async def runs_overview(
             "  COALESCE(sum(r.cost_usd), 0) AS cost_usd, "
             "  COALESCE(sum(extract(epoch FROM (r.finished_at - r.fired_at))), 0) "
             "    AS duration_seconds, "
-            "  max(r.fired_at) AS last_fired_at "
+            "  max(r.fired_at) AS last_fired_at, "
+            # The health strip reads this, not the run list: that one is capped and
+            # narrowed by the status filter, which would paint every strip one colour.
+            "  COALESCE((SELECT jsonb_agg(to_jsonb(recent) ORDER BY recent.fired_at) "
+            "    FROM (SELECT r2.id, r2.status, r2.fired_at FROM deployment_runs r2 "
+            "      WHERE r2.deployment_id = d.id AND r2.fired_at >= $1 "
+            "      ORDER BY r2.fired_at DESC LIMIT 20) recent), '[]'::jsonb) AS recent "
             "FROM deployments d "
             "LEFT JOIN deployment_runs r ON r.deployment_id = d.id AND r.fired_at >= $1 "
             "WHERE (d.archived_at IS NULL OR r.id IS NOT NULL) "
@@ -313,47 +321,75 @@ async def record_burst(
     *,
     stop_reason: StopReason,
     terminated: bool,
+    errored: bool,
     cost_delta: float,
     num_turns: int,
     started_at: datetime,
 ) -> None:
     """Fold one wake-to-idle burst into the open deployment run of this session.
 
-    An unattended run has no one to answer a confirmation prompt, so only
-    `requires_action` leaves the run open — every other stop is its outcome.
+    A burst that ends blocked leaves the run open — it is still going, waiting on
+    an operator. Anything else is the run's end. `errored` is load-bearing: a
+    burst that died on an exception still reports `end_turn`, so without it a
+    crashed run would be recorded as a success.
     """
-    waiting = stop_reason is StopReason.REQUIRES_ACTION and not terminated
-    failed = stop_reason in FAILING_STOP_REASONS
-    status = "running" if waiting else "failed" if failed else "succeeded"
+    blocked = not errored and not terminated and stop_reason in BLOCKING_STOP_REASONS
     await conn.execute(
         "UPDATE deployment_runs SET "
         "  started_at = COALESCE(started_at, $2), "
         "  cost_usd = cost_usd + $3, num_turns = num_turns + $4, stop_reason = $5, "
-        "  status = $6, error_type = COALESCE($7, error_type), "
-        "  error_message = COALESCE($8, error_message), "
-        "  finished_at = CASE WHEN $9 THEN now() ELSE finished_at END "
+        "  status = $6, error_type = COALESCE(error_type, $7), "
+        "  error_message = COALESCE(error_message, $8), "
+        "  finished_at = CASE WHEN $9 THEN finished_at ELSE now() END "
         "WHERE session_id = $1 AND finished_at IS NULL",
         session_id,
         started_at,
         cost_delta,
         num_turns,
         str(stop_reason),
+        "failed" if errored else "running" if blocked else "succeeded",
+        "session_error" if errored else None,
+        "the sandbox stopped on an error" if errored else None,
+        blocked,
+    )
+
+
+async def _close_open_runs(
+    conn, session_id: str, status: str, error_type: str, reason: str
+) -> None:
+    await conn.execute(
+        "UPDATE deployment_runs SET status = $2, finished_at = now(), "
+        "  error_type = COALESCE(error_type, $3), error_message = COALESCE(error_message, $4) "
+        "WHERE session_id = $1 AND finished_at IS NULL",
+        session_id,
         status,
-        str(stop_reason) if failed else None,
-        f"the run stopped: {stop_reason}" if failed else None,
-        not waiting,
+        error_type,
+        reason,
     )
 
 
 async def cancel_open_runs(conn, session_id: str, reason: str) -> None:
     """Close the run of a session an operator terminated or deleted, so it does
     not read as still running forever."""
+    await _close_open_runs(conn, session_id, "cancelled", "cancelled", reason)
+
+
+async def fail_open_runs(conn, session_id: str, error_type: str, reason: str) -> None:
+    """Close the run of a session that cannot proceed at all — the sandbox never
+    reaches a checkpoint in that case, so nothing else would ever close it."""
+    await _close_open_runs(conn, session_id, "failed", error_type, reason)
+
+
+async def cancel_agent_runs(conn, agent_id: str, reason: str) -> None:
+    """Kill switch: the sandbox stops on the control signal but reports an
+    ordinary end_turn, so a killed run would otherwise be recorded as a success."""
     await conn.execute(
         "UPDATE deployment_runs SET status = 'cancelled', finished_at = now(), "
-        "  error_type = COALESCE(error_type, 'cancelled'), "
+        "  error_type = COALESCE(error_type, 'agent_disabled'), "
         "  error_message = COALESCE(error_message, $2) "
-        "WHERE session_id = $1 AND finished_at IS NULL",
-        session_id,
+        "WHERE finished_at IS NULL "
+        "  AND session_id IN (SELECT id FROM sessions WHERE agent_id = $1)",
+        agent_id,
         reason,
     )
 

@@ -152,6 +152,7 @@ class ControlChannel:
         run_id: str | None = None,
         started_at: str | None = None,
         num_turns: int = 0,
+        errored: bool = False,
     ) -> None:
         await self._post(
             "/checkpoint",
@@ -164,5 +165,6 @@ class ControlChannel:
                 "run_id": run_id,
                 "started_at": started_at,
                 "num_turns": num_turns,
+                "errored": errored,
             },
         )
