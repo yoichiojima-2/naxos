@@ -36,15 +36,15 @@ export function groupEvents(events: SessionEvent[]): {
 } {
   const blocks: Block[] = [];
   const byToolUseId = new Map<string, ToolBlock>();
-  const byCallHash = new Map<string, ToolBlock>();
   let costUsd: number | null = null;
 
-  const index = (block: ToolBlock) => {
-    const id = text(block.use.payload.tool_use_id);
-    const hash = text(block.use.payload.call_hash);
-    if (id) byToolUseId.set(id, block);
-    if (hash) byCallHash.set(hash, block);
-  };
+  const awaiting = (hash: string) =>
+    blocks.find(
+      (b) =>
+        b.kind === "tool" &&
+        b.use.payload.decision === "awaiting_confirmation" &&
+        text(b.use.payload.call_hash) === hash,
+    ) as ToolBlock | undefined;
 
   for (const event of events) {
     const payload = event.payload;
@@ -74,20 +74,20 @@ export function groupEvents(events: SessionEvent[]): {
       // A resumed call replays with a new tool_use_id but the same call_hash;
       // it settles the row that asked for approval instead of adding another.
       // The pause denied the call, so its result is the "needs approval"
-      // notice — the replay supersedes it.
-      const pendingApproval = byCallHash.get(text(payload.call_hash));
-      if (
-        payload.decision !== "awaiting_confirmation" &&
-        pendingApproval?.use.payload.decision === "awaiting_confirmation"
-      ) {
-        pendingApproval.use = event;
-        pendingApproval.result = undefined;
-        index(pendingApproval);
+      // notice — the replay supersedes it. call_hash has no per-invocation
+      // nonce, so identical concurrent calls share one; settle them in order.
+      const hash = text(payload.call_hash);
+      const settled =
+        payload.decision === "awaiting_confirmation" || !hash ? undefined : awaiting(hash);
+      const block = settled ?? { kind: "tool" as const, key: event.seq, use: event };
+      if (settled) {
+        settled.use = event;
+        settled.result = undefined;
       } else {
-        const block: ToolBlock = { kind: "tool", key: event.seq, use: event };
         blocks.push(block);
-        index(block);
       }
+      const id = text(payload.tool_use_id);
+      if (id) byToolUseId.set(id, block);
       continue;
     }
 
