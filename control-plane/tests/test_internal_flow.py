@@ -189,6 +189,76 @@ async def test_always_allow_needs_no_confirmation(client, internal_client, launc
     assert verdict["by"] == "policy"
 
 
+async def test_a_restricted_tools_list_denies_everything_outside_it(
+    client, internal_client, launched
+):
+    # allowed_tools only pre-approves in the SDK, so the restriction has to hold here.
+    policy = {
+        "tools": ["Read", "mcp__artifacts__*"],
+        "permission_policy": {"default": "always_allow"},
+    }
+    _, session = await start_session(client, launched, **policy)
+    sid = session["id"]
+    await internal_client.post(f"/internal/sessions/{sid}/claim")
+
+    verdict = (
+        await internal_client.post(
+            f"/internal/sessions/{sid}/permission",
+            json={"call_hash": DIGEST, "tool_use_id": "toolu_x", **BASH},
+        )
+    ).json()
+    assert verdict["decision"] == "deny"
+    assert verdict["by"] == "policy"
+    assert "Bash is not one of this agent's tools" in verdict["reason"]
+
+    # No pending confirmation is created for a tool the agent may not use at all.
+    events = (await client.get(f"/v1/sessions/{sid}/events")).json()["data"]
+    assert not any(e["type"] == "session.status_idle" for e in events)
+
+    for name in ("Read", "mcp__artifacts__artifact_create"):
+        allowed = (
+            await internal_client.post(
+                f"/internal/sessions/{sid}/permission",
+                json={
+                    "call_hash": call_hash(name, {}),
+                    "tool_use_id": "toolu_y",
+                    "tool_name": name,
+                    "input": {},
+                },
+            )
+        ).json()
+        assert allowed["decision"] == "allow", name
+
+
+async def test_an_empty_tools_list_leaves_the_agent_unrestricted(client, internal_client, launched):
+    _, session = await start_session(
+        client, launched, permission_policy={"default": "always_allow"}
+    )
+    await internal_client.post(f"/internal/sessions/{session['id']}/claim")
+
+    verdict = (
+        await internal_client.post(
+            f"/internal/sessions/{session['id']}/permission",
+            json={"call_hash": DIGEST, "tool_use_id": "toolu_x", **BASH},
+        )
+    ).json()
+    assert verdict["decision"] == "allow"
+
+
+async def test_kill_switch_beats_the_tools_list(client, internal_client, launched):
+    agent, session = await start_session(client, launched, tools=["Read"])
+    await internal_client.post(f"/internal/sessions/{session['id']}/claim")
+    await client.patch(f"/v1/agents/{agent['id']}", json={"disabled": True})
+
+    verdict = (
+        await internal_client.post(
+            f"/internal/sessions/{session['id']}/permission",
+            json={"call_hash": DIGEST, "tool_use_id": "toolu_x", **BASH},
+        )
+    ).json()
+    assert verdict["killed"] is True
+
+
 async def test_kill_switch_denies_a_tool_call_mid_run(client, internal_client, launched):
     agent, session = await start_session(client, launched)
     await internal_client.post(f"/internal/sessions/{session['id']}/claim")

@@ -546,7 +546,7 @@ async def test_bundled_sample_skills_seed_from_the_repo(pool, client):
     bigquery = next(s for s in listed if s["name"] == "bigquery")
     assert bigquery["ready"] is True
     assert bigquery["created_by"] == "system:seed"
-    assert bigquery["description"].startswith("Query BigQuery")
+    assert bigquery["description"].startswith("Analyse data in BigQuery")
 
 
 async def _make_skill(client, name: str, ready: bool = True) -> dict:

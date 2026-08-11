@@ -608,11 +608,13 @@ function ToolCall({
   const flag =
     call.decision === "user_denied"
       ? "denied"
-      : call.decision === "killed"
-        ? "killed"
-        : isError
-          ? "error"
-          : "";
+      : call.decision === "not_allowed"
+        ? "not allowed"
+        : call.decision === "killed"
+          ? "killed"
+          : isError
+            ? "error"
+            : "";
   const state = flag ? "err" : block.result ? "ok" : "wait";
   const summary = toolSummary(call.input);
 

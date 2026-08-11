@@ -18,7 +18,7 @@ from claude_agent_sdk.types import (
 from naxos_shared.events import EventType, SessionConfig, StopReason
 from naxos_shared.ids import call_hash
 
-from . import artifacts, schedules
+from . import artifacts, bigquery, schedules
 from .control import ControlChannel
 from .skills_sync import PLUGIN_NAME
 
@@ -84,13 +84,16 @@ class Harness:
         self.interrupted = False
         self.killed = False
         self.num_turns = 0
-        for reserved in ("artifacts", "schedules"):
+        for reserved in ("artifacts", "schedules", "bigquery"):
             if reserved in (config.mcp_servers or {}):
                 log.warning(
                     "agent-configured MCP server '%s' is shadowed by the built-in tools", reserved
                 )
         self.artifact_server = artifacts.build_server(channel, config, Path(cwd))
         self.schedule_server = schedules.build_server(channel)
+        # None unless the environment was opted into BigQuery datasets, so an
+        # environment without the grant has no BigQuery tools at all.
+        self.bigquery_server = bigquery.build_server()
 
     async def interrupt(self) -> None:
         """Stop the in-flight turn. Called by the queue watcher mid-run."""
@@ -151,7 +154,7 @@ class Harness:
         if verdict.get("killed"):
             label = "killed"
         elif not allowed:
-            label = "user_denied"
+            label = "not_allowed" if verdict.get("by") == "policy" else "user_denied"
         elif verdict.get("by") == "user":
             label = "user_allowed"
         else:
@@ -190,6 +193,7 @@ class Harness:
                 **self.config.mcp_servers,
                 "artifacts": self.artifact_server,
                 "schedules": self.schedule_server,
+                **({"bigquery": self.bigquery_server} if self.bigquery_server else {}),
             },
             allowed_tools=self.config.tools,
             disallowed_tools=SESSION_LOCAL_SCHEDULER_TOOLS,

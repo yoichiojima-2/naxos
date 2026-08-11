@@ -235,6 +235,36 @@ private state). The mechanism:
   registration. Humans manage artifacts (download, describe, share, revoke, delete)
   from the UI's Artifacts page or the `/v1/artifacts` API.
 
+### BigQuery
+
+The sandbox image carries no `bq` or `gcloud` CLI, so BigQuery is reached through a
+built-in tool rather than a shell command. The mechanism mirrors artifacts:
+
+- The sandbox exposes an **in-process MCP server** (`bigquery`) with four tools:
+  `bigquery_list_datasets`, `bigquery_list_tables`, `bigquery_describe_table`, and
+  `bigquery_query`. Ordinary tool calls — they pass the `PreToolUse` permission gate,
+  land in `audit.tool_calls` with the SQL as the recorded input, and obey the kill
+  switch. Requests go straight from the sandbox to `bigquery.googleapis.com` as the
+  environment SA, which is what bounds them.
+- **The server is registered only when the environment was opted in.** Terraform
+  passes the environment's `bigquery_datasets` list to the sandbox job as
+  `BIGQUERY_DATASETS`; when it is empty the server is not built, so an environment
+  without the grant has no BigQuery tools at all rather than tools that fail. That is
+  the same list that drives the IAM grants, so the tool surface and the IAM boundary
+  cannot drift apart.
+- **Guardrails are enforced in code, not prompt**: only a single read-only
+  `SELECT`/`WITH` runs (DML, DDL, and multi-statement scripts are refused before the
+  API call); every query is dry-run first and refused if it would scan more than
+  `MAX_QUERY_BYTES_BILLED` (default 1GiB), which is also sent as `maximumBytesBilled`
+  so the cap holds even if the estimate is wrong; results are capped at
+  `MAX_QUERY_ROWS` (default 200) and truncated past 100k characters.
+- The job location is resolved once from the readable datasets and cached, because a
+  job against a regional dataset otherwise fails as "not found in location US" — and
+  the location has to be known before the dry run, so it cannot be read off the query.
+- A denial is reported to the agent as terminal (which datasets it can read, and to
+  stop rather than retry), since no amount of retrying widens a Terraform-provisioned
+  grant.
+
 ### Agent-created deployments (scheduling from inside a session)
 
 When a user asks an agent to "do this every morning", the durable answer is a
@@ -306,7 +336,7 @@ audit.runs(run_id, session_id, agent_id, environment_id, deployment_run_id,
 
 audit.tool_calls(run_id, session_id, agent_id, principal, ts, tool_use_id,
            tool_name, args_redacted,
-           decision,            -- auto_allowed | user_allowed | user_denied | killed
+           decision,            -- auto_allowed | user_allowed | user_denied | not_allowed | killed
            result_status, latency_ms, error)
 ```
 
@@ -376,9 +406,9 @@ Documented deviations from CMA: IAP auth instead of API keys; environments opera
 
 ## 8. Security model
 
-- **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a `bigquery_datasets` list in `environments.json` grants the SA `bigquery.jobUser` plus `dataViewer` on exactly the listed datasets (the audit dataset is never grantable), so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.
+- **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a `bigquery_datasets` list in `environments.json` grants the SA `bigquery.jobUser` plus `dataViewer` on exactly the listed datasets (the audit dataset is never grantable) and is passed to the sandbox job as `BIGQUERY_DATASETS`, which is what decides whether the BigQuery tools exist at all — so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.
 - **Sandbox ↔ control-plane auth**: OIDC ID token of the env SA → Cloud Run IAM on `naxos-internal`, then an app-level check that the token's SA equals `environments.service_account_email` for the session being touched. No bearer tokens to mint or leak.
-- **Tool restriction**: tools not in the agent version's `tools` list are never passed to the SDK. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
+- **Tool restriction**: a non-empty `tools` list on the agent version is enforced in the control plane's permission endpoint — a call to anything outside it is denied before any policy or confirmation lookup, and audited `not_allowed`. It cannot be enforced by the SDK: `allowed_tools` only pre-approves calls (measured, §4.1), and the CLI's built-ins cannot be withheld from the model at all, so the gate is the only place the restriction can actually hold. Entries may be globs, so `mcp__artifacts__*` names a whole built-in server. An empty list means unrestricted. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
 - **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
 - **Audit**: all agent events flow through `naxos-internal`, so the control plane is the single audit writer — the sandbox cannot forge or skip audit rows. `principal` is the IAP email for user-triggered turns, `deployment:{id}` for cron.
 - **IAP** directly on Cloud Run with the custom OAuth client (no-org project); the app verifies the IAP JWT.

@@ -52,7 +52,8 @@ async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principa
         )
         tool_usage = await conn.fetch(
             "SELECT payload->>'tool_name' AS tool_name, count(*) AS calls, "
-            "  count(*) FILTER (WHERE payload->>'decision' = 'user_denied') AS denied "
+            "  count(*) FILTER (WHERE payload->>'decision' IN ('user_denied', 'not_allowed')) "
+            "  AS denied "
             "FROM session_events "
             "WHERE type = 'agent.tool_use' AND created_at >= $1 "
             "  AND payload->>'tool_name' IS NOT NULL "

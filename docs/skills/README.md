@@ -22,4 +22,4 @@ Then attach the returned `skill_id` to an agent version (`skill_ids` on `POST /v
 
 | Skill | What |
 |---|---|
-| `bigquery/` | Querying BigQuery from the sandbox with the REST API: metadata-server auth, dry-run cost checks, schema discovery, pagination, result publishing |
+| `bigquery/` | Analysing BigQuery data with the sandbox's built-in `bigquery_*` tools: what the tools enforce, GoogleSQL patterns for discovery, partition pruning, and cheap aggregation |

@@ -28,3 +28,12 @@ def test_first_matching_rule_wins():
     policy = _policy(("mcp__artifacts__*", "always_ask"), ("*", "always_allow"))
     assert policy.mode_for("mcp__artifacts__artifact_share") is PermissionMode.ALWAYS_ASK
     assert policy.mode_for("Bash") is PermissionMode.ALWAYS_ALLOW
+
+
+def test_tool_matches_supports_literals_and_globs():
+    from naxos_shared.events import tool_matches
+
+    assert tool_matches("Bash", ["Read", "Bash"])
+    assert tool_matches("mcp__artifacts__artifact_create", ["mcp__artifacts__*"])
+    assert not tool_matches("Bash", ["Read", "mcp__artifacts__*"])
+    assert not tool_matches("Bash", [])

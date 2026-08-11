@@ -95,6 +95,8 @@ class _Channel:
         ({"decision": "allow", "by": "policy"}, "auto_allowed", "allow"),
         ({"decision": "allow", "by": "user"}, "user_allowed", "allow"),
         ({"decision": "deny", "by": "user", "reason": "no"}, "user_denied", "deny"),
+        # Outside the agent version's tools list: denied by the control plane, not a human.
+        ({"decision": "deny", "by": "policy", "reason": "not yours"}, "not_allowed", "deny"),
         ({"decision": "deny", "reason": "agent disabled", "killed": True}, "killed", "deny"),
     ],
 )
