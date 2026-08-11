@@ -3,18 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { agentName, api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
+import CountHeader from "@/components/list-header";
 
 const MD_COMPONENTS: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-};
-
-const BADGE: Record<string, string> = {
-  idle: "idle",
-  running: "running",
-  rescheduling: "rescheduling",
-  terminated: "terminated",
 };
 
 export default function Sessions({ agents }: { agents: Agent[] }) {
@@ -49,22 +43,17 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
 
   return (
     <>
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <span className="muted">
-          {sessions === null ? "…" : `${sessions.length} session${sessions.length === 1 ? "" : "s"}`}
-        </span>
-        <div className="row">
-          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ width: 220 }}>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-          <button className="primary" onClick={createSession} disabled={!agents.length}>
-            New session
-          </button>
-        </div>
-      </div>
-      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+      <CountHeader count={sessions === null ? null : sessions.length} noun="session">
+        <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ width: 220 }}>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+        <button className="primary" onClick={createSession} disabled={!agents.length}>
+          New session
+        </button>
+      </CountHeader>
+      <div className="panel flush">
         <div className="table-wrap">
           <table>
           <thead>
@@ -84,7 +73,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
                   <td>{s.title ?? s.id}</td>
                   <td className="muted">{agentName(agents, s.agent_id)}</td>
                   <td>
-                    <span className={`badge ${needsAction ? "requires_action" : BADGE[s.status]}`}>
+                    <span className={`badge ${needsAction ? "requires_action" : s.status}`}>
                       {needsAction ? "needs approval" : s.status}
                       {s.stop_reason && !needsAction ? `:${s.stop_reason}` : ""}
                     </span>
@@ -139,12 +128,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
       if (event.type === "session.status_terminated") setStatus("terminated");
     };
     // Named SSE events require a listener per type; a catch-all keeps this simple.
-    [
-      "user.message", "user.interrupt", "user.tool_confirmation", "user.custom_tool_result",
-      "agent.message", "agent.thinking", "agent.tool_use", "agent.tool_result",
-      "session.status_running", "session.status_idle", "session.status_terminated",
-      "session.error", "span.model_request_start", "span.model_request_end",
-    ].forEach((type) => es.addEventListener(type, push));
+    EVENT_TYPES.forEach((type) => es.addEventListener(type, push));
     return () => es.close();
   }, [session.id]);
 
@@ -176,13 +160,13 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
 
   return (
     <div className="panel">
-      <div className="row between" style={{ marginBottom: 12 }}>
+      <div className="row between mb12">
         <div className="row">
-          <button className="ghost" onClick={onBack} aria-label="back" style={{ display: "inline-flex" }}>
+          <button className="ghost flex-inline" onClick={onBack} aria-label="back">
             <BackIcon />
           </button>
           <strong>{session.title ?? session.id}</strong>
-          <span className={`badge ${BADGE[status]}`}>{status}</span>
+          <span className={`badge ${status}`}>{status}</span>
         </div>
         <div className="row">
           <button className="ghost" onClick={loadFiles}>Files</button>
@@ -190,7 +174,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
         </div>
       </div>
       {files && (
-        <div className="panel" style={{ marginBottom: 12 }}>
+        <div className="panel mb12">
           {files.length === 0 && <span className="muted">workspace is empty</span>}
           {files.map((f) => (
             <div className="row between" key={f.path}>
@@ -248,73 +232,92 @@ function Event({
   decided: Set<string>;
   onConfirm: (hash: string, result: "allow" | "deny") => void;
 }) {
-  const kind = event.type.split(".")[0];
-  const payload = event.payload as Record<string, any>;
-
-  if (event.type === "agent.tool_use" && payload.decision === "awaiting_confirmation") {
-    const hash = String(payload.call_hash);
-    const pending = !decided.has(hash);
-    return (
-      <div className="event ask">
-        <div className="row between">
-          <span>
-            <span className="badge requires_action">approval</span>{" "}
-            <strong>{payload.tool_name}</strong>
-          </span>
-          {pending && (
-            <span className="row">
-              <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
-              <button className="danger" onClick={() => onConfirm(hash, "deny")}>Deny</button>
-            </span>
-          )}
-        </div>
-        <pre>{JSON.stringify(payload.input, null, 2)}</pre>
-      </div>
-    );
+  if (event.type === "agent.tool_use" && event.payload.decision === "awaiting_confirmation") {
+    return <ApprovalEvent event={event} decided={decided} onConfirm={onConfirm} />;
   }
-
   if (
     event.type === "agent.thinking" ||
     event.type === "agent.tool_use" ||
     event.type === "agent.tool_result"
   ) {
-    let label = "thinking";
-    let name = "";
-    let detail = "";
-    let flag = "";
-    if (event.type === "agent.tool_use") {
-      label = "tool";
-      name = String(payload.tool_name ?? "");
-      detail = JSON.stringify(payload.input ?? {}, null, 2);
-      if (payload.decision === "user_denied") flag = "denied";
-    } else if (event.type === "agent.tool_result") {
-      label = "result";
-      detail = String(payload.content ?? "");
-      if (payload.is_error) flag = "error";
-    } else {
-      detail = String(payload.text ?? "");
-    }
-    const summary = (
-      <>
-        {label}
-        {name && <span className="mono">{name}</span>}
-        {flag && <span className="badge terminated">{flag}</span>}
-      </>
-    );
-    return (
-      <div className="event agent fold">
-        {detail ? (
-          <details>
-            <summary>{summary}</summary>
-            <pre>{detail}</pre>
-          </details>
-        ) : (
-          <span className="fold-line">{summary}</span>
+    return <FoldedEvent event={event} />;
+  }
+  return <MessageEvent event={event} />;
+}
+
+function ApprovalEvent({
+  event,
+  decided,
+  onConfirm,
+}: {
+  event: SessionEvent;
+  decided: Set<string>;
+  onConfirm: (hash: string, result: "allow" | "deny") => void;
+}) {
+  const hash = String(event.payload.call_hash);
+  const pending = !decided.has(hash);
+  return (
+    <div className="event ask">
+      <div className="row between">
+        <span>
+          <span className="badge requires_action">approval</span>{" "}
+          <strong>{String(event.payload.tool_name ?? "")}</strong>
+        </span>
+        {pending && (
+          <span className="row">
+            <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
+            <button className="danger" onClick={() => onConfirm(hash, "deny")}>Deny</button>
+          </span>
         )}
       </div>
-    );
-  }
+      <pre>{JSON.stringify(event.payload.input, null, 2)}</pre>
+    </div>
+  );
+}
 
+function FoldedEvent({ event }: { event: SessionEvent }) {
+  const payload = event.payload;
+  let label = "thinking";
+  let name = "";
+  let detail = "";
+  let flag = "";
+  if (event.type === "agent.tool_use") {
+    label = "tool";
+    name = String(payload.tool_name ?? "");
+    detail = JSON.stringify(payload.input ?? {}, null, 2);
+    if (payload.decision === "user_denied") flag = "denied";
+    if (payload.decision === "killed") flag = "killed";
+  } else if (event.type === "agent.tool_result") {
+    label = "result";
+    detail = String(payload.content ?? "");
+    if (payload.is_error) flag = "error";
+  } else {
+    detail = String(payload.text ?? "");
+  }
+  const summary = (
+    <>
+      {label}
+      {name && <span className="mono">{name}</span>}
+      {flag && <span className="badge terminated">{flag}</span>}
+    </>
+  );
+  return (
+    <div className="event agent fold">
+      {detail ? (
+        <details>
+          <summary>{summary}</summary>
+          <pre>{detail}</pre>
+        </details>
+      ) : (
+        <span className="fold-line">{summary}</span>
+      )}
+    </div>
+  );
+}
+
+function MessageEvent({ event }: { event: SessionEvent }) {
+  const kind = event.type.split(".")[0];
+  const payload = event.payload;
   let body = "";
   let markdown = "";
   if (event.type === "user.message") {

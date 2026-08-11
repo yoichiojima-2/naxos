@@ -184,7 +184,7 @@ export default function AgentForm({
           </button>
         ))}
       </div>
-      <div className="row" style={{ marginTop: 8 }}>
+      <div className="row mt8">
         <input
           value={customTool}
           placeholder="Custom tool name, e.g. mcp__github__get_me"
@@ -218,7 +218,7 @@ export default function AgentForm({
         ))}
       </div>
       {rules.map((rule, i) => (
-        <div className="row" key={i} style={{ marginTop: 8 }}>
+        <div className="row mt8" key={i}>
           <input
             value={rule.tool}
             placeholder="Tool name or *"
@@ -253,7 +253,7 @@ export default function AgentForm({
         <option value="*" />
         {tools.map((tool) => <option key={tool} value={tool} />)}
       </datalist>
-      <div style={{ marginTop: 8 }}>
+      <div className="mt8">
         <button
           type="button"
           className="ghost"
@@ -330,9 +330,9 @@ export default function AgentForm({
         style={{ minHeight: 80 }}
         onChange={(e) => setMcpJson(e.target.value)}
       />
-      {mcpServers === null && <p className="hint" style={{ color: "var(--danger)" }}>Invalid JSON object.</p>}
+      {mcpServers === null && <p className="hint error">Invalid JSON object.</p>}
 
-      <div className="row" style={{ marginTop: 16 }}>
+      <div className="row mt16">
         <button className="primary" onClick={submit} disabled={!name || mcpServers === null || busy}>
           {submitLabel}
         </button>

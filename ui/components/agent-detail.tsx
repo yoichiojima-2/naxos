@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { api, AgentDetail as Detail, AgentIn, Environment } from "@/lib/api";
+import { api, apiConfirm, AgentDetail as Detail, AgentIn, Environment } from "@/lib/api";
 import AgentForm, { MODELS } from "@/components/agent-form";
 import { BackIcon } from "@/components/icons";
 
@@ -35,7 +35,7 @@ export default function AgentDetail({
     return (
       <div className="panel">
         <a className="back" href="#agents"><BackIcon />Agents</a>
-        <p className="muted" style={{ marginTop: 12 }}>Agent not found.</p>
+        <p className="muted mt12">Agent not found.</p>
       </div>
     );
   }
@@ -55,8 +55,12 @@ export default function AgentDetail({
 
   async function archive() {
     if (!detail) return;
-    if (!window.confirm(`Archive agent "${detail.name}"? It disappears from the console and can no longer start sessions.`)) return;
-    await api(`/v1/agents/${agentId}/archive`, { json: {} });
+    if (
+      !(await apiConfirm(
+        `Archive agent "${detail.name}"? It disappears from the console and can no longer start sessions.`,
+        `/v1/agents/${agentId}/archive`,
+      ))
+    ) return;
     onChange();
     window.location.hash = "#agents";
   }
@@ -75,7 +79,7 @@ export default function AgentDetail({
 
   return (
     <>
-      <div className="row between" style={{ marginBottom: 16 }}>
+      <div className="row between mb16">
         <div className="row">
           <a className="back" href="#agents"><BackIcon />Agents</a>
           <h2 style={{ fontSize: 20, fontWeight: 650 }}>{detail.name}</h2>
@@ -122,7 +126,7 @@ export default function AgentDetail({
         <>
           <div className="panel">
             <strong>Overview</strong>
-            <dl className="kv" style={{ marginTop: 12 }}>
+            <dl className="kv mt12">
               <dt>ID</dt>
               <dd className="mono">{detail.id}</dd>
               <dt>Model</dt>
@@ -154,28 +158,28 @@ export default function AgentDetail({
           <div className="panel">
             <strong>Instructions</strong>
             {detail.instructions ? (
-              <pre className="mono" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: 12 }}>
+              <pre className="mono prewrap mt12">
                 {detail.instructions}
               </pre>
             ) : (
-              <p className="muted" style={{ marginTop: 8 }}>none — the agent runs with the default system prompt.</p>
+              <p className="muted mt8">none — the agent runs with the default system prompt.</p>
             )}
           </div>
 
           <div className="panel">
             <strong>Tools</strong>
             {detail.tools.length ? (
-              <div className="chips" style={{ marginTop: 12 }}>
+              <div className="chips mt12">
                 {detail.tools.map((tool) => <span className="chip on" key={tool}>{tool}</span>)}
               </div>
             ) : (
-              <p className="muted" style={{ marginTop: 8 }}>All tools allowed (unrestricted).</p>
+              <p className="muted mt8">All tools allowed (unrestricted).</p>
             )}
           </div>
 
           <div className="panel">
             <strong>Permission policy</strong>
-            <dl className="kv" style={{ marginTop: 12 }}>
+            <dl className="kv mt12">
               <dt>Default</dt>
               <dd>
                 {detail.permission_policy.default === "always_ask"
@@ -194,7 +198,7 @@ export default function AgentDetail({
           {(detail.vault_ids.length > 0 || detail.memory_store_ids.length > 0 || mcpNames.length > 0) && (
             <div className="panel">
               <strong>Attachments</strong>
-              <dl className="kv" style={{ marginTop: 12 }}>
+              <dl className="kv mt12">
                 {detail.vault_ids.length > 0 && (
                   <>
                     <dt>Vaults</dt>

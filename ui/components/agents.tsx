@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api, Agent, AgentIn, Environment } from "@/lib/api";
 import AgentForm from "@/components/agent-form";
+import CountHeader from "@/components/list-header";
 
 export default function Agents({
   agents,
@@ -31,12 +32,11 @@ export default function Agents({
 
   return (
     <>
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <span className="muted">{agents.length} agent{agents.length === 1 ? "" : "s"}</span>
+      <CountHeader count={agents.length} noun="agent">
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New agent"}
         </button>
-      </div>
+      </CountHeader>
 
       {showForm && (
         <AgentForm
@@ -47,7 +47,7 @@ export default function Agents({
         />
       )}
 
-      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="panel flush">
         <div className="table-wrap">
           <table>
             <thead>
@@ -74,7 +74,7 @@ export default function Agents({
                       ? <span className="badge terminated">disabled</span>
                       : <span className="badge running">active</span>}
                   </td>
-                  <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                  <td className="ta-right" onClick={(e) => e.stopPropagation()}>
                     <button
                       className={agent.disabled ? "ghost" : "danger"}
                       onClick={() => toggleKill(agent)}

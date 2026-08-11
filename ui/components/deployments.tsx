@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { agentName, api, Agent, Deployment, DeploymentRun } from "@/lib/api";
+import { agentName, api, apiConfirm, Agent, Deployment, DeploymentRun } from "@/lib/api";
+import CountHeader from "@/components/list-header";
 
 export default function Deployments({ agents }: { agents: Agent[] }) {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -38,8 +39,16 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
   }
 
   async function action(id: string, verb: string) {
-    if (verb === "archive" && !window.confirm("Archive this deployment? Its schedule stops firing.")) return;
-    await api(`/v1/deployments/${id}/${verb}`, { json: {} });
+    if (verb === "archive") {
+      if (
+        !(await apiConfirm(
+          "Archive this deployment? Its schedule stops firing.",
+          `/v1/deployments/${id}/archive`,
+        ))
+      ) return;
+    } else {
+      await api(`/v1/deployments/${id}/${verb}`, { json: {} });
+    }
     refresh();
     if (verb === "run") loadRuns(id);
   }
@@ -56,14 +65,11 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
 
   return (
     <>
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <span className="muted">
-          {deployments.length} deployment{deployments.length === 1 ? "" : "s"}
-        </span>
+      <CountHeader count={deployments.length} noun="deployment">
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New deployment"}
         </button>
-      </div>
+      </CountHeader>
 
       {showForm && (
         <div className="panel">
@@ -83,13 +89,13 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
           </select>
           <label>prompt for each run</label>
           <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-          <div style={{ marginTop: 12 }}>
+          <div className="mt12">
             <button className="primary" onClick={create} disabled={!name || !prompt}>Create</button>
           </div>
         </div>
       )}
 
-      <div className="panel" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="panel flush">
         <div className="table-wrap">
           <table>
           <thead>
@@ -148,8 +154,8 @@ function DeploymentRow({
             ? <span className="badge idle">paused</span>
             : <span className="badge running">active</span>}
         </td>
-        <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-          <span className="row" style={{ justifyContent: "flex-end" }}>
+        <td className="ta-right" onClick={(e) => e.stopPropagation()}>
+          <span className="row end">
             <button className="ghost" onClick={() => onAction(deployment.id, "run")}>Run now</button>
             <button className="ghost" onClick={() => onAction(deployment.id, deployment.paused ? "unpause" : "pause")}>
               {deployment.paused ? "Unpause" : "Pause"}
@@ -170,7 +176,7 @@ function DeploymentRow({
               <div><label>created</label>{new Date(deployment.created_at).toLocaleString()} <span className="muted">by {deployment.created_by}</span></div>
             </div>
             <label>prompt for each run</label>
-            <pre style={{ whiteSpace: "pre-wrap", margin: "0 0 10px" }}>{prompt || <span className="muted">(none)</span>}</pre>
+            <pre className="prewrap" style={{ margin: "0 0 10px" }}>{prompt || <span className="muted">(none)</span>}</pre>
             <label>recent runs</label>
             {!runs && <span className="muted">loading…</span>}
             {runs?.length === 0 && <span className="muted">no runs yet</span>}

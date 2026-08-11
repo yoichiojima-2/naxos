@@ -164,8 +164,20 @@ body {
 
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
+.row.end { justify-content: flex-end; }
 .muted { color: var(--muted); font-size: 13px; }
 .mono { font-family: var(--mono); font-size: 12.5px; }
+
+.mb12 { margin-bottom: 12px; }
+.mb16 { margin-bottom: 16px; }
+.mt8 { margin-top: 8px; }
+.mt12 { margin-top: 12px; }
+.mt16 { margin-top: 16px; }
+.hint.error { color: var(--danger); }
+.ta-right { text-align: right; }
+.flex-inline { display: inline-flex; }
+.panel.flush { padding: 0; overflow: hidden; }
+.prewrap { white-space: pre-wrap; word-break: break-word; }
 
 .table-wrap { overflow-x: auto; }
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, Memory, MemoryStore } from "@/lib/api";
+import { api, apiConfirm, listFor, Memory, MemoryStore } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
+import CountHeader from "@/components/list-header";
 
 export default function MemoryStores() {
   const [stores, setStores] = useState<MemoryStore[]>([]);
@@ -13,10 +14,12 @@ export default function MemoryStores() {
   const refresh = useCallback(async () => {
     const result = await api<{ data: MemoryStore[] }>("/v1/memory_stores");
     setStores(result.data);
-    for (const store of result.data) {
-      const items = await api<{ data: Memory[] }>(`/v1/memory_stores/${store.id}/memories`);
-      setMemories((prev) => ({ ...prev, [store.id]: items.data }));
-    }
+    setMemories(
+      await listFor<Memory>(
+        result.data.map((s) => s.id),
+        (id) => `/v1/memory_stores/${id}/memories`,
+      ),
+    );
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -41,16 +44,27 @@ export default function MemoryStores() {
     refresh();
   }
 
+  async function deleteMemory(storeId: string, memory: Memory) {
+    if (
+      await apiConfirm(
+        `Delete "${memory.path}"?`,
+        `/v1/memory_stores/${storeId}/memories/${memory.id}`,
+        { method: "DELETE" },
+      )
+    ) {
+      refresh();
+    }
+  }
+
   if (editing) {
     return (
       <div className="panel">
-        <div className="row between" style={{ marginBottom: 12 }}>
+        <div className="row between mb12">
           <div className="row">
             <button
-              className="ghost"
+              className="ghost flex-inline"
               onClick={() => setEditing(null)}
               aria-label="back"
-              style={{ display: "inline-flex" }}
             >
               <BackIcon />
             </button>
@@ -69,18 +83,15 @@ export default function MemoryStores() {
 
   return (
     <>
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <span className="muted">{stores.length} store{stores.length === 1 ? "" : "s"}</span>
-        <div className="row">
-          <input
-            placeholder="new store name"
-            value={storeName}
-            onChange={(e) => setStoreName(e.target.value)}
-            style={{ width: 220 }}
-          />
-          <button className="primary" onClick={createStore} disabled={!storeName}>Create</button>
-        </div>
-      </div>
+      <CountHeader count={stores.length} noun="store">
+        <input
+          placeholder="new store name"
+          value={storeName}
+          onChange={(e) => setStoreName(e.target.value)}
+          style={{ width: 220 }}
+        />
+        <button className="primary" onClick={createStore} disabled={!storeName}>Create</button>
+      </CountHeader>
       {stores.map((store) => (
         <div className="panel" key={store.id}>
           <div className="row between">
@@ -100,15 +111,13 @@ export default function MemoryStores() {
                 {(memories[store.id] ?? []).map((memory) => (
                   <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
                     <td className="mono">{memory.path}</td>
-                    <td className="muted" style={{ textAlign: "right" }}>{memory.size} B</td>
-                    <td style={{ textAlign: "right", width: 1 }}>
+                    <td className="muted ta-right">{memory.size} B</td>
+                    <td className="ta-right" style={{ width: 1 }}>
                       <button
                         className="danger"
-                        onClick={async (e) => {
+                        onClick={(e) => {
                           e.stopPropagation();
-                          if (!window.confirm(`Delete "${memory.path}"?`)) return;
-                          await api(`/v1/memory_stores/${store.id}/memories/${memory.id}`, { method: "DELETE" });
-                          refresh();
+                          deleteMemory(store.id, memory);
                         }}
                       >
                         Delete

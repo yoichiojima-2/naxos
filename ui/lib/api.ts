@@ -29,6 +29,42 @@ export async function api<T = unknown>(
   return response.json();
 }
 
+export async function listFor<T>(
+  ids: string[],
+  path: (id: string) => string,
+): Promise<Record<string, T[]>> {
+  const results = await Promise.all(ids.map((id) => api<{ data: T[] }>(path(id))));
+  return Object.fromEntries(ids.map((id, i) => [id, results[i].data]));
+}
+
+export async function apiConfirm(
+  message: string,
+  path: string,
+  init?: RequestInit & { json?: unknown },
+): Promise<boolean> {
+  if (!window.confirm(message)) return false;
+  await api(path, init ?? { json: {} });
+  return true;
+}
+
+// Mirrors naxos_shared.events.EventType.
+export const EVENT_TYPES = [
+  "user.message",
+  "user.interrupt",
+  "user.tool_confirmation",
+  "user.custom_tool_result",
+  "agent.message",
+  "agent.thinking",
+  "agent.tool_use",
+  "agent.tool_result",
+  "session.status_running",
+  "session.status_idle",
+  "session.status_terminated",
+  "session.error",
+  "span.model_request_start",
+  "span.model_request_end",
+] as const;
+
 export type Agent = {
   id: string;
   name: string;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, Credential, Vault } from "@/lib/api";
+import { api, apiConfirm, listFor, Credential, Vault } from "@/lib/api";
 
 export default function Vaults() {
   const [vaults, setVaults] = useState<Vault[]>([]);
@@ -12,10 +12,12 @@ export default function Vaults() {
   const refresh = useCallback(async () => {
     const result = await api<{ data: Vault[] }>("/v1/vaults");
     setVaults(result.data);
-    for (const vault of result.data) {
-      const creds = await api<{ data: Credential[] }>(`/v1/vaults/${vault.id}/credentials`);
-      setCredentials((prev) => ({ ...prev, [vault.id]: creds.data }));
-    }
+    setCredentials(
+      await listFor<Credential>(
+        result.data.map((v) => v.id),
+        (id) => `/v1/vaults/${id}/credentials`,
+      ),
+    );
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -39,9 +41,32 @@ export default function Vaults() {
     refresh();
   }
 
+  async function deleteVault(vault: Vault) {
+    if (
+      await apiConfirm(
+        `Delete vault "${vault.name}"? Agents using it lose its credentials.`,
+        `/v1/vaults/${vault.id}/archive`,
+      )
+    ) {
+      setVaults((prev) => prev.filter((v) => v.id !== vault.id));
+    }
+  }
+
+  async function deleteCredential(vaultId: string, cred: Credential) {
+    if (
+      await apiConfirm(
+        `Delete credential "${cred.name}"?`,
+        `/v1/vaults/${vaultId}/credentials/${cred.id}`,
+        { method: "DELETE" },
+      )
+    ) {
+      refresh();
+    }
+  }
+
   return (
     <>
-      <div className="row" style={{ marginBottom: 16 }}>
+      <div className="row mb16">
         <input
           placeholder="new vault name"
           value={vaultName}
@@ -57,16 +82,7 @@ export default function Vaults() {
             <strong>{vault.name}</strong>
             <span className="row">
               <span className="muted mono">{vault.id}</span>
-              <button
-                className="danger"
-                onClick={async () => {
-                  if (!window.confirm(`Delete vault "${vault.name}"? Agents using it lose its credentials.`)) return;
-                  await api(`/v1/vaults/${vault.id}/archive`, { json: {} });
-                  setVaults((prev) => prev.filter((v) => v.id !== vault.id));
-                }}
-              >
-                Delete
-              </button>
+              <button className="danger" onClick={() => deleteVault(vault)}>Delete</button>
             </span>
           </div>
           <div className="table-wrap">
@@ -76,15 +92,8 @@ export default function Vaults() {
                   <tr key={cred.id}>
                     <td>{cred.name}</td>
                     <td className="muted">{cred.type} → mcp:{cred.target.mcp_server}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button
-                        className="danger"
-                        onClick={async () => {
-                          if (!window.confirm(`Delete credential "${cred.name}"?`)) return;
-                          await api(`/v1/vaults/${vault.id}/credentials/${cred.id}`, { method: "DELETE" });
-                          refresh();
-                        }}
-                      >
+                    <td className="ta-right">
+                      <button className="danger" onClick={() => deleteCredential(vault.id, cred)}>
                         Delete
                       </button>
                     </td>
@@ -119,7 +128,7 @@ export default function Vaults() {
               <input type="password" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
             </div>
           </div>
-          <div style={{ marginTop: 12 }}>
+          <div className="mt12">
             <button className="primary" onClick={addCredential} disabled={!form.name || !form.value}>
               Store credential
             </button>
