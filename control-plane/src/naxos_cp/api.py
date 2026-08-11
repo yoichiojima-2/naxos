@@ -209,6 +209,10 @@ async def patch_agent(agent_id: str, body: AgentPatch, _: str = Depends(principa
         )
         if db.rowcount(result) != 1:
             raise HTTPException(404, "agent not found")
+        if body.disabled:
+            await deployments.cancel_agent_runs(
+                conn, agent_id, "the agent was disabled (kill switch)"
+            )
     return {"id": agent_id, "disabled": body.disabled}
 
 
@@ -370,6 +374,9 @@ async def delete_session(session_id: str, principal: str = Depends(principal_of)
             r["id"]
             for r in await conn.fetch("SELECT id FROM artifacts WHERE session_id = $1", session_id)
         ]
+        # Before the delete: the run's session_id is nulled by the FK, so an open
+        # run could no longer be found. A rollback on the 409 below undoes it.
+        await deployments.cancel_open_runs(conn, session_id, "the session was deleted")
         # Conditional DELETE so the liveness check and the delete are one atomic
         # statement — a claim landing in between makes the condition fail, not race.
         result = await conn.execute(
@@ -398,6 +405,7 @@ async def terminate_session(session_id: str, _: str = Depends(principal_of)) -> 
             raise HTTPException(404, "session not found")
         await store.set_status(conn, session_id, SessionStatus.TERMINATED)
         await store.clear_egress_routes(conn, session_id)
+        await deployments.cancel_open_runs(conn, session_id, "session terminated by an operator")
     return {"id": session_id, "status": "terminated"}
 
 

@@ -277,6 +277,7 @@ class Checkpoint(BaseModel):
     cost_usd: float | None = None
     stop_reason: StopReason = StopReason.END_TURN
     terminated: bool = False
+    errored: bool = False
     run_id: str | None = None
     started_at: datetime | None = None
     num_turns: int = 0
@@ -328,6 +329,17 @@ async def checkpoint(
             cost_delta,
             started_at,
         )
+        if trigger_type == "deployment":
+            await deployments.record_burst(
+                conn,
+                session_id,
+                stop_reason=body.stop_reason,
+                terminated=body.terminated,
+                errored=body.errored,
+                cost_delta=cost_delta,
+                num_turns=body.num_turns,
+                started_at=started_at,
+            )
         await store.release_lease(conn, session_id, body.lease_id)
         pending = await conn.fetchval(
             "SELECT count(*) FROM session_events WHERE session_id = $1 AND processed_at IS NULL",

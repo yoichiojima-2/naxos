@@ -615,9 +615,10 @@ table.api td.d code { font-size: 0.9em; }
   <div class="tbl-head"><span class="tbl-name">deployment_runs</span></div>
   <div class="table-wrap"><table>
     <tr><td class="c">id, deployment_id, session_id</td><td class="n"></td></tr>
-    <tr><td class="c">status</td><td class="n">CHECK IN <code>queued · running · succeeded · failed</code></td></tr>
-    <tr><td class="c">error_type</td><td class="n"><code>session_error · budget_reached · timeout · retries_exhausted · infra_error</code></td></tr>
-    <tr><td class="c">fired_at, finished_at</td><td class="n"></td></tr>
+    <tr><td class="c">status</td><td class="n">CHECK IN <code>queued · running · succeeded · failed · cancelled</code></td></tr>
+    <tr><td class="c">error_type</td><td class="n"><code>session_error · budget_reached · timeout · retries_exhausted · infra_error · agent_disabled · cancelled</code></td></tr>
+    <tr><td class="c">stop_reason, cost_usd, num_turns</td><td class="n">folded in at the fired session's checkpoint</td></tr>
+    <tr><td class="c">fired_at, started_at, finished_at</td><td class="n">a run blocked on an operator (<code>requires_action</code>, <code>budget_reached</code> — raising the budget resumes) stays open and keeps accumulating; terminal failures come from the control plane, since a crashed burst still reports <code>end_turn</code> and exhausted wake retries never reach a checkpoint</td></tr>
   </table></div>
 </div>
 
@@ -779,6 +780,7 @@ table.api td.d code { font-size: 0.9em; }
   <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments · /v1/deployments/{id}</td><td class="d">list / get</td></tr>
   <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/deployments/{id}/pause | /unpause | /archive | /run</td><td class="d">lifecycle + run-now</td></tr>
   <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments/{id}/runs</td><td class="d">run history</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments/runs?days=&amp;deployment_id=&amp;status=</td><td class="d">run history across deployments + per-deployment rollup (the runs view)</td></tr>
 </table></div>
 
 <h4>Vaults</h4>
@@ -884,7 +886,7 @@ docs/              design docs (English)
   <li><strong>Spike (blocking)</strong>: Agent SDK resume semantics — pending tool_use replay through <code>can_use_tool</code>, transcript restore from a relocated directory, Vertex backend availability in asia-northeast1/global (resolves the model-region open issue).</li>
   <li><strong>Walking skeleton</strong>: Terraform base (SQL, buckets, BQ, SAs, services, one <code>default</code> environment Job) + agents CRUD (versioned) + sessions + events + the full loop: create session → job launch → SDK turn on Vertex → events → SSE → idle checkpoint → resume. Audit (<code>runs</code> + <code>tool_calls</code>) and kill switch from day one. Reconciler.</li>
   <li><strong>Permissions + budget + interrupt</strong>: <code>always_ask</code> round-trip including pause/release/resume, budget enforcement, minimal UI (session timeline + approval inbox).</li>
-  <li><strong>Deployments</strong>: Scheduler-per-deployment, <code>deployment_runs</code> with error types, pause/unpause/run-now, UI tab.</li>
+  <li><strong>Deployments</strong>: Scheduler-per-deployment, <code>deployment_runs</code> with error types, outcome and duration closed at checkpoint, pause/unpause/run-now, UI tab with a runs view (duration chart, per-deployment success rate and run history).</li>
   <li><strong>Vaults + egress proxy</strong>: Secret Manager write path, MCP URL rewriting, header substitution, per-vault IAM.</li>
   <li><strong>Memory stores</strong>: CRUD + mount/writeback + UI.</li>
   <li><strong>Hardening</strong>: second environment (proves the fan-out), budget alerts, cost review at the phase gate.</li>
@@ -896,7 +898,7 @@ docs/              design docs (English)
   <li>Phase 1 spike has an explicit pass/fail: resume replays the pending tool_use, or the fallback is adopted and documented here.</li>
   <li>Every phase ships to the project and runs its end-to-end demo (Phase 2: curl create agent → session → SSE shows <code>agent.message</code> → <code>audit.runs</code> row exists → flip <code>disabled</code> → event rejected).</li>
   <li>Approval flow: <code>always_ask</code> tool → container exits during the pause (verify zero cost while pending) → confirm via UI → session resumes and completes.</li>
-  <li>Deployments: cron fires → <code>deployment_runs</code> row → session completes; error path exercised by archiving the agent.</li>
+  <li>Deployments: cron fires → <code>deployment_runs</code> row → session completes and the run closes with its outcome, duration and cost; error path exercised by archiving the agent, and the budget/terminate paths by stopping a fired session.</li>
   <li>Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.</li>
 </ul>
 

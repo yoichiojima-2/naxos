@@ -15,6 +15,13 @@ A Google Cloud implementation of Claude Managed Agents: versioned agents, isolat
 
 </details>
 
+<details>
+<summary>Deployment runs: duration, outcome and cost of every unattended run</summary>
+
+![Deployment runs — run duration over time coloured by outcome, with success rate, average duration and spend per deployment](docs/img/deployment-runs.png)
+
+</details>
+
 ## Why
 
 Hosted agent platforms run the agent loop and sandbox on the provider's cloud. naxos exists for workloads that can't leave your own boundary:
