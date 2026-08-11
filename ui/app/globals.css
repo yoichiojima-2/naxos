@@ -237,6 +237,8 @@ label {
 .hint { color: var(--faint); font-size: 12.5px; margin-top: 6px; }
 .hint.error { color: var(--danger); }
 
+.filter-input { width: 200px; flex: none; }
+
 /* --- tables --------------------------------------------------------------- */
 
 table { width: 100%; border-collapse: collapse; }
