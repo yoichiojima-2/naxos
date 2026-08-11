@@ -133,14 +133,15 @@ export default function Page() {
   }, [toast]);
 
   useEffect(() => {
-    setTheme(document.documentElement.dataset.theme ?? null);
+    setTheme(
+      document.documentElement.dataset.theme ??
+        (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+    );
   }, []);
 
   function toggleTheme() {
-    const effective =
-      theme ??
-      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = effective === "dark" ? "light" : "dark";
+    if (!theme) return;
+    const next = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     localStorage.setItem("theme", next);
     setTheme(next);
@@ -149,6 +150,11 @@ export default function Page() {
   const current = NAV.find((n) => n.page === route.page) ?? NAV[0];
   const agentDetail = route.page === "agents" && route.id;
   const artifactDetail = route.page === "artifacts" && route.id;
+  const sessionDetail = route.page === "sessions" && route.id;
+
+  useEffect(() => {
+    document.title = `naxos · ${current.label}`;
+  }, [current.label]);
 
   return (
     <div className="shell">
@@ -163,7 +169,7 @@ export default function Page() {
         </a>
         <div className="appbar-spacer" />
         <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
-          ☾
+          {theme === "dark" ? "☀" : "☾"}
         </button>
       </header>
       <div className="body">
@@ -189,7 +195,7 @@ export default function Page() {
         </aside>
         <div className="frame">
           <main className="content">
-            {!agentDetail && !artifactDetail && (
+            {!agentDetail && !artifactDetail && !sessionDetail && (
               <div className="page-head">
                 <div className="breadcrumbs">
                   naxos<span className="sep">/</span>{current.label}
@@ -199,7 +205,12 @@ export default function Page() {
               </div>
             )}
             {route.page === "sessions" && (
-              <Sessions agents={agents} favorites={favorites} onToggleFavorite={toggleFavorite} />
+              <Sessions
+                agents={agents}
+                sessionId={route.id}
+                favorites={favorites}
+                onToggleFavorite={toggleFavorite}
+              />
             )}
             {route.page === "agents" && !route.id && (
               <Agents

@@ -5,19 +5,23 @@ import { api, apiConfirm, listFor, Skill, SkillFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
 import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
+import FileList from "@/components/file-list";
 
 const SKILL_MD_TEMPLATE = (name: string) =>
   `---\nname: ${name}\ndescription: When and how to use this skill.\n---\n\nInstructions the agent loads when it uses this skill.\n`;
 
+const byPath = (a: SkillFile, b: SkillFile) =>
+  Number(b.path === "SKILL.md") - Number(a.path === "SKILL.md") || a.path.localeCompare(b.path);
+
 export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skills, setSkills] = useState<Skill[] | null>(null);
   const [files, setFiles] = useState<Record<string, SkillFile[]>>({});
   const [skillName, setSkillName] = useState("");
   const [description, setDescription] = useState("");
   const [editing, setEditing] = useState<
     { skillId: string; path: string; content: string; isNew: boolean } | null
   >(null);
-  const favFilter = useFavoriteFilter("skill", skills, favorites);
+  const favFilter = useFavoriteFilter("skill", skills ?? [], favorites);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Skill[] }>("/v1/skills");
@@ -121,7 +125,7 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
 
   return (
     <>
-      <CountHeader count={skills.length} noun="skill">
+      <CountHeader count={skills === null ? null : skills.length} noun="skill">
         {favFilter.chip}
         <input
           placeholder="skill-name (lowercase, dashes)"
@@ -143,7 +147,13 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
           Create
         </button>
       </CountHeader>
-      {favFilter.apply(skills).map((skill) => (
+      {skills === null && <div className="panel"><span className="muted">loading…</span></div>}
+      {skills?.length === 0 && (
+        <div className="panel">
+          <span className="muted">no skills yet — create one above to share know-how across agents.</span>
+        </div>
+      )}
+      {favFilter.apply(skills ?? []).map((skill) => (
         <div className="panel" key={skill.id}>
           <div className="row between">
             <div className="row">
@@ -179,29 +189,31 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
             </div>
           </div>
           {skill.description && <p className="muted">{skill.description}</p>}
-          <div className="table-wrap">
-            <table>
-              <tbody>
-                {(files[skill.id] ?? []).map((file) => (
-                  <tr key={file.id} className="click" onClick={() => openFile(skill.id, file)}>
-                    <td className="mono">{file.path}</td>
-                    <td className="muted ta-right">{file.size} B</td>
-                    <td className="ta-right" style={{ width: 1 }}>
-                      <button
-                        className="danger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteFile(skill.id, file);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {(files[skill.id] ?? []).length > 0 && (
+            <FileList count={(files[skill.id] ?? []).length}>
+              <table>
+                <tbody>
+                  {[...(files[skill.id] ?? [])].sort(byPath).map((file) => (
+                    <tr key={file.id} className="click" onClick={() => openFile(skill.id, file)}>
+                      <td className="mono">{file.path}</td>
+                      <td className="muted ta-right">{file.size} B</td>
+                      <td className="ta-right" style={{ width: 1 }}>
+                        <button
+                          className="danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteFile(skill.id, file);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </FileList>
+          )}
         </div>
       ))}
     </>

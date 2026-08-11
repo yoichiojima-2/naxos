@@ -30,6 +30,12 @@ export default function Agents({
   }
 
   async function toggleKill(agent: Agent) {
+    if (
+      !agent.disabled &&
+      !window.confirm(
+        `Kill "${agent.name}"? Running sessions stop before their next tool call and its deployments pause.`,
+      )
+    ) return;
     await api(`/v1/agents/${agent.id}`, { method: "PATCH", json: { disabled: !agent.disabled } });
     onChange();
   }

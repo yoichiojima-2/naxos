@@ -17,10 +17,10 @@ export default function Artifacts({
   favorites,
   onToggleFavorite,
 }: { agents: Agent[] } & FavoriteProps) {
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const favFilter = useFavoriteFilter("artifact", artifacts, favorites);
+  const favFilter = useFavoriteFilter("artifact", artifacts ?? [], favorites);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Artifact[] }>("/v1/artifacts");
@@ -60,7 +60,7 @@ export default function Artifacts({
 
   const q = query.trim().toLowerCase();
   const filtered = favFilter.apply(
-    artifacts.filter(
+    (artifacts ?? []).filter(
       (a) =>
         !q ||
         `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
@@ -71,19 +71,24 @@ export default function Artifacts({
 
   return (
     <>
-      <CountHeader count={filtered.length} of={artifacts.length} noun="artifact">
-        {artifacts.length > 0 && (
+      <CountHeader
+        count={artifacts === null ? null : filtered.length}
+        of={artifacts?.length}
+        noun="artifact"
+      >
+        {!!artifacts?.length && (
           <FilterInput placeholder="Filter artifacts…" value={query} onChange={setQuery} />
         )}
         {favFilter.chip}
       </CountHeader>
       <div className="panel">
-        {artifacts.length === 0 && (
+        {artifacts === null && <span className="muted">loading…</span>}
+        {artifacts?.length === 0 && (
           <span className="muted">
             no artifacts yet — agents publish them with the artifact_create tool.
           </span>
         )}
-        {artifacts.length > 0 && filtered.length === 0 && (
+        {!!artifacts?.length && filtered.length === 0 && (
           <span className="muted">no artifacts match the current filter.</span>
         )}
         {filtered.length > 0 && (
