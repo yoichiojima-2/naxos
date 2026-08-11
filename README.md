@@ -5,6 +5,15 @@ A Google Cloud implementation of Claude Managed Agents: versioned agents, isolat
 - Design: [`docs/design.md`](docs/design.md)
 - Constraints and conventions: [`CLAUDE.md`](CLAUDE.md)
 
+![Sessions — live agent runs with status, principal, and cost per session](docs/img/sessions.png)
+
+<details>
+<summary>A session timeline: event stream, tool calls, and a human approval gate</summary>
+
+![Session timeline — the agent pauses on a gated tool call until a human allows or denies it](docs/img/session-timeline.png)
+
+</details>
+
 ## Why
 
 Hosted agent platforms run the agent loop and sandbox on the provider's cloud. naxos exists for workloads that can't leave your own boundary:
