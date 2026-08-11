@@ -36,7 +36,10 @@ async def wake(conn: asyncpg.Connection, session_id: str) -> bool:
         )
         await store.set_status(conn, session_id, SessionStatus.IDLE, StopReason.RETRIES_EXHAUSTED)
         return False
-    if await store.running_sandbox_count(conn) >= config.MAX_CONCURRENT_SANDBOXES:
+    # Serialize concurrent wakes: without the lock, parallel transactions all read
+    # the pre-launch count and overshoot the global sandbox cap.
+    await conn.fetchval("SELECT pg_advisory_xact_lock(hashtext('naxos.wake'))")
+    if await store.running_sandbox_count(conn, session_id) >= config.MAX_CONCURRENT_SANDBOXES:
         log.warning("sandbox concurrency cap reached; %s stays queued", session_id)
         return False
 

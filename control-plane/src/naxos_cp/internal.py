@@ -15,6 +15,7 @@ from naxos_shared.events import (
     StopReason,
 )
 from naxos_shared.ids import new_id
+from naxos_shared.paths import unsafe_relpath
 from pydantic import BaseModel, Field
 
 from . import artifacts, audit, config, db, deployments, store, wake
@@ -67,7 +68,6 @@ async def claim(
         lease_id = await store.acquire_lease(conn, session_id, row["service_account_email"])
         if lease_id is None:
             raise HTTPException(409, "session is already leased")
-        await conn.execute("UPDATE sessions SET retry_count = 0 WHERE id = $1", session_id)
         await store.set_status(conn, session_id, SessionStatus.RUNNING)
     return {"lease_id": lease_id}
 
@@ -190,20 +190,24 @@ class SandboxEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class SandboxEventsIn(BaseModel):
+    events: list[SandboxEvent] = Field(default_factory=list)
+    run_id: str | None = None
+
+
 @router.post("/sessions/{session_id}/events")
 async def sandbox_events(
-    session_id: str, body: dict[str, Any], caller: str = Depends(caller_service_account)
+    session_id: str, body: SandboxEventsIn, caller: str = Depends(caller_service_account)
 ) -> dict:
-    events = [SandboxEvent.model_validate(e) for e in body.get("events", [])]
     audit_rows = []
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
-        for event in events:
+        for event in body.events:
             await store.append_event(conn, session_id, event.type, event.payload, processed=True)
             if event.type is EventType.AGENT_TOOL_USE:
                 audit_rows.append(
                     audit.tool_call_row(
-                        run_id=body.get("run_id", session_id),
+                        run_id=body.run_id or session_id,
                         session_id=session_id,
                         agent_id=row["agent_id"],
                         principal=row["created_by"],
@@ -214,7 +218,7 @@ async def sandbox_events(
                     )
                 )
     await audit.log_tool_calls(audit_rows)
-    return {"ok": True, "count": len(events)}
+    return {"ok": True, "count": len(body.events)}
 
 
 class PermissionAsk(BaseModel):
@@ -359,21 +363,24 @@ async def session_memory(session_id: str, caller: str = Depends(caller_service_a
     return {"stores": stores}
 
 
+class MemoryWriteback(BaseModel):
+    stores: dict[str, dict[str, str | None]] = Field(default_factory=dict)
+
+
 @router.post("/sessions/{session_id}/memory")
 async def session_memory_writeback(
-    session_id: str, body: dict[str, Any], caller: str = Depends(caller_service_account)
+    session_id: str, body: MemoryWriteback, caller: str = Depends(caller_service_account)
 ) -> dict:
     """Persist memory files the agent changed during the burst. Last write wins."""
     written = 0
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
         allowed = set(row["memory_store_ids"] or [])
-        for store_id, files in (body.get("stores") or {}).items():
+        for store_id, files in body.stores.items():
             if store_id not in allowed:
                 continue
             for path, content in files.items():
-                segments = str(path).split("/")
-                if ".." in segments or "" in segments:
+                if unsafe_relpath(path):
                     log.warning("memory writeback skipped, unsafe path %s/%s", store_id, path)
                     continue
                 if content is None:
@@ -383,22 +390,12 @@ async def session_memory_writeback(
                         path,
                     )
                     continue
-                if len(str(content).encode()) > config.MAX_MEMORY_BYTES:
+                if len(content.encode()) > config.MAX_MEMORY_BYTES:
                     log.warning(
                         "memory writeback skipped, %s/%s exceeds size limit", store_id, path
                     )
                     continue
-                await conn.execute(
-                    "INSERT INTO memories (id, store_id, path, content, updated_by) "
-                    "VALUES ($1, $2, $3, $4, $5) "
-                    "ON CONFLICT (store_id, path) DO UPDATE SET content = EXCLUDED.content, "
-                    "  updated_by = EXCLUDED.updated_by, updated_at = now()",
-                    new_id("memory"),
-                    store_id,
-                    path,
-                    content,
-                    f"agent:{session_id}",
-                )
+                await store.upsert_memory(conn, store_id, path, content, f"agent:{session_id}")
                 written += 1
     return {"written": written}
 
@@ -508,24 +505,14 @@ async def share_session_artifact(
 ) -> dict:
     async with db.transaction() as conn:
         await _authorize(conn, session_id, caller)
-        if body.shared:
-            record = await conn.fetchrow(
-                "UPDATE artifacts SET share_token = COALESCE(share_token, $3), "
-                "  shared_at = COALESCE(shared_at, now()), "
-                "  shared_by = COALESCE(shared_by, $4), updated_at = now() "
-                "WHERE session_id = $1 AND name = $2 RETURNING *",
-                session_id,
-                body.name,
-                secrets.token_urlsafe(24),
-                f"agent:{session_id}",
-            )
-        else:
-            record = await conn.fetchrow(
-                "UPDATE artifacts SET share_token = NULL, shared_at = NULL, shared_by = NULL, "
-                "  updated_at = now() WHERE session_id = $1 AND name = $2 RETURNING *",
-                session_id,
-                body.name,
-            )
+        artifact_id = await conn.fetchval(
+            "SELECT id FROM artifacts WHERE session_id = $1 AND name = $2",
+            session_id,
+            body.name,
+        )
+        if artifact_id is None:
+            raise HTTPException(404, "artifact not found")
+        record = await artifacts.set_shared(conn, artifact_id, body.shared, f"agent:{session_id}")
         if record is None:
             raise HTTPException(404, "artifact not found")
         await _emit_artifact_event(

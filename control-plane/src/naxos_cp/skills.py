@@ -1,6 +1,7 @@
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from naxos_shared.ids import new_id
+from naxos_shared.paths import unsafe_relpath
 from pydantic import BaseModel, Field
 
 from . import config, db
@@ -76,8 +77,7 @@ async def put_file(
 ) -> dict:
     if len(body.content.encode()) > config.MAX_MEMORY_BYTES:
         raise HTTPException(413, "skill file exceeds 64KB")
-    segments = body.path.split("/")
-    if ".." in segments or "" in segments:
+    if unsafe_relpath(body.path):
         raise HTTPException(400, "path must be relative with no empty or .. segments")
     async with db.transaction() as conn:
         skill = await conn.fetchval(

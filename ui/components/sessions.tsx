@@ -15,6 +15,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [open, setOpen] = useState<Session | null>(null);
   const [agentId, setAgentId] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Session[] }>("/v1/sessions");
@@ -37,6 +38,53 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     setOpen(session);
   }
 
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const allSelected = !!sessions?.length && sessions.every((s) => selected.has(s.id));
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set((sessions ?? []).map((s) => s.id)));
+  }
+
+  const noun = selected.size === 1 ? "session" : "sessions";
+
+  async function bulkApply(run: (id: string) => Promise<unknown>) {
+    const ids = [...selected];
+    const results = await Promise.allSettled(ids.map(run));
+    const failed = ids.filter((_, i) => results[i].status === "rejected");
+    setSelected(new Set(failed));
+    await refresh();
+    if (failed.length) {
+      window.alert(`${failed.length} of ${ids.length} requests failed; the failed ${
+        failed.length === 1 ? "session stays" : "sessions stay"} selected.`);
+    }
+  }
+
+  async function bulkSetBudget() {
+    const raw = window.prompt(`New budget in USD for ${selected.size} ${noun}:`);
+    if (raw === null || !raw.trim()) return;
+    const budget = Number(raw);
+    if (!Number.isFinite(budget) || budget < 0) {
+      window.alert(`"${raw}" is not a valid budget`);
+      return;
+    }
+    await bulkApply((id) =>
+      api(`/v1/sessions/${id}`, { method: "PATCH", json: { budget_usd: budget } }),
+    );
+  }
+
+  async function bulkTerminate() {
+    if (!window.confirm(`Terminate ${selected.size} ${noun}?`)) return;
+    await bulkApply((id) => api(`/v1/sessions/${id}/terminate`, { json: {} }));
+  }
+
   if (open) {
     return <Timeline session={open} onBack={() => { setOpen(null); refresh(); }} />;
   }
@@ -44,32 +92,61 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   return (
     <>
       <CountHeader count={sessions === null ? null : sessions.length} noun="session">
-        <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ width: 220 }}>
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
-        <button className="primary" onClick={createSession} disabled={!agents.length}>
-          New session
-        </button>
+        {selected.size > 0 ? (
+          <>
+            <span className="muted">{selected.size} selected</span>
+            <button className="ghost" onClick={bulkSetBudget}>Set budget</button>
+            <button className="danger" onClick={bulkTerminate}>Terminate</button>
+            <button className="ghost" onClick={() => setSelected(new Set())}>Clear</button>
+          </>
+        ) : (
+          <>
+            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ width: 220 }}>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <button className="primary" onClick={createSession} disabled={!agents.length}>
+              New session
+            </button>
+          </>
+        )}
       </CountHeader>
       <div className="panel flush">
         <div className="table-wrap">
           <table>
           <thead>
-            <tr><th>title</th><th>agent</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
+            <tr>
+              <th>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  aria-label="select all sessions"
+                />
+              </th>
+              <th>title</th><th>agent</th><th>status</th><th>principal</th><th>cost</th><th>created</th>
+            </tr>
           </thead>
           <tbody>
             {sessions === null && (
-              <tr><td className="empty" colSpan={6}>loading…</td></tr>
+              <tr><td className="empty" colSpan={7}>loading…</td></tr>
             )}
             {sessions?.length === 0 && (
-              <tr><td className="empty" colSpan={6}>no sessions yet — pick an agent above and start one.</td></tr>
+              <tr><td className="empty" colSpan={7}>no sessions yet — pick an agent above and start one.</td></tr>
             )}
             {(sessions ?? []).map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
               return (
                 <tr key={s.id} className="click" onClick={() => setOpen(s)}>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(s.id)}
+                      onChange={() => toggle(s.id)}
+                      aria-label={`select ${s.title ?? s.id}`}
+                    />
+                  </td>
                   <td>{s.title ?? s.id}</td>
                   <td className="muted">{agentName(agents, s.agent_id)}</td>
                   <td>

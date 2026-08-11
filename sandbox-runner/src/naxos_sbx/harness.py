@@ -103,6 +103,12 @@ class Harness:
         tool_name = hook_input.get("tool_name", "")
         tool_input = hook_input.get("tool_input", {}) or {}
         digest = call_hash(tool_name, tool_input)
+        call = {
+            "tool_name": tool_name,
+            "input": tool_input,
+            "tool_use_id": tool_use_id,
+            "call_hash": digest,
+        }
 
         verdict = await self.channel.ask_permission(digest, tool_name, tool_input, tool_use_id)
         decision = verdict.get("decision")
@@ -112,22 +118,8 @@ class Harness:
             # swallowed and the CLI falls back to its own permission system,
             # observed on GCP). Deny the call and interrupt the turn instead;
             # run() sees paused_call and reports requires_action.
-            self.paused_call = {
-                "call_hash": digest,
-                "tool_name": tool_name,
-                "input": tool_input,
-                "tool_use_id": tool_use_id,
-            }
-            self._queue(
-                EventType.AGENT_TOOL_USE,
-                {
-                    "tool_name": tool_name,
-                    "input": tool_input,
-                    "tool_use_id": tool_use_id,
-                    "call_hash": digest,
-                    "decision": "awaiting_confirmation",
-                },
-            )
+            self.paused_call = call
+            self._queue(EventType.AGENT_TOOL_USE, {**call, "decision": "awaiting_confirmation"})
             await self.flush()
             if self._client is not None:
                 asyncio.create_task(self._client.interrupt())
@@ -151,16 +143,7 @@ class Harness:
             label = "user_allowed"
         else:
             label = "auto_allowed"
-        self._queue(
-            EventType.AGENT_TOOL_USE,
-            {
-                "tool_name": tool_name,
-                "input": tool_input,
-                "tool_use_id": tool_use_id,
-                "call_hash": digest,
-                "decision": label,
-            },
-        )
+        self._queue(EventType.AGENT_TOOL_USE, {**call, "decision": label})
         if verdict.get("killed"):
             self.killed = True
             if self._client is not None:
