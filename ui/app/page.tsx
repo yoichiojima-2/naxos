@@ -147,6 +147,14 @@ export default function Page() {
     setTheme(next);
   }
 
+  // Collapsed to a scrolling row on narrow screens, the active page can sit
+  // past the right edge; keep it in view.
+  useEffect(() => {
+    document
+      .querySelector(".sidebar a.active")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [route.page]);
+
   const current = NAV.find((n) => n.page === route.page) ?? NAV[0];
   const agentDetail = route.page === "agents" && route.id;
   const artifactDetail = route.page === "artifacts" && route.id;

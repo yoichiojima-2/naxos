@@ -152,6 +152,7 @@ export default function Sessions({
       <Timeline
         key={sessionId}
         sessionId={sessionId}
+        agents={agents}
         known={sessions?.find((s) => s.id === sessionId)}
       />
     );
@@ -292,7 +293,11 @@ export default function Sessions({
   );
 }
 
-function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) {
+function Timeline({
+  sessionId,
+  agents,
+  known,
+}: { sessionId: string; agents: Agent[]; known?: Session }) {
   const [session, setSession] = useState<Session | null>(known ?? null);
   const [missing, setMissing] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
@@ -383,15 +388,23 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
     });
   }
 
-  const decided = new Set(
+  const decided = new Map(
     events
       .filter((e) => e.type === "user.tool_confirmation")
-      .map((e) => String(e.payload.call_hash)),
+      .map((e) => [String(e.payload.call_hash), String(e.payload.result)]),
   );
 
-  const { blocks, costUsd } = useMemo(() => groupEvents(events), [events]);
+  const { blocks, costUsd, modelRequestOpen } = useMemo(() => groupEvents(events), [events]);
 
   const live = status === "running" || status === "rescheduling";
+  // A run stays "running" until the idle checkpoint, well after the agent has
+  // answered, so the status alone would keep claiming work that is over. Real
+  // work is a model request in flight, a tool still running, or a turn the
+  // agent has not started answering yet.
+  const last = blocks[blocks.length - 1];
+  const working =
+    live &&
+    (modelRequestOpen || last?.kind === "user" || (last?.kind === "tool" && !last.result));
 
   if (missing) {
     return (
@@ -418,6 +431,11 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
             <BackIcon />
           </a>
           <strong>{session?.title ?? <span className="mono" title={sessionId}>{shortId(sessionId)}</span>}</strong>
+          {session && (
+            <span className="muted" title={fullTime(session.created_at)}>
+              {agentName(agents, session.agent_id)} · {relativeTime(session.created_at)}
+            </span>
+          )}
           <span className={`badge ${status}`}>{status}</span>
           {costUsd !== null && (
             <span className="muted mono" title="session cost so far">${costUsd.toFixed(4)}</span>
@@ -478,9 +496,12 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
                 onConfirm={confirm}
               />
             ))}
-        {status === "rescheduling" && (
+        {(status === "rescheduling" || working) && (
           <div className="event system">
-            <span className="muted"><span className="spinner" />session is waking up…</span>
+            <span className="muted">
+              <span className="spinner" />
+              {status === "rescheduling" ? "session is waking up…" : "agent is working…"}
+            </span>
           </div>
         )}
         <div ref={endRef} />
@@ -533,7 +554,7 @@ function TimelineBlock({
   onConfirm,
 }: {
   block: Block;
-  decided: Set<string>;
+  decided: Map<string, string>;
   onConfirm: (hash: string, result: "allow" | "deny") => void;
 }) {
   switch (block.kind) {
@@ -594,19 +615,27 @@ function ToolCall({
   onConfirm,
 }: {
   block: ToolBlock;
-  decided: Set<string>;
+  decided: Map<string, string>;
   onConfirm: (hash: string, result: "allow" | "deny") => void;
 }) {
   const call = block.use.payload;
   const result = block.result?.payload;
   const isError = !!result?.is_error;
+  const verdict = decided.get(String(call.call_hash));
 
-  if (call.decision === "awaiting_confirmation" && !decided.has(String(call.call_hash))) {
+  if (call.decision === "awaiting_confirmation" && !verdict) {
     return <ApprovalEvent event={block.use} onConfirm={onConfirm} />;
   }
 
-  const flag =
-    call.decision === "user_denied"
+  // Between the decision and the replay the recorded result is still the notice
+  // that paused the call; showing it as a failure would misread a granted
+  // approval as an error.
+  const settling = call.decision === "awaiting_confirmation";
+  const flag = settling
+    ? verdict === "allow"
+      ? "approved"
+      : "denying"
+    : call.decision === "user_denied"
       ? "denied"
       : call.decision === "not_allowed"
         ? "not allowed"
@@ -615,7 +644,7 @@ function ToolCall({
           : isError
             ? "error"
             : "";
-  const state = flag ? "err" : block.result ? "ok" : "wait";
+  const state = settling ? "wait" : flag ? "err" : block.result ? "ok" : "wait";
   const summary = toolSummary(call.input);
 
   return (
@@ -624,11 +653,13 @@ function ToolCall({
         <span className={`dot ${state}`} />
         <span className="mono">{String(call.tool_name ?? "tool")}</span>
         {summary && <span className="tool-arg mono">{summary}</span>}
-        {flag && <span className="badge terminated">{flag}</span>}
+        {flag && (
+          <span className={`badge ${settling ? "rescheduling" : "terminated"}`}>{flag}</span>
+        )}
         <EventTime at={block.use.created_at} />
       </summary>
       <pre>{JSON.stringify(call.input ?? {}, null, 2)}</pre>
-      {block.result && (
+      {block.result && !settling && (
         <pre className={isError ? "err" : ""}>{prettifyResult(String(result?.content ?? ""))}</pre>
       )}
     </details>

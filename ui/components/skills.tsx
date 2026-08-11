@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiConfirm, listFor, Skill, SkillFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
 import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
@@ -21,18 +21,26 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   const [editing, setEditing] = useState<
     { skillId: string; path: string; content: string; isNew: boolean } | null
   >(null);
+  const opened = useRef<Set<string>>(new Set());
   const favFilter = useFavoriteFilter("skill", skills ?? [], favorites);
+
+  // One request per skill on load costs a round trip each for lists nobody has
+  // opened; load a skill's files the first time it is expanded instead, and
+  // reload only those on refresh.
+  const loadFiles = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
+    ids.forEach((id) => opened.current.add(id));
+    const loaded = await listFor<SkillFile>(ids, (id) => `/v1/skills/${id}/files`);
+    setFiles((prev) => ({ ...prev, ...loaded }));
+  }, []);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Skill[] }>("/v1/skills");
     setSkills(result.data);
-    setFiles(
-      await listFor<SkillFile>(
-        result.data.map((s) => s.id),
-        (id) => `/v1/skills/${id}/files`,
-      ),
+    await loadFiles(
+      [...opened.current].filter((id) => result.data.some((s) => s.id === id)),
     );
-  }, []);
+  }, [loadFiles]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -189,8 +197,11 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
             </div>
           </div>
           {skill.description && <p className="muted">{skill.description}</p>}
-          {(files[skill.id] ?? []).length > 0 && (
-            <FileList count={(files[skill.id] ?? []).length}>
+          {!!skill.file_count && (
+            <FileList
+              count={skill.file_count}
+              onOpen={() => { if (!files[skill.id]) loadFiles([skill.id]); }}
+            >
               <table>
                 <tbody>
                   {[...(files[skill.id] ?? [])].sort(byPath).map((file) => (
