@@ -431,7 +431,8 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
   display: flex; flex-direction: column;
 }
 .viewer-full-body .viewer-frame { flex: 1; min-height: 0; height: auto; }
-.viewer-full-body pre { max-height: none; }
+/* compound, so lifting the .viewer-body cap does not depend on source order */
+.viewer-body.viewer-full-body pre { max-height: none; }
 .viewer-full-body .md { width: 100%; max-width: 90ch; margin: 0 auto; }
 .viewer-full-body img { max-height: 100%; object-fit: contain; margin: auto; }
 @media (max-width: 560px) { .viewer-full-name { display: none; } }

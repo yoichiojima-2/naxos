@@ -129,8 +129,9 @@ export default function ArtifactViewer({
     // The covered page stays in the tab order and the accessibility tree —
     // Delete included — so inert every ancestor sibling of the overlay. This is
     // what <dialog>.showModal() does, which we cannot use: swapping the element
-    // would remount the preview. Alerts are exempt: the error toast draws above
-    // the overlay and must stay clickable and announced.
+    // would remount the preview. The error toast draws above the overlay and
+    // must stay clickable and announced, so top-level alerts are exempt — this
+    // holds only while the toast stays an unwrapped [role=alert] in the shell.
     const inerted: HTMLElement[] = [];
     for (let node: HTMLElement | null = container.current; node?.parentElement; node = node.parentElement) {
       for (const sibling of node.parentElement.children) {
