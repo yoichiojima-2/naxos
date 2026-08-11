@@ -61,6 +61,12 @@ export default function Docs() {
             A file an agent chose to publish as a durable output — downloadable,
             versioned, and shareable via a stable org-internal link.
           </dd>
+          <dt>Skill</dt>
+          <dd>
+            Reusable know-how shared across the organization — a folder of
+            instructions (SKILL.md plus supporting files) any agent can be given.
+            Agents load skills read-only; they are edited only here.
+          </dd>
         </dl>
       </div>
 
@@ -134,7 +140,9 @@ export default function Docs() {
           <a href="#memory">Memory</a> is what an agent carries between sessions.{" "}
           <a href="#artifacts">Artifacts</a> are the outputs agents publish with their
           built-in <code>artifact_create</code> / <code>artifact_share</code> tools —
-          download them or hand out a share link that stays inside the IAP boundary.
+          download them or hand out a share link that stays inside the IAP boundary.{" "}
+          <a href="#skills">Skills</a> package shared procedures once and attach them
+          to any agent.
         </p>
       </div>
 

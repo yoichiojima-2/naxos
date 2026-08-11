@@ -12,7 +12,7 @@ from naxos_cp import api, db, internal, wake
 TABLES = (
     "session_events, tool_confirmations, egress_routes, artifacts, sessions, agent_versions, "
     "agents, environments, deployment_runs, deployments, vault_credentials, vaults, "
-    "memories, memory_stores"
+    "memories, memory_stores, skill_files, skills"
 )
 
 

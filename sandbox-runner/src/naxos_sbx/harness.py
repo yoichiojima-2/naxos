@@ -20,6 +20,7 @@ from naxos_shared.ids import call_hash
 
 from . import artifacts
 from .control import ControlChannel
+from .skills_sync import PLUGIN_NAME
 
 log = logging.getLogger(__name__)
 
@@ -41,10 +42,17 @@ class Harness:
     can_use_tool, so it cannot gate every call.
     """
 
-    def __init__(self, channel: ControlChannel, config: SessionConfig, cwd: str) -> None:
+    def __init__(
+        self,
+        channel: ControlChannel,
+        config: SessionConfig,
+        cwd: str,
+        plugin_dir: str | None = None,
+    ) -> None:
         self.channel = channel
         self.config = config
         self.cwd = cwd
+        self.plugin_dir = plugin_dir
         self.run_id = os.environ.get("CLOUD_RUN_EXECUTION", channel.session_id)
         self.pending: list[dict[str, Any]] = []
         self.sdk_session_id: str | None = config.sdk_session_id
@@ -159,6 +167,16 @@ class Harness:
     # --- the loop ---------------------------------------------------------
 
     def options(self) -> ClaudeAgentOptions:
+        # setting_sources=[] is SDK isolation mode: filesystem settings in the
+        # agent-writable (and checkpointed) workspace are never loaded, so an
+        # agent cannot persist hooks or permission rules that would run
+        # outside the PreToolUse gate. Skills therefore mount as a local
+        # plugin outside the workspace, not via project settings; Skill calls
+        # still hit the gate like any other tool.
+        extra: dict[str, Any] = {}
+        if self.config.skill_names and self.plugin_dir:
+            extra["plugins"] = [{"type": "local", "path": self.plugin_dir}]
+            extra["skills"] = [f"{PLUGIN_NAME}:{name}" for name in self.config.skill_names]
         return ClaudeAgentOptions(
             cwd=self.cwd,
             system_prompt=self.config.instructions,
@@ -167,7 +185,9 @@ class Harness:
             allowed_tools=self.config.tools,
             max_turns=self.config.max_turns,
             resume=self.sdk_session_id,
+            setting_sources=[],
             hooks={"PreToolUse": [HookMatcher(hooks=[self._pre_tool_use])]},
+            **extra,
         )
 
     def _budget_exhausted(self) -> bool:

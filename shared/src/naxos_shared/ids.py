@@ -13,6 +13,8 @@ PREFIXES = {
     "memory_store": "memstore",
     "memory": "mem",
     "artifact": "art",
+    "skill": "skill",
+    "skill_file": "skf",
     "confirmation": "conf",
     "run": "run",
 }
