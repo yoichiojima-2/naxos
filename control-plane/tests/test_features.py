@@ -196,6 +196,13 @@ async def test_memory_round_trip_and_size_cap(client):
     )
     assert too_big.status_code == 413
 
+    for bad_path in ["/tmp/escape", "a/../b", "a//b", "trailing/"]:
+        rejected = await client.post(
+            f"/v1/memory_stores/{store['id']}/memories",
+            json={"path": bad_path, "content": "x"},
+        )
+        assert rejected.status_code == 400, bad_path
+
 
 async def test_session_config_rewrites_mcp_urls_through_egress(
     client, internal_client, launched, monkeypatch

@@ -5,11 +5,29 @@ import { api, apiConfirm, listFor, Memory, MemoryStore } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
 
+type Editing = {
+  storeId: string;
+  id: string | null;
+  originalPath: string | null;
+  path: string;
+  content: string;
+};
+
+const pathValid = (path: string) => {
+  const segments = path.split("/");
+  return (
+    /^[a-zA-Z0-9._/-]{1,200}$/.test(path) &&
+    !segments.includes("..") &&
+    !segments.includes("")
+  );
+};
+
 export default function MemoryStores() {
   const [stores, setStores] = useState<MemoryStore[]>([]);
   const [memories, setMemories] = useState<Record<string, Memory[]>>({});
   const [storeName, setStoreName] = useState("");
-  const [editing, setEditing] = useState<{ storeId: string; path: string; content: string } | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: MemoryStore[] }>("/v1/memory_stores");
@@ -32,16 +50,45 @@ export default function MemoryStores() {
 
   async function openMemory(storeId: string, memory: Memory) {
     const full = await api<Memory>(`/v1/memory_stores/${storeId}/memories/${memory.id}`);
-    setEditing({ storeId, path: full.path, content: full.content ?? "" });
+    setEditing({
+      storeId,
+      id: memory.id,
+      originalPath: full.path,
+      path: full.path,
+      content: full.content ?? "",
+    });
   }
 
   async function save() {
-    if (!editing) return;
-    await api(`/v1/memory_stores/${editing.storeId}/memories`, {
-      json: { path: editing.path, content: editing.content },
-    });
-    setEditing(null);
-    refresh();
+    if (!editing || saving || !pathValid(editing.path)) return;
+    setSaving(true);
+    try {
+      const fresh = await api<{ data: Memory[] }>(
+        `/v1/memory_stores/${editing.storeId}/memories`,
+      );
+      const collision = fresh.data.find(
+        (m) => m.path === editing.path && m.id !== editing.id,
+      );
+      if (collision && !window.confirm(`"${editing.path}" already exists — overwrite it?`)) {
+        return;
+      }
+      await api(`/v1/memory_stores/${editing.storeId}/memories`, {
+        json: { path: editing.path, content: editing.content },
+      });
+      if (editing.id && editing.originalPath && editing.originalPath !== editing.path) {
+        try {
+          await api(`/v1/memory_stores/${editing.storeId}/memories/${editing.id}`, {
+            method: "DELETE",
+          });
+        } catch {
+          // content is saved under the new path; refresh shows the leftover if any
+        }
+      }
+      setEditing(null);
+      refresh();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteMemory(storeId: string, memory: Memory) {
@@ -57,6 +104,7 @@ export default function MemoryStores() {
   }
 
   if (editing) {
+    const invalid = !pathValid(editing.path);
     return (
       <div className="panel">
         <div className="row between mb12">
@@ -68,10 +116,27 @@ export default function MemoryStores() {
             >
               <BackIcon />
             </button>
-            <span className="mono">{editing.path}</span>
+            <input
+              className="mono"
+              placeholder="path, e.g. notes.md"
+              value={editing.path}
+              onChange={(e) => setEditing({ ...editing, path: e.target.value })}
+              style={{ width: 280 }}
+              aria-label="file path"
+            />
+            {editing.originalPath && editing.originalPath !== editing.path && (
+              <span className="muted">renaming {editing.originalPath}</span>
+            )}
           </div>
-          <button className="primary" onClick={save}>Save</button>
+          <button className="primary" onClick={save} disabled={invalid || saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
         </div>
+        {invalid && editing.path !== "" && (
+          <p className="muted mb12">
+            paths may only use letters, digits, and <span className="mono">. _ / -</span>
+          </p>
+        )}
         <textarea
           style={{ minHeight: 360 }}
           value={editing.content}
@@ -99,7 +164,7 @@ export default function MemoryStores() {
             <button
               className="ghost"
               onClick={() =>
-                setEditing({ storeId: store.id, path: "notes.md", content: "" })
+                setEditing({ storeId: store.id, id: null, originalPath: null, path: "", content: "" })
               }
             >
               New file
@@ -108,9 +173,16 @@ export default function MemoryStores() {
           <div className="table-wrap">
             <table>
               <tbody>
+                {(memories[store.id] ?? []).length === 0 && (
+                  <tr><td className="empty" colSpan={4}>no files in this store yet.</td></tr>
+                )}
                 {(memories[store.id] ?? []).map((memory) => (
                   <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
                     <td className="mono">{memory.path}</td>
+                    <td className="muted">
+                      {memory.updated_at && new Date(memory.updated_at).toLocaleString()}
+                      {memory.updated_by && ` · ${memory.updated_by}`}
+                    </td>
                     <td className="muted ta-right">{memory.size} B</td>
                     <td className="ta-right" style={{ width: 1 }}>
                       <button
