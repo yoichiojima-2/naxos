@@ -129,23 +129,12 @@ export default function Page() {
 
   return (
     <div className="shell">
-      <aside className="global-rail" aria-label="Global navigation">
-        <a className="rail-logo" href="#dashboard" aria-label="Naxos home">N</a>
-        <div className="rail-actions">
-          <button className="rail-button" aria-label="Search">⌕</button>
-          <button className="rail-button rail-create" aria-label="Create">＋</button>
-        </div>
-        <div className="rail-bottom">
-          <button className="rail-button" onClick={toggleTheme} aria-label="Toggle dark mode">◐</button>
-          <span className="avatar" aria-label="Signed in user">YO</span>
-        </div>
-      </aside>
       <aside className="sidebar">
         <a className="brand" href="#dashboard">
-          <span className="brand-mark">N</span>
-          <span><strong>naxos</strong><small>Agent workspace</small></span>
+          <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
+          <span><strong>naxos</strong><small>control plane</small></span>
         </a>
-        <div className="nav-label">Workspace</div>
+        <div className="nav-label">Operate</div>
         <nav>
           {NAV.map(({ page, label, icon: Icon }) => (
             <a
@@ -158,19 +147,25 @@ export default function Page() {
             </a>
           ))}
         </nav>
+        <div className="sidebar-foot">
+          <span className="system-state"><i />GCP org boundary</span>
+          <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle color theme">
+            <span>Theme</span><b aria-hidden="true">◐</b>
+          </button>
+        </div>
       </aside>
       <div className="frame">
         <header className="topbar">
-          <div className="breadcrumbs"><span>naxos</span><b>/</b><span>{current.label}</span></div>
+          <div className="breadcrumbs"><span>Control plane</span><b>/</b><span>{current.label}</span></div>
           <div className="topbar-actions">
-            <div className="quick-search"><span>⌕</span><span>Search workspace</span><kbd>/</kbd></div>
-            <button className="icon-btn help-button" aria-label="Help">?</button>
+            <span className="region"><i />Control plane · asia-northeast1</span>
+            <button className="icon-btn" onClick={toggleTheme} aria-label="Toggle color theme">◐</button>
           </div>
         </header>
         <main className="content">
           {!agentDetail && !artifactDetail && (
             <div className="page-head">
-              <div className="eyebrow">Workspace</div>
+              <div className="eyebrow">{route.page === "dashboard" ? "System overview" : "Workspace"}</div>
               <h1>{current.label}</h1>
               <p>{PAGE_INFO[route.page]}</p>
             </div>
