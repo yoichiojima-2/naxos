@@ -40,6 +40,12 @@ const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
   { page: "docs", label: "Docs", icon: DocsIcon },
 ];
 
+const NAV_SECTIONS: { label: string; pages: Page[] }[] = [
+  { label: "Work", pages: ["sessions", "deployments", "artifacts"] },
+  { label: "Configure", pages: ["agents", "skills", "vaults", "memory"] },
+  { label: "Resources", pages: ["docs"] },
+];
+
 const PAGE_INFO: Record<Page, string> = {
   sessions:
     "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
@@ -124,63 +130,81 @@ export default function Page() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <a className="brand" href="#sessions"><span>naxos</span></a>
-        <nav>
-          {NAV.map(({ page, label, icon: Icon }) => (
-            <a
-              key={page}
-              href={`#${page}`}
-              className={page === route.page ? "active" : ""}
-            >
-              <Icon />
-              {label}
-            </a>
+      <header className="appbar">
+        <a className="brand" href="#sessions">
+          <span className="brand-mark" aria-hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2 22 12 12 22 2 12z" />
+            </svg>
+          </span>
+          <span>naxos</span>
+        </a>
+        <div className="appbar-spacer" />
+        <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
+          ☾
+        </button>
+      </header>
+      <div className="body">
+        <aside className="sidebar">
+          {NAV_SECTIONS.map(({ label, pages }) => (
+            <nav className="nav-group" key={label}>
+              <span className="nav-label">{label}</span>
+              {pages.map((page) => {
+                const { label: pageLabel, icon: Icon } = NAV.find((n) => n.page === page)!;
+                return (
+                  <a
+                    key={page}
+                    href={`#${page}`}
+                    className={page === route.page ? "active" : ""}
+                  >
+                    <Icon />
+                    {pageLabel}
+                  </a>
+                );
+              })}
+            </nav>
           ))}
-        </nav>
-      </aside>
-      <div className="frame">
-        <header className="topbar">
-          <span className="topbar-title">{current.label}</span>
-          <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
-            ☾
-          </button>
-        </header>
-        <main className="content">
-          {!agentDetail && !artifactDetail && (
-            <div className="page-head">
-              <h2>{current.label}</h2>
-              <p>{PAGE_INFO[route.page]}</p>
+        </aside>
+        <div className="frame">
+          <main className="content">
+            {!agentDetail && !artifactDetail && (
+              <div className="page-head">
+                <div className="breadcrumbs">
+                  naxos<span className="sep">/</span>{current.label}
+                </div>
+                <h2>{current.label}</h2>
+                <p>{PAGE_INFO[route.page]}</p>
+              </div>
+            )}
+            {route.page === "sessions" && <Sessions agents={agents} />}
+            {route.page === "agents" && !route.id && (
+              <Agents agents={agents} environments={environments} onChange={refresh} />
+            )}
+            {agentDetail && (
+              <AgentDetail
+                agentId={route.id!}
+                environments={environments}
+                onChange={refresh}
+              />
+            )}
+            {route.page === "deployments" && <Deployments agents={agents} />}
+            {route.page === "artifacts" && !route.id && <Artifacts agents={agents} />}
+            {artifactDetail && (
+              route.id!.startsWith("shared/")
+                ? <ArtifactViewer token={route.id!.slice("shared/".length)} agents={agents} />
+                : <ArtifactViewer artifactId={route.id!} agents={agents} />
+            )}
+            {route.page === "vaults" && <Vaults />}
+            {route.page === "memory" && <MemoryStores />}
+            {route.page === "skills" && <Skills />}
+            {route.page === "docs" && <Docs />}
+          </main>
+          {toast && (
+            <div className="toast" role="alert" onClick={() => setToast(null)}>
+              {toast}
             </div>
           )}
-          {route.page === "sessions" && <Sessions agents={agents} />}
-          {route.page === "agents" && !route.id && (
-            <Agents agents={agents} environments={environments} onChange={refresh} />
-          )}
-          {agentDetail && (
-            <AgentDetail
-              agentId={route.id!}
-              environments={environments}
-              onChange={refresh}
-            />
-          )}
-          {route.page === "deployments" && <Deployments agents={agents} />}
-          {route.page === "artifacts" && !route.id && <Artifacts agents={agents} />}
-          {artifactDetail && (
-            route.id!.startsWith("shared/")
-              ? <ArtifactViewer token={route.id!.slice("shared/".length)} agents={agents} />
-              : <ArtifactViewer artifactId={route.id!} agents={agents} />
-          )}
-          {route.page === "vaults" && <Vaults />}
-          {route.page === "memory" && <MemoryStores />}
-          {route.page === "skills" && <Skills />}
-          {route.page === "docs" && <Docs />}
-        </main>
-        {toast && (
-          <div className="toast" role="alert" onClick={() => setToast(null)}>
-            {toast}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
