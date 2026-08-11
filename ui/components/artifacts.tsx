@@ -44,7 +44,8 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
   }
 
   async function copyLink(artifact: Artifact) {
-    const url = `${window.location.origin}/v1/artifacts/shared/${artifact.share_token}`;
+    const path = artifact.share_url ?? `/v1/artifacts/shared/${artifact.share_token}`;
+    const url = path.startsWith("http") ? path : `${window.location.origin}${path}`;
     await navigator.clipboard.writeText(url);
     setCopied(artifact.id);
     setTimeout(() => setCopied(null), 1500);

@@ -90,6 +90,18 @@ async def test_create_honors_custom_name(tools, uploads):
     assert uploads[0][1] == "sessions/session_x/artifacts/summary.md"
 
 
+async def test_create_falls_back_to_source_content_type(tools, uploads):
+    await tools.create({"path": "out/report.md", "name": "weekly-summary"})
+    assert uploads[0][3] == "text/markdown"
+
+
+async def test_create_rejects_invalid_custom_names(tools, uploads):
+    for name in ("../escape.md", "/absolute.md", "a\nb"):
+        result = await tools.create({"path": "out/report.md", "name": name})
+        assert result.get("is_error")
+    assert uploads == []
+
+
 async def test_create_rejects_escape_and_missing_files(tools, uploads):
     escaped = await tools.create({"path": "../secrets.txt"})
     assert escaped.get("is_error")

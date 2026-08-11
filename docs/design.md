@@ -70,7 +70,7 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 **Permission pause (`always_ask`).** The gate is a **`PreToolUse` hook**, not `can_use_tool` — see §4.1 for why. On every tool call:
 
 1. Check the kill switch (`agents.disabled`; 15s cache + control-channel push).
-2. Match the tool against the agent version's permission policy. `always_allow` → allow, record the decision in audit.
+2. Match the tool against the agent version's permission policy — first matching rule wins; rules match exact tool names or fnmatch-style globs (e.g. `mcp__artifacts__*`). `always_allow` → allow, record the decision in audit.
 3. `always_ask` → look up `tool_confirmations` by `(session_id, call_hash)` where `call_hash = sha256(tool_name + canonical_json(input))`. Stored decision → return it. **The key is the call hash, not `tool_use_id`** — the SDK assigns a fresh `tool_use_id` when a pending call is replayed after resume (measured; §4.1).
 4. No decision → insert a pending row, emit `session.status_idle(stop_reason=requires_action)`, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, **checkpoint and exit** — a blocked container costs nothing.
 5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.

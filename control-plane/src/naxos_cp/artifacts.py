@@ -5,17 +5,14 @@ at sessions/{session_id}/artifacts/{name}. Sharing mints a stable token URL —
 still behind IAP, so an artifact never leaves the org boundary.
 """
 
-import asyncio
-import functools
 import secrets
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from google.cloud import storage
 from pydantic import BaseModel
 
-from . import config, db
+from . import config, db, gcs
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
@@ -37,36 +34,13 @@ def validate_name(name: str) -> None:
 
 def serialize(row: asyncpg.Record | dict) -> dict:
     out = dict(row)
+    out.pop("session_bucket", None)
     if out.get("share_token"):
         out["share_url"] = share_url(out["share_token"])
     return out
 
 
-@functools.cache
-def _storage() -> storage.Client:
-    return storage.Client()
-
-
-async def _download_blob(bucket: str, path: str) -> bytes | None:
-    def _download() -> bytes | None:
-        blob = _storage().bucket(bucket).blob(path)
-        if not blob.exists():
-            return None
-        return blob.download_as_bytes()
-
-    return await asyncio.to_thread(_download)
-
-
-async def _delete_blob(bucket: str, path: str) -> None:
-    def _delete() -> None:
-        blob = _storage().bucket(bucket).blob(path)
-        if blob.exists():
-            blob.delete()
-
-    await asyncio.to_thread(_delete)
-
-
-async def _fetch(conn: asyncpg.Connection, artifact_id: str) -> asyncpg.Record:
+async def _fetch_with_bucket(conn: asyncpg.Connection, artifact_id: str) -> asyncpg.Record:
     row = await conn.fetchrow(
         "SELECT a.*, e.session_bucket FROM artifacts a "
         "JOIN environments e ON e.id = a.environment_id WHERE a.id = $1",
@@ -80,10 +54,15 @@ async def _fetch(conn: asyncpg.Connection, artifact_id: str) -> asyncpg.Record:
 def _content_response(row: asyncpg.Record, content: bytes | None) -> Response:
     if content is None:
         raise HTTPException(404, "artifact content not found")
+    # attachment + nosniff: agent-authored content must never render on the
+    # API origin, where it would run with the viewer's IAP session.
     return Response(
         content=content,
         media_type=row["content_type"],
-        headers={"content-disposition": f'inline; filename="{row["name"].split("/")[-1]}"'},
+        headers={
+            "content-disposition": f'attachment; filename="{row["name"].split("/")[-1]}"',
+            "x-content-type-options": "nosniff",
+        },
     )
 
 
@@ -109,7 +88,7 @@ async def get_shared_content(token: str, _: str = Depends(principal_of)) -> Resp
         )
     if row is None:
         raise HTTPException(404, "shared artifact not found")
-    content = await _download_blob(row["session_bucket"], blob_path(row["session_id"], row["name"]))
+    content = await gcs.download(row["session_bucket"], blob_path(row["session_id"], row["name"]))
     return _content_response(row, content)
 
 
@@ -135,15 +114,17 @@ async def list_artifacts(
 @router.get("/artifacts/{artifact_id}")
 async def get_artifact(artifact_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        row = await _fetch(conn, artifact_id)
+        row = await conn.fetchrow("SELECT * FROM artifacts WHERE id = $1", artifact_id)
+    if row is None:
+        raise HTTPException(404, "artifact not found")
     return serialize(row)
 
 
 @router.get("/artifacts/{artifact_id}/content")
 async def get_artifact_content(artifact_id: str, _: str = Depends(principal_of)) -> Response:
     async with db.transaction() as conn:
-        row = await _fetch(conn, artifact_id)
-    content = await _download_blob(row["session_bucket"], blob_path(row["session_id"], row["name"]))
+        row = await _fetch_with_bucket(conn, artifact_id)
+    content = await gcs.download(row["session_bucket"], blob_path(row["session_id"], row["name"]))
     return _content_response(row, content)
 
 
@@ -156,12 +137,15 @@ async def patch_artifact(
     artifact_id: str, body: ArtifactPatch, _: str = Depends(principal_of)
 ) -> dict:
     async with db.transaction() as conn:
-        row = await conn.fetchrow(
-            "UPDATE artifacts SET description = COALESCE($2, description), updated_at = now() "
-            "WHERE id = $1 RETURNING *",
-            artifact_id,
-            body.description,
-        )
+        if "description" in body.model_fields_set:
+            row = await conn.fetchrow(
+                "UPDATE artifacts SET description = $2, updated_at = now() "
+                "WHERE id = $1 RETURNING *",
+                artifact_id,
+                body.description,
+            )
+        else:
+            row = await conn.fetchrow("SELECT * FROM artifacts WHERE id = $1", artifact_id)
     if row is None:
         raise HTTPException(404, "artifact not found")
     return serialize(row)
@@ -170,24 +154,25 @@ async def patch_artifact(
 @router.delete("/artifacts/{artifact_id}")
 async def delete_artifact(artifact_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        row = await _fetch(conn, artifact_id)
+        row = await _fetch_with_bucket(conn, artifact_id)
         await conn.execute("DELETE FROM artifacts WHERE id = $1", artifact_id)
-    await _delete_blob(row["session_bucket"], blob_path(row["session_id"], row["name"]))
+    await gcs.delete(row["session_bucket"], blob_path(row["session_id"], row["name"]))
     return {"id": artifact_id, "deleted": True}
 
 
 @router.post("/artifacts/{artifact_id}/share")
 async def share_artifact(artifact_id: str, principal: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        row = await _fetch(conn, artifact_id)
-        if row["share_token"] is None:
-            row = await conn.fetchrow(
-                "UPDATE artifacts SET share_token = $2, shared_at = now(), shared_by = $3, "
-                "  updated_at = now() WHERE id = $1 RETURNING *",
-                artifact_id,
-                secrets.token_urlsafe(24),
-                principal,
-            )
+        row = await conn.fetchrow(
+            "UPDATE artifacts SET share_token = COALESCE(share_token, $2), "
+            "  shared_at = COALESCE(shared_at, now()), shared_by = COALESCE(shared_by, $3), "
+            "  updated_at = now() WHERE id = $1 RETURNING *",
+            artifact_id,
+            secrets.token_urlsafe(24),
+            principal,
+        )
+    if row is None:
+        raise HTTPException(404, "artifact not found")
     return serialize(row)
 
 

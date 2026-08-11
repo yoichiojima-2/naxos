@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,14 @@ from .config import MAX_ARTIFACT_BYTES
 from .control import ControlChannel
 
 log = logging.getLogger(__name__)
+
+# Mirrors the control plane's ArtifactIn name rules; checked before the blob
+# upload so a rejected registration cannot leave orphaned or overwritten content.
+NAME_RE = re.compile(r"^[a-zA-Z0-9._/ -]{1,200}$")
+
+
+def _valid_name(name: str) -> bool:
+    return bool(NAME_RE.match(name)) and ".." not in name.split("/") and not name.startswith("/")
 
 
 def _text(message: str) -> dict[str, Any]:
@@ -77,10 +86,16 @@ class ArtifactTools:
         except ValueError as exc:
             return _error(str(exc))
         name = (args.get("name") or "").strip() or source.name
+        if not _valid_name(name):
+            return _error("artifact names may only contain letters, digits, '. _ / -' and spaces")
         size = source.stat().st_size
         if size > MAX_ARTIFACT_BYTES:
             return _error(f"artifact is {size} bytes; the limit is {MAX_ARTIFACT_BYTES}")
-        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        content_type = (
+            mimetypes.guess_type(name)[0]
+            or mimetypes.guess_type(source.name)[0]
+            or "application/octet-stream"
+        )
         await _upload_blob(self.config.session_bucket, self._blob_path(name), source, content_type)
         record = await self.channel.register_artifact(
             name=name,

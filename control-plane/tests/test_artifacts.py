@@ -1,6 +1,6 @@
 import pytest
 
-from naxos_cp import artifacts
+from naxos_cp import gcs
 
 from .test_session_flow import make_agent
 
@@ -8,7 +8,7 @@ MESSAGE = {"type": "user.message", "content": [{"type": "text", "text": "make a 
 
 
 @pytest.fixture(autouse=True)
-def gcs(monkeypatch):
+def blobs(monkeypatch):
     """In-memory stand-in for the session bucket."""
     blobs: dict[tuple[str, str], bytes] = {}
 
@@ -18,8 +18,8 @@ def gcs(monkeypatch):
     async def fake_delete(bucket: str, path: str) -> None:
         blobs.pop((bucket, path), None)
 
-    monkeypatch.setattr(artifacts, "_download_blob", fake_download)
-    monkeypatch.setattr(artifacts, "_delete_blob", fake_delete)
+    monkeypatch.setattr(gcs, "download", fake_download)
+    monkeypatch.setattr(gcs, "delete", fake_delete)
     return blobs
 
 
@@ -58,16 +58,17 @@ async def test_register_lists_and_bumps_versions(client, internal_client, launch
 
     got = (await client.get(f"/v1/artifacts/{created['id']}")).json()
     assert got["size_bytes"] == 99
+    assert "session_bucket" not in got
 
     events = (await client.get(f"/v1/sessions/{session['id']}/events")).json()["data"]
     actions = [e["payload"]["action"] for e in events if e["type"] == "agent.artifact"]
     assert actions == ["created", "updated"]
 
 
-async def test_agent_share_round_trip(client, internal_client, launched, gcs):
+async def test_agent_share_round_trip(client, internal_client, launched, blobs):
     _, session = await make_session(client)
     created = (await register(internal_client, session["id"])).json()
-    gcs[("naxos2-sess-default", f"sessions/{session['id']}/artifacts/report.md")] = b"# hi"
+    blobs[("naxos2-sess-default", f"sessions/{session['id']}/artifacts/report.md")] = b"# hi"
 
     shared = (
         await internal_client.post(
@@ -120,23 +121,32 @@ async def test_user_share_and_unshare(client, internal_client, launched):
     assert unshared["share_token"] is None
 
 
-async def test_user_download_patch_and_delete(client, internal_client, launched, gcs):
+async def test_user_download_patch_and_delete(client, internal_client, launched, blobs):
     _, session = await make_session(client)
     created = (await register(internal_client, session["id"])).json()
     key = ("naxos2-sess-default", f"sessions/{session['id']}/artifacts/report.md")
-    gcs[key] = b"body"
+    blobs[key] = b"body"
 
     content = await client.get(f"/v1/artifacts/{created['id']}/content")
     assert content.content == b"body"
+    assert content.headers["content-disposition"].startswith("attachment")
+    assert content.headers["x-content-type-options"] == "nosniff"
 
     patched = (
         await client.patch(f"/v1/artifacts/{created['id']}", json={"description": "weekly"})
     ).json()
     assert patched["description"] == "weekly"
 
+    untouched = (await client.patch(f"/v1/artifacts/{created['id']}", json={})).json()
+    assert untouched["description"] == "weekly"
+    cleared = (
+        await client.patch(f"/v1/artifacts/{created['id']}", json={"description": None})
+    ).json()
+    assert cleared["description"] is None
+
     deleted = (await client.delete(f"/v1/artifacts/{created['id']}")).json()
     assert deleted["deleted"] is True
-    assert key not in gcs
+    assert key not in blobs
     assert (await client.get(f"/v1/artifacts/{created['id']}")).status_code == 404
 
 

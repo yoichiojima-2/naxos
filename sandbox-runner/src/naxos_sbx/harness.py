@@ -56,6 +56,10 @@ class Harness:
         self.interrupted = False
         self.killed = False
         self.num_turns = 0
+        if "artifacts" in (config.mcp_servers or {}):
+            log.warning(
+                "agent-configured MCP server 'artifacts' is shadowed by the built-in artifact tools"
+            )
         self.artifact_server = artifacts.build_server(channel, config, Path(cwd))
 
     async def interrupt(self) -> None:
