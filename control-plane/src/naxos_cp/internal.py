@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from naxos_shared.events import (
+    EventIn,
     EventType,
     PermissionMode,
     PermissionPolicy,
@@ -531,6 +532,122 @@ async def share_session_artifact(
             conn, session_id, "shared" if body.shared else "unshared", record
         )
     return artifacts.serialize(record)
+
+
+class ScheduleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    cron: str
+    prompt: str = Field(min_length=1)
+    timezone: str = "Asia/Tokyo"
+    budget_usd: float | None = Field(None, ge=0)
+
+
+def _validate_cron(cron: str) -> str:
+    # Cloud Scheduler validates for real at job creation; this catches the
+    # obvious mistakes in DEV_MODE, where no scheduler job is created.
+    if len(cron.split()) != 5:
+        raise HTTPException(422, "cron must have 5 fields (minute hour day month weekday)")
+    return cron
+
+
+def _serialize_deployment(row: Any) -> dict[str, Any]:
+    prompt = "\n".join(
+        block.get("text", "")
+        for event in row["initial_events"]
+        for block in event.get("content", [])
+    )
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "cron": row["cron"],
+        "timezone": row["timezone"],
+        "prompt": prompt,
+        "paused": row["paused"],
+        "budget_usd": float(row["budget_usd"]) if row["budget_usd"] is not None else None,
+        "created_by": row["created_by"],
+    }
+
+
+@router.get("/sessions/{session_id}/deployments")
+async def session_deployments(
+    session_id: str, caller: str = Depends(caller_service_account)
+) -> dict:
+    """Every unarchived deployment of the session's agent, operator-created included,
+    so the agent can answer "what is scheduled for you" truthfully."""
+    async with db.transaction() as conn:
+        row = await _authorize(conn, session_id, caller)
+        rows = await conn.fetch(
+            "SELECT * FROM deployments WHERE agent_id = $1 AND archived_at IS NULL "
+            "ORDER BY created_at",
+            row["agent_id"],
+        )
+    return {"data": [_serialize_deployment(r) for r in rows]}
+
+
+@router.post("/sessions/{session_id}/deployments", status_code=201)
+async def create_session_deployment(
+    session_id: str, body: ScheduleIn, caller: str = Depends(caller_service_account)
+) -> dict:
+    """Create a durable deployment for the session's agent, on the agent's behalf.
+
+    Unpinned (agent_version NULL = latest at fire time) and attributed to
+    agent:{session_id}, so operators can see and govern what agents scheduled.
+    """
+    _validate_cron(body.cron)
+    initial_events = [
+        EventIn(type=EventType.USER_MESSAGE, content=[{"type": "text", "text": body.prompt}])
+    ]
+    async with db.transaction() as conn:
+        row = await _authorize(conn, session_id, caller)
+        existing = await conn.fetchval(
+            "SELECT count(*) FROM deployments WHERE agent_id = $1 AND archived_at IS NULL "
+            "AND created_by LIKE 'agent:%'",
+            row["agent_id"],
+        )
+        if existing >= config.MAX_AGENT_DEPLOYMENTS:
+            raise HTTPException(
+                409,
+                f"this agent already has {existing} agent-created deployments "
+                f"(limit {config.MAX_AGENT_DEPLOYMENTS}); archive one first",
+            )
+        record = await deployments.insert(
+            conn,
+            agent_id=row["agent_id"],
+            agent_version=None,
+            name=body.name,
+            cron=body.cron,
+            timezone=body.timezone,
+            initial_events=initial_events,
+            budget_usd=body.budget_usd,
+            created_by=f"agent:{session_id}",
+        )
+    return _serialize_deployment(record)
+
+
+@router.delete("/sessions/{session_id}/deployments/{deployment_id}")
+async def archive_session_deployment(
+    session_id: str, deployment_id: str, caller: str = Depends(caller_service_account)
+) -> dict:
+    """Archive an agent-created deployment. Operator-created deployments are
+    read-only to agents: visible in the list, not archivable from the sandbox."""
+    async with db.transaction() as conn:
+        row = await _authorize(conn, session_id, caller)
+        record = await conn.fetchrow(
+            "SELECT * FROM deployments WHERE id = $1 AND agent_id = $2 AND archived_at IS NULL",
+            deployment_id,
+            row["agent_id"],
+        )
+        if record is None:
+            raise HTTPException(404, "deployment not found for this agent")
+        if not (record["created_by"] or "").startswith("agent:"):
+            raise HTTPException(
+                403, "this deployment was created by an operator; only operators can archive it"
+            )
+        await conn.execute(
+            "UPDATE deployments SET archived_at = now() WHERE id = $1", deployment_id
+        )
+    await deployments._delete_scheduler_job(record["scheduler_job_name"])
+    return {"id": deployment_id, "archived": True}
 
 
 @router.get("/egress/routes/{token}")

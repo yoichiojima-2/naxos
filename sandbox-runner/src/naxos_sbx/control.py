@@ -99,6 +99,31 @@ class ControlChannel:
     async def delete_artifact(self, name: str) -> dict[str, Any]:
         return await self._delete(f"/artifacts/{name}")
 
+    async def list_deployments(self) -> dict[str, Any]:
+        return await self._get("/deployments")
+
+    async def create_deployment(
+        self,
+        name: str,
+        cron: str,
+        prompt: str,
+        timezone: str,
+        budget_usd: float | None,
+    ) -> dict[str, Any]:
+        return await self._post(
+            "/deployments",
+            {
+                "name": name,
+                "cron": cron,
+                "prompt": prompt,
+                "timezone": timezone,
+                "budget_usd": budget_usd,
+            },
+        )
+
+    async def archive_deployment(self, deployment_id: str) -> dict[str, Any]:
+        return await self._delete(f"/deployments/{deployment_id}")
+
     async def share_artifact(self, name: str, shared: bool) -> dict[str, Any]:
         return await self._post("/artifacts/share", {"name": name, "shared": shared})
 
