@@ -72,8 +72,8 @@ export default function Docs() {
       <div className="panel">
         <strong>2 · Create an agent</strong>
         <p>
-          Agents are created through the REST API (this UI lists them but does not
-          create them). The API sits behind IAP, so requests are made as you:
+          Create an agent on the <a href="#agents">Agents</a> page, or through the
+          REST API. The API sits behind IAP, so requests are made as you:
         </p>
         <pre>{CREATE_AGENT_EXAMPLE}</pre>
         <p>
