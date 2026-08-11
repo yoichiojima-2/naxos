@@ -82,8 +82,8 @@ class SkillFileIn(BaseModel):
 async def put_file(
     skill_id: str, body: SkillFileIn, principal: str = Depends(principal_of)
 ) -> dict:
-    if len(body.content.encode()) > config.MAX_MEMORY_BYTES:
-        raise HTTPException(413, "skill file exceeds 64KB")
+    if len(body.content.encode()) > config.MAX_SKILL_FILE_BYTES:
+        raise HTTPException(413, f"skill file exceeds {config.MAX_SKILL_FILE_BYTES // 1024}KB")
     if unsafe_relpath(body.path):
         raise HTTPException(400, "path must be relative with no empty or .. segments")
     async with db.transaction() as conn:
@@ -142,8 +142,8 @@ async def seed_samples(conn: asyncpg.Connection, root: Path = SEED_DIR) -> list[
         taken = await conn.fetchval("SELECT 1 FROM skills WHERE name = $1 LIMIT 1", entry.name)
         if taken:
             continue
-        description = _frontmatter_description((entry / SKILL_ENTRY).read_text())
         try:
+            description = _frontmatter_description((entry / SKILL_ENTRY).read_text())
             async with conn.transaction():
                 skill_id = new_id("skill")
                 await conn.execute(
@@ -158,9 +158,14 @@ async def seed_samples(conn: asyncpg.Connection, root: Path = SEED_DIR) -> list[
                     rel = file.relative_to(entry).as_posix()
                     if any(part.startswith(".") for part in file.relative_to(entry).parts):
                         continue
-                    content = file.read_text()
-                    if len(content.encode()) > config.MAX_MEMORY_BYTES:
-                        raise ValueError(f"{rel} exceeds the {config.MAX_MEMORY_BYTES}B file cap")
+                    try:
+                        content = file.read_text()
+                    except UnicodeDecodeError:
+                        log.warning("%s/%s is not text, not seeded", entry.name, rel)
+                        continue
+                    if len(content.encode()) > config.MAX_SKILL_FILE_BYTES:
+                        log.warning("%s/%s exceeds the file cap, not seeded", entry.name, rel)
+                        continue
                     await conn.execute(
                         "INSERT INTO skill_files (id, skill_id, path, content, updated_by) "
                         "VALUES ($1, $2, $3, $4, $5)",
@@ -172,8 +177,8 @@ async def seed_samples(conn: asyncpg.Connection, root: Path = SEED_DIR) -> list[
                     )
         except asyncpg.UniqueViolationError:
             continue
-        except (ValueError, UnicodeDecodeError) as exc:
-            log.warning("sample skill %s not seeded: %s", entry.name, exc)
+        except UnicodeDecodeError:
+            log.warning("sample skill %s has a non-text SKILL.md, not seeded", entry.name)
             continue
         seeded.append(entry.name)
     if seeded:
@@ -182,9 +187,25 @@ async def seed_samples(conn: asyncpg.Connection, root: Path = SEED_DIR) -> list[
 
 
 def _frontmatter_description(text: str) -> str | None:
-    for line in text.splitlines():
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return None
         if line.startswith("description:"):
-            return line.split(":", 1)[1].strip() or None
+            value = line.split(":", 1)[1].strip()
+            if value in ("|", "|-", ">", ">-"):
+                block: list[str] = []
+                for cont in lines[i + 1 :]:
+                    if cont.strip() == "---" or (cont.strip() and not cont[0].isspace()):
+                        break
+                    if cont.strip():
+                        block.append(cont.strip())
+                return " ".join(block) or None
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            return value or None
     return None
 
 
