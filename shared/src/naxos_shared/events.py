@@ -106,6 +106,7 @@ class SessionConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     permission_policy: PermissionPolicy = Field(default_factory=PermissionPolicy)
     mcp_servers: dict[str, Any] = Field(default_factory=dict)
+    skill_names: list[str] = Field(default_factory=list)
     session_bucket: str
     sdk_session_id: str | None = None
     budget_usd: float | None = None

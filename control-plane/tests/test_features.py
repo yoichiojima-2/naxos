@@ -237,6 +237,102 @@ async def test_session_config_rewrites_mcp_urls_through_egress(
     assert route["secret_ref"].startswith("projects/test/secrets/vault-")
 
 
+async def test_skill_round_trip_and_validation(client):
+    bad_name = await client.post("/v1/skills", json={"name": "Deploy Helper"})
+    assert bad_name.status_code == 422
+
+    skill = (
+        await client.post(
+            "/v1/skills", json={"name": "deploy-helper", "description": "How we deploy"}
+        )
+    ).json()
+    duplicate = await client.post("/v1/skills", json={"name": "deploy-helper"})
+    assert duplicate.status_code == 409
+
+    listed = (await client.get("/v1/skills")).json()["data"]
+    assert [s["name"] for s in listed] == ["deploy-helper"]
+    assert listed[0]["ready"] is False
+
+    put = (
+        await client.post(
+            f"/v1/skills/{skill['id']}/files",
+            json={"path": "SKILL.md", "content": "---\nname: deploy-helper\n---\nSteps."},
+        )
+    ).json()
+    got = (await client.get(f"/v1/skills/{skill['id']}/files/{put['id']}")).json()
+    assert got["content"].endswith("Steps.")
+    assert (await client.get("/v1/skills")).json()["data"][0]["ready"] is True
+
+    too_big = await client.post(
+        f"/v1/skills/{skill['id']}/files",
+        json={"path": "big.md", "content": "x" * (64 * 1024 + 1)},
+    )
+    assert too_big.status_code == 413
+
+    await client.post(f"/v1/skills/{skill['id']}/archive")
+    assert (await client.get("/v1/skills")).json()["data"] == []
+    rejected = await client.post(
+        f"/v1/skills/{skill['id']}/files", json={"path": "more.md", "content": "no"}
+    )
+    assert rejected.status_code == 404
+
+
+async def _make_skill(client, name: str, ready: bool = True) -> dict:
+    skill = (await client.post("/v1/skills", json={"name": name})).json()
+    if ready:
+        await client.post(
+            f"/v1/skills/{skill['id']}/files",
+            json={"path": "SKILL.md", "content": f"---\nname: {name}\n---\nUse me."},
+        )
+    return skill
+
+
+async def test_session_inherits_agent_skills_and_mounts_them(client, internal_client, launched):
+    skill = await _make_skill(client, "deploy-helper")
+    await client.post(
+        f"/v1/skills/{skill['id']}/files",
+        json={"path": "scripts/run.sh", "content": "echo deploy"},
+    )
+    draft = await _make_skill(client, "draft-skill", ready=False)
+    _, agent = await make_agent(client, skill_ids=[skill["id"], draft["id"]])
+    assert agent["skill_ids"] == [skill["id"], draft["id"]]
+
+    session = (
+        await client.post(
+            "/v1/sessions",
+            json={"agent": {"id": agent["id"]}, "initial_events": [MESSAGE]},
+        )
+    ).json()
+    assert session["skill_ids"] == [skill["id"], draft["id"]]
+    await internal_client.post(f"/internal/sessions/{session['id']}/claim")
+
+    config = (await internal_client.get(f"/internal/sessions/{session['id']}/config")).json()
+    assert config["skill_names"] == ["deploy-helper"]
+
+    mounted = (await internal_client.get(f"/internal/sessions/{session['id']}/skills")).json()
+    assert set(mounted["skills"]) == {skill["id"]}
+    assert mounted["skills"][skill["id"]]["name"] == "deploy-helper"
+    assert mounted["skills"][skill["id"]]["files"]["scripts/run.sh"] == "echo deploy"
+
+
+async def test_archived_skill_is_not_mounted(client, internal_client, launched):
+    skill = await _make_skill(client, "deploy-helper")
+    _, agent = await make_agent(client, skill_ids=[skill["id"]])
+    session = (
+        await client.post(
+            "/v1/sessions",
+            json={"agent": {"id": agent["id"]}, "initial_events": [MESSAGE]},
+        )
+    ).json()
+    await client.post(f"/v1/skills/{skill['id']}/archive")
+    await internal_client.post(f"/internal/sessions/{session['id']}/claim")
+
+    config = (await internal_client.get(f"/internal/sessions/{session['id']}/config")).json()
+    assert config["skill_names"] == []
+    mounted = (await internal_client.get(f"/internal/sessions/{session['id']}/skills")).json()
+    assert mounted["skills"] == {}
+
+
 async def test_memory_mount_and_writeback(client, internal_client, launched):
     store = (await client.post("/v1/memory_stores", json={"name": "runbooks"})).json()
     await client.post(

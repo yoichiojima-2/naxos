@@ -12,6 +12,8 @@ PREFIXES = {
     "credential": "cred",
     "memory_store": "memstore",
     "memory": "mem",
+    "skill": "skill",
+    "skill_file": "skf",
     "confirmation": "conf",
     "run": "run",
 }

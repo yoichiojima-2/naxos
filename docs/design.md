@@ -32,7 +32,7 @@ Decisions fixed with the owner:
 | State | Cloud SQL Postgres `db-g1-small`, private IP, Direct VPC egress from Cloud Run | always-on (the one fixed cost) | — |
 | Workspaces | GCS bucket per environment `naxos2-sess-{env}` | — | env SA + `sa-api` only |
 | Audit | BigQuery `audit.runs` + `audit.tool_calls`, written **only by the control plane** | — | `sa-api` |
-| UI — agents, session chat/timeline, approval inbox, deployments, vaults, memory, kill switch | Next.js static export baked into the api image | — | — |
+| UI — agents, session chat/timeline, approval inbox, deployments, vaults, memory, skills, kill switch | Next.js static export baked into the api image | — | — |
 
 The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json` (the v1 `roles.json` pattern, re-derived). Many agents can share an environment.
 
@@ -158,7 +158,38 @@ memories (id, store_id, path, UNIQUE (store_id, path),
         created_at, updated_at)
         -- mounted as ws/memory/{store}/…, written back at checkpoint
         -- versioning deferred (documented)
+
+skills (id, name UNIQUE,      -- ^[a-z0-9][a-z0-9-]{0,63}$, the mount directory name
+        description, archived_at, created_by, created_at, updated_at)
+skill_files (id, skill_id, path, UNIQUE (skill_id, path),
+        content,              -- ≤64KB per file
+        updated_by, created_at, updated_at)
+        -- agent_versions.skill_ids / sessions.skill_ids reference these
 ```
+
+### Skills (org-shared agent capabilities)
+
+A skill is the Agent Skills format — a folder with a `SKILL.md` entry file plus
+supporting files — stored org-wide in Postgres, shared by all environments the
+same way memory stores and vaults are. `agent_versions.skill_ids` attaches
+skills to an agent; sessions copy the list at creation (overridable per
+session, like vaults and memory).
+
+- **Mount**: the sandbox materialises the session's skills under
+  `ws/.claude/skills/{name}/` on every wake (internal `GET
+  /sessions/{id}/skills`) and enables `setting_sources=["project"]` so the SDK
+  discovers them; the `Skill` tool is appended to the allowlist when the agent
+  restricts tools. A skill is mounted only if it is unarchived and has a
+  `SKILL.md`.
+- **Read-only from the sandbox** — deliberate deviation from memory: there is
+  no skill writeback path, and the mount tree is rebuilt from Postgres on every
+  wake, so a prompt-injected agent cannot poison a skill shared by every other
+  agent. Skills change only through the API, by a human principal.
+- **Governance unchanged**: `Skill` invocations pass through the same
+  `PreToolUse` gate as every other tool call — the permission policy and kill
+  switch apply, and the call lands in `audit.tool_calls`.
+- **Not versioned** (like memory, documented): editing a skill changes it for
+  every agent that references it, including pinned agent versions.
 
 ### Storage split
 
@@ -215,9 +246,13 @@ DELETE /v1/vaults/{id}/credentials/{cid}
 
 POST   /v1/memory_stores · GET /v1/memory_stores[/{id}]
 POST   /v1/memory_stores/{id}/memories · GET (list) · GET/PUT/DELETE …/memories/{mid}
+
+POST   /v1/skills · GET /v1/skills[/{id}] · POST /v1/skills/{id}/archive
+POST   /v1/skills/{id}/files               upsert by path
+GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 ```
 
-Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / memory_writeback`, plus `deployments/{id}/fire` and `reconcile`.
+Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback`, plus `deployments/{id}/fire` and `reconcile`.
 
 Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
 

@@ -152,15 +152,25 @@ class Harness:
     # --- the loop ---------------------------------------------------------
 
     def options(self) -> ClaudeAgentOptions:
+        # Skills need project setting_sources so the SDK discovers
+        # ws/.claude/skills; the "Skill" tool call still goes through the
+        # PreToolUse gate like any other, so the permission policy applies.
+        extra: dict[str, Any] = {}
+        tools = list(self.config.tools)
+        if self.config.skill_names:
+            extra["setting_sources"] = ["project"]
+            if tools and "Skill" not in tools:
+                tools.append("Skill")
         return ClaudeAgentOptions(
             cwd=self.cwd,
             system_prompt=self.config.instructions,
             model=self.config.model,
             mcp_servers=self.config.mcp_servers,
-            allowed_tools=self.config.tools,
+            allowed_tools=tools,
             max_turns=self.config.max_turns,
             resume=self.sdk_session_id,
             hooks={"PreToolUse": [HookMatcher(hooks=[self._pre_tool_use])]},
+            **extra,
         )
 
     def _budget_exhausted(self) -> bool:

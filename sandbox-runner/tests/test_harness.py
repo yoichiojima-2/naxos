@@ -38,6 +38,22 @@ def test_options_empty_tools_means_unrestricted():
     assert _harness(_config()).options().allowed_tools == []
 
 
+def test_options_skills_enable_project_settings_and_skill_tool():
+    options = _harness(_config(tools=["Bash"], skill_names=["deploy-helper"])).options()
+    assert options.setting_sources == ["project"]
+    assert options.allowed_tools == ["Bash", "Skill"]
+
+
+def test_options_skills_keep_empty_allowlist_unrestricted():
+    options = _harness(_config(tools=[], skill_names=["deploy-helper"])).options()
+    assert options.setting_sources == ["project"]
+    assert options.allowed_tools == []
+
+
+def test_options_without_skills_load_no_setting_sources():
+    assert _harness(_config(tools=["Bash"])).options().setting_sources is None
+
+
 def test_cost_accumulates_on_top_of_prior_bursts():
     harness = _harness(_config(cost_usd=5.0))
     harness._accumulate_cost(0.3)

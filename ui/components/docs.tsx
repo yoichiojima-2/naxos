@@ -56,6 +56,12 @@ export default function Docs() {
           </dd>
           <dt>Memory</dt>
           <dd>Files an agent keeps across sessions, browsable and editable here.</dd>
+          <dt>Skill</dt>
+          <dd>
+            Reusable know-how shared across the organization — a folder of
+            instructions (SKILL.md plus supporting files) any agent can be given.
+            Agents load skills read-only; they are edited only here.
+          </dd>
         </dl>
       </div>
 
@@ -126,7 +132,9 @@ export default function Docs() {
           unattended runs. <a href="#vaults">Vaults</a> hold credentials for external
           services — values are write-only and injected at the egress proxy, so agents
           can use a credential without ever seeing it.{" "}
-          <a href="#memory">Memory</a> is what an agent carries between sessions.
+          <a href="#memory">Memory</a> is what an agent carries between sessions.{" "}
+          <a href="#skills">Skills</a> package shared procedures once and attach them
+          to any agent.
         </p>
       </div>
 

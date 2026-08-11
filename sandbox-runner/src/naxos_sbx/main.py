@@ -10,6 +10,7 @@ from .config import IDLE_LINGER_SECONDS
 from .control import ControlChannel
 from .harness import CONTINUE_PROMPT, Harness
 from .memory_sync import MemorySync
+from .skills_sync import SkillsSync
 from .workspace import Workspace
 
 log = logging.getLogger(__name__)
@@ -125,6 +126,7 @@ async def run_session(session_id: str) -> None:
         workspace.restore()
         memory = MemorySync(channel, workspace.ws)
         await memory.materialise()
+        await SkillsSync(channel, workspace.ws).materialise()
         heartbeat_task = asyncio.create_task(_heartbeat(channel, stop))
         harness = Harness(channel, config, str(workspace.ws))
 
