@@ -43,39 +43,6 @@ export type Agent = {
 export const agentName = (agents: Agent[], id: string) =>
   agents.find((a) => a.id === id)?.name ?? id;
 
-export type PermissionMode = "always_ask" | "always_allow";
-export type PermissionRule = { tool: string; mode: PermissionMode };
-export type PermissionPolicy = { default: PermissionMode; rules: PermissionRule[] };
-
-export type AgentDetail = Agent & {
-  version: number;
-  model: string;
-  instructions: string | null;
-  tools: string[];
-  permission_policy: PermissionPolicy;
-  mcp_servers: Record<string, unknown>;
-  vault_ids: string[];
-  memory_store_ids: string[];
-  default_budget_usd: string | number | null;
-  max_turns: number | null;
-  created_by?: string;
-  created_at?: string;
-};
-
-export type AgentIn = {
-  name: string;
-  environment_id: string;
-  model: string;
-  instructions: string | null;
-  tools: string[];
-  permission_policy: PermissionPolicy;
-  mcp_servers: Record<string, unknown>;
-  vault_ids: string[];
-  memory_store_ids: string[];
-  default_budget_usd: number | null;
-  max_turns: number | null;
-};
-
 export type Session = {
   id: string;
   agent_id: string;
@@ -119,9 +86,14 @@ export type DeploymentRun = {
   fired_at: string;
 };
 
-export type Environment = { id: string; name: string };
 export type Vault = { id: string; name: string };
-export type Credential = { id: string; name: string; type: string; target: Record<string, string> };
+export type Credential = {
+  id: string;
+  name: string;
+  type: string;
+  target: Record<string, string>;
+  created_at: string;
+};
 export type MemoryStore = { id: string; name: string };
 export type Memory = { id: string; path: string; size?: number; content?: string };
 export type WorkspaceFile = { path: string; size: number };
