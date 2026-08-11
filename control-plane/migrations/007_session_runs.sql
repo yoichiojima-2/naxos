@@ -1,9 +1,10 @@
 -- Per-burst run log for the monitoring view: one row per wake-to-idle burst,
 -- mirroring the BigQuery audit.runs row so cost/usage can be queried without
 -- granting the API BigQuery read access. cost_usd is the burst's delta.
+-- No FK to sessions: cost history must survive session deletion.
 CREATE TABLE session_runs (
     id             text PRIMARY KEY,
-    session_id     text NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    session_id     text NOT NULL,
     agent_id       text NOT NULL,
     environment_id text NOT NULL,
     trigger_type   text NOT NULL,

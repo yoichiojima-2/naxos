@@ -19,6 +19,10 @@ async def test_summary_aggregates_runs_and_tool_calls(client, internal_client, l
                     "type": "agent.tool_use",
                     "payload": {"tool_name": "Read", "decision": "user_denied"},
                 },
+                {
+                    "type": "agent.tool_use",
+                    "payload": {"tool_name": "Write", "decision": "awaiting_confirmation"},
+                },
             ],
         },
     )

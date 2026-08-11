@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, MonitoringSummary } from "@/lib/api";
 
 const RANGES = [7, 30, 90] as const;
@@ -43,15 +43,19 @@ export default function Monitoring() {
   const [data, setData] = useState<MonitoringSummary | null>(null);
   const [asTable, setAsTable] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setData(await api<MonitoringSummary>(`/v1/monitoring/summary?days=${days}`));
-  }, [days]);
-
   useEffect(() => {
+    let live = true;
+    const refresh = async () => {
+      const summary = await api<MonitoringSummary>(`/v1/monitoring/summary?days=${days}`);
+      if (live) setData(summary);
+    };
     refresh();
     const timer = setInterval(refresh, 30_000);
-    return () => clearInterval(timer);
-  }, [refresh]);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [days]);
 
   if (data === null) return <span className="muted">loading…</span>;
 

@@ -10,7 +10,8 @@ router = APIRouter(prefix="/v1")
 
 @router.get("/monitoring/summary")
 async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principal_of)) -> dict:
-    since = datetime.now(UTC) - timedelta(days=days)
+    today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    since = today - timedelta(days=days - 1)
     async with db.transaction() as conn:
         totals = await conn.fetchrow(
             "SELECT COALESCE(sum(cost_usd), 0) AS cost_usd, count(*) AS runs, "
@@ -20,7 +21,8 @@ async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principa
         )
         tool_calls = await conn.fetchval(
             "SELECT count(*) FROM session_events "
-            "WHERE type = 'agent.tool_use' AND created_at >= $1",
+            "WHERE type = 'agent.tool_use' AND created_at >= $1 "
+            "  AND COALESCE(payload->>'decision', '') != 'awaiting_confirmation'",
             since,
         )
         all_time = await conn.fetchrow(
@@ -54,6 +56,7 @@ async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principa
             "FROM session_events "
             "WHERE type = 'agent.tool_use' AND created_at >= $1 "
             "  AND payload->>'tool_name' IS NOT NULL "
+            "  AND COALESCE(payload->>'decision', '') != 'awaiting_confirmation' "
             "GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 12",
             since,
         )
