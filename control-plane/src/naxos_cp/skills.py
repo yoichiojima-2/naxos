@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Annotated
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,9 +25,22 @@ READY = (
 FILE_COUNT = "(SELECT count(*) FROM skill_files f WHERE f.skill_id = s.id) AS file_count"
 
 
+Tag = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,31}$")]
+
+
 class SkillIn(BaseModel):
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
     description: str | None = None
+    tags: list[Tag] = Field(default_factory=list, max_length=16)
+
+
+class SkillPatch(BaseModel):
+    description: str | None = None
+    tags: list[Tag] | None = Field(default=None, max_length=16)
+
+
+def _dedupe(tags: list[str]) -> list[str]:
+    return list(dict.fromkeys(tags))
 
 
 @router.post("/skills", status_code=201)
@@ -34,11 +48,12 @@ async def create_skill(body: SkillIn, principal: str = Depends(principal_of)) ->
     async with db.transaction() as conn:
         try:
             row = await conn.fetchrow(
-                "INSERT INTO skills (id, name, description, created_by) "
-                "VALUES ($1, $2, $3, $4) RETURNING *",
+                "INSERT INTO skills (id, name, description, tags, created_by) "
+                "VALUES ($1, $2, $3, $4, $5) RETURNING *",
                 new_id("skill"),
                 body.name,
                 body.description,
+                _dedupe(body.tags),
                 principal,
             )
         except asyncpg.UniqueViolationError:
@@ -47,13 +62,40 @@ async def create_skill(body: SkillIn, principal: str = Depends(principal_of)) ->
 
 
 @router.get("/skills")
-async def list_skills(_: str = Depends(principal_of)) -> dict:
+async def list_skills(tag: str | None = None, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        rows = await conn.fetch(
-            f"SELECT s.*, {READY}, {FILE_COUNT} FROM skills s "
-            "WHERE s.archived_at IS NULL ORDER BY s.name"
-        )
+        if tag is None:
+            rows = await conn.fetch(
+                f"SELECT s.*, {READY}, {FILE_COUNT} FROM skills s "
+                "WHERE s.archived_at IS NULL ORDER BY s.name"
+            )
+        else:
+            rows = await conn.fetch(
+                f"SELECT s.*, {READY}, {FILE_COUNT} FROM skills s "
+                "WHERE s.archived_at IS NULL AND $1 = ANY(s.tags) ORDER BY s.name",
+                tag,
+            )
     return {"data": [dict(r) for r in rows]}
+
+
+@router.patch("/skills/{skill_id}")
+async def update_skill(skill_id: str, body: SkillPatch, _: str = Depends(principal_of)) -> dict:
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(400, "provide description and/or tags")
+    if "tags" in updates:
+        updates["tags"] = _dedupe(updates["tags"] or [])
+    sets = ", ".join(f"{name} = ${i}" for i, name in enumerate(updates, start=2))
+    async with db.transaction() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE skills SET {sets}, updated_at = now() "
+            "WHERE id = $1 AND archived_at IS NULL RETURNING *",
+            skill_id,
+            *updates.values(),
+        )
+    if row is None:
+        raise HTTPException(404, "skill not found or archived")
+    return dict(row)
 
 
 @router.get("/skills/{skill_id}")

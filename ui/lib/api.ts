@@ -229,7 +229,8 @@ export type Memory = {
   updated_at?: string;
 };
 export type Skill = {
-  id: string; name: string; description: string | null; ready: boolean; file_count?: number;
+  id: string; name: string; description: string | null; tags: string[]; ready: boolean;
+  file_count?: number;
 };
 export type SkillFile = { id: string; path: string; size?: number; content?: string };
 export type WorkspaceFile = { path: string; size: number };
