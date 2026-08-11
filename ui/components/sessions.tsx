@@ -55,27 +55,34 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
 
   const noun = selected.size === 1 ? "session" : "sessions";
 
+  async function bulkApply(run: (id: string) => Promise<unknown>) {
+    const ids = [...selected];
+    const results = await Promise.allSettled(ids.map(run));
+    const failed = ids.filter((_, i) => results[i].status === "rejected");
+    setSelected(new Set(failed));
+    await refresh();
+    if (failed.length) {
+      window.alert(`${failed.length} of ${ids.length} requests failed; the failed ${
+        failed.length === 1 ? "session stays" : "sessions stay"} selected.`);
+    }
+  }
+
   async function bulkSetBudget() {
     const raw = window.prompt(`New budget in USD for ${selected.size} ${noun}:`);
-    if (raw === null) return;
+    if (raw === null || !raw.trim()) return;
     const budget = Number(raw);
-    if (!Number.isFinite(budget) || budget < 0) return;
-    await Promise.all(
-      [...selected].map((id) =>
-        api(`/v1/sessions/${id}`, { method: "PATCH", json: { budget_usd: budget } }),
-      ),
+    if (!Number.isFinite(budget) || budget < 0) {
+      window.alert(`"${raw}" is not a valid budget`);
+      return;
+    }
+    await bulkApply((id) =>
+      api(`/v1/sessions/${id}`, { method: "PATCH", json: { budget_usd: budget } }),
     );
-    setSelected(new Set());
-    refresh();
   }
 
   async function bulkTerminate() {
     if (!window.confirm(`Terminate ${selected.size} ${noun}?`)) return;
-    await Promise.all(
-      [...selected].map((id) => api(`/v1/sessions/${id}/terminate`, { json: {} })),
-    );
-    setSelected(new Set());
-    refresh();
+    await bulkApply((id) => api(`/v1/sessions/${id}/terminate`, { json: {} }));
   }
 
   if (open) {
