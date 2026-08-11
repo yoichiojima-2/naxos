@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from naxos_shared.events import SessionConfig
 
-from naxos_sbx.harness import Harness
+from naxos_sbx.harness import Harness, _result_text
 
 
 def _config(**overrides) -> SessionConfig:
@@ -114,3 +114,17 @@ async def test_pre_tool_use_pending_pauses_the_call():
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert harness.paused_call is not None
     assert channel.emitted[-1]["payload"]["decision"] == "awaiting_confirmation"
+
+
+def test_result_text_unwraps_content_blocks():
+    content = [{"type": "text", "text": "first"}, {"type": "text", "text": "second"}]
+    assert _result_text(content) == "first\n\nsecond"
+
+
+def test_result_text_passes_plain_strings_through():
+    assert _result_text("already text") == "already text"
+    assert _result_text(None) == ""
+
+
+def test_result_text_truncates_to_the_event_size_cap():
+    assert len(_result_text([{"type": "text", "text": "x" * 5000}])) == 4000

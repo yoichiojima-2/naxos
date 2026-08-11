@@ -41,6 +41,19 @@ class BudgetReached(Exception):
     pass
 
 
+def _result_text(content: Any) -> str:
+    """Tool result content as the agent saw it, not as Python repr."""
+    if isinstance(content, list):
+        parts = [
+            block["text"]
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+            else str(block)
+            for block in content
+        ]
+        return "\n\n".join(parts)[:4000]
+    return ("" if content is None else str(content))[:4000]
+
+
 class Harness:
     """Runs one wake-to-idle burst of a session.
 
@@ -244,7 +257,7 @@ class Harness:
                             {
                                 "tool_use_id": block.tool_use_id,
                                 "is_error": bool(block.is_error),
-                                "content": str(block.content)[:4000],
+                                "content": _result_text(block.content),
                             },
                         )
             elif isinstance(message, ResultMessage):
