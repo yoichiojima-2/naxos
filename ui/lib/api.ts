@@ -71,6 +71,7 @@ export const EVENT_TYPES = [
   "agent.artifact",
   "session.status_running",
   "session.status_idle",
+  "session.status_rescheduling",
   "session.status_terminated",
   "session.error",
   "span.model_request_start",

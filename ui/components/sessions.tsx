@@ -295,6 +295,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
       setEvents((prev) => (prev.some((e) => e.seq === event.seq) ? prev : [...prev, event]));
       if (event.type === "session.status_running") setStatus("running");
       if (event.type === "session.status_idle") setStatus("idle");
+      if (event.type === "session.status_rescheduling") setStatus("rescheduling");
       if (event.type === "session.status_terminated") setStatus("terminated");
     };
     // Named SSE events require a listener per type; a catch-all keeps this simple.
@@ -374,7 +375,9 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
           />
         ))}
         {status === "rescheduling" && (
-          <div className="event system"><span className="muted">session is waking up…</span></div>
+          <div className="event system">
+            <span className="muted"><span className="spinner" />session is waking up…</span>
+          </div>
         )}
       </div>
       <div className="composer">
