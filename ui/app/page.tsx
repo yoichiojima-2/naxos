@@ -3,15 +3,32 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, Agent, Environment } from "@/lib/api";
 import Agents from "@/components/agents";
+import AgentDetail from "@/components/agent-detail";
 import Sessions from "@/components/sessions";
 import Deployments from "@/components/deployments";
 import Vaults from "@/components/vaults";
 import MemoryStores from "@/components/memory";
+import {
+  AgentsIcon,
+  DeploymentsIcon,
+  MemoryIcon,
+  SessionsIcon,
+  VaultsIcon,
+} from "@/components/icons";
 
-const TABS = ["sessions", "agents", "deployments", "vaults", "memory"] as const;
-type Tab = (typeof TABS)[number];
+const PAGES = ["sessions", "agents", "deployments", "vaults", "memory"] as const;
+type Page = (typeof PAGES)[number];
+type Route = { page: Page; id?: string };
 
-const TAB_INFO: Record<Tab, string> = {
+const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
+  { page: "sessions", label: "Sessions", icon: SessionsIcon },
+  { page: "agents", label: "Agents", icon: AgentsIcon },
+  { page: "deployments", label: "Deployments", icon: DeploymentsIcon },
+  { page: "vaults", label: "Vaults", icon: VaultsIcon },
+  { page: "memory", label: "Memory", icon: MemoryIcon },
+];
+
+const PAGE_INFO: Record<Page, string> = {
   sessions:
     "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
   agents:
@@ -24,8 +41,16 @@ const TAB_INFO: Record<Tab, string> = {
     "What agents remember across sessions. Browse each memory store's files, open one to read or edit it.",
 };
 
+function parseHash(hash: string): Route {
+  const [page, id] = hash.replace(/^#/, "").split("/");
+  if ((PAGES as readonly string[]).includes(page)) {
+    return { page: page as Page, id: id || undefined };
+  }
+  return { page: "sessions" };
+}
+
 export default function Page() {
-  const [tab, setTab] = useState<Tab>("sessions");
+  const [route, setRoute] = useState<Route>({ page: "sessions" });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -43,10 +68,7 @@ export default function Page() {
   useEffect(() => { refresh(); }, [refresh]);
 
   useEffect(() => {
-    const fromHash = () => {
-      const h = window.location.hash.slice(1) as Tab;
-      if ((TABS as readonly string[]).includes(h)) setTab(h);
-    };
+    const fromHash = () => setRoute(parseHash(window.location.hash));
     fromHash();
     window.addEventListener("hashchange", fromHash);
     return () => window.removeEventListener("hashchange", fromHash);
@@ -68,11 +90,6 @@ export default function Page() {
     setTheme(document.documentElement.dataset.theme ?? null);
   }, []);
 
-  function switchTab(t: Tab) {
-    setTab(t);
-    window.location.hash = t;
-  }
-
   function toggleTheme() {
     const effective =
       theme ??
@@ -83,37 +100,61 @@ export default function Page() {
     setTheme(next);
   }
 
+  const current = NAV.find((n) => n.page === route.page) ?? NAV[0];
+  const agentDetail = route.page === "agents" && route.id;
+
   return (
-    <main>
-      <header className="top">
-        <h1><span>naxos</span> managed agents</h1>
-        <div className="row">
-          <nav className="tabs">
-            {TABS.map((t) => (
-              <button key={t} className={t === tab ? "active" : ""} onClick={() => switchTab(t)}>
-                {t}
-              </button>
-            ))}
-          </nav>
-          <button className="ghost theme" onClick={toggleTheme} aria-label="toggle dark mode">
+    <div className="shell">
+      <aside className="sidebar">
+        <a className="brand" href="#sessions"><span>naxos</span></a>
+        <nav>
+          {NAV.map(({ page, label, icon: Icon }) => (
+            <a
+              key={page}
+              href={`#${page}`}
+              className={page === route.page ? "active" : ""}
+            >
+              <Icon />
+              {label}
+            </a>
+          ))}
+        </nav>
+      </aside>
+      <div className="frame">
+        <header className="topbar">
+          <span className="topbar-title">{current.label}</span>
+          <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
             ☾
           </button>
-        </div>
-      </header>
-      <div className="tab-info">
-        <span>{tab}</span>
-        {TAB_INFO[tab]}
+        </header>
+        <main className="content">
+          {!agentDetail && (
+            <div className="page-head">
+              <h2>{current.label}</h2>
+              <p>{PAGE_INFO[route.page]}</p>
+            </div>
+          )}
+          {route.page === "sessions" && <Sessions agents={agents} />}
+          {route.page === "agents" && !route.id && (
+            <Agents agents={agents} environments={environments} onChange={refresh} />
+          )}
+          {agentDetail && (
+            <AgentDetail
+              agentId={route.id!}
+              environments={environments}
+              onChange={refresh}
+            />
+          )}
+          {route.page === "deployments" && <Deployments agents={agents} />}
+          {route.page === "vaults" && <Vaults />}
+          {route.page === "memory" && <MemoryStores />}
+        </main>
+        {toast && (
+          <div className="toast" role="alert" onClick={() => setToast(null)}>
+            {toast}
+          </div>
+        )}
       </div>
-      {tab === "sessions" && <Sessions agents={agents} />}
-      {tab === "agents" && <Agents agents={agents} environments={environments} onChange={refresh} />}
-      {tab === "deployments" && <Deployments agents={agents} />}
-      {tab === "vaults" && <Vaults />}
-      {tab === "memory" && <MemoryStores />}
-      {toast && (
-        <div className="toast" role="alert" onClick={() => setToast(null)}>
-          {toast}
-        </div>
-      )}
-    </main>
+    </div>
   );
 }
