@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 from pathlib import Path
@@ -17,7 +16,7 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import config, db, sessions, store, wake
+from . import config, db, notify, sessions, store, wake
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
@@ -385,11 +384,10 @@ async def get_events(
 
 
 async def _sse(session_id: str, after: int):
-    """Replay from `after`, then tail. Frame ids are the per-session seq."""
+    """Replay from `after`, then tail on LISTEN/NOTIFY. Frame ids are the seq."""
     cursor = after
-    since_ping = 0.0
     while True:
-        async with db.transaction() as conn:
+        async with db.pool().acquire() as conn:
             rows = await store.list_events(conn, session_id, cursor, 200)
         for row in rows:
             cursor = row["seq"]
@@ -407,12 +405,8 @@ async def _sse(session_id: str, after: int):
             if row["type"] == str(EventType.SESSION_STATUS_TERMINATED):
                 return
         if rows:
-            since_ping = 0.0
             continue
-        await asyncio.sleep(config.SSE_POLL_SECONDS)
-        since_ping += config.SSE_POLL_SECONDS
-        if since_ping >= config.SSE_PING_SECONDS:
-            since_ping = 0.0
+        if not await notify.wait(session_id, config.SSE_PING_SECONDS):
             yield ": ping\n\n"
 
 

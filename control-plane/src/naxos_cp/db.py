@@ -46,10 +46,13 @@ async def transaction() -> AsyncIterator[asyncpg.Connection]:
 
 @asynccontextmanager
 async def lifespan(app) -> AsyncIterator[None]:
+    from . import notify
+
     p = await connect()
     async with p.acquire() as conn:
         await migrate(conn)
     yield
+    await notify.close()
     await disconnect()
 
 

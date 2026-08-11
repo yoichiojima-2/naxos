@@ -6,7 +6,7 @@ import asyncpg
 from naxos_shared.events import EventType, SessionStatus, StopReason
 from naxos_shared.ids import new_id
 
-from . import config
+from . import config, notify
 from .db import rowcount
 
 
@@ -34,7 +34,7 @@ async def append_event(
     )
     if seq is None:
         raise LookupError(session_id)
-    return await conn.fetchrow(
+    record = await conn.fetchrow(
         "INSERT INTO session_events (session_id, seq, type, payload, principal, processed_at) "
         "VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN now() ELSE NULL END) RETURNING *",
         session_id,
@@ -44,6 +44,8 @@ async def append_event(
         principal,
         processed,
     )
+    await conn.execute("SELECT pg_notify($1, $2)", notify.CHANNEL, session_id)
+    return record
 
 
 async def list_events(
