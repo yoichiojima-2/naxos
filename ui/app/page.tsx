@@ -111,14 +111,15 @@ export default function Page() {
   }, [toast]);
 
   useEffect(() => {
-    setTheme(document.documentElement.dataset.theme ?? null);
+    setTheme(
+      document.documentElement.dataset.theme ??
+        (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+    );
   }, []);
 
   function toggleTheme() {
-    const effective =
-      theme ??
-      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = effective === "dark" ? "light" : "dark";
+    if (!theme) return;
+    const next = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     localStorage.setItem("theme", next);
     setTheme(next);
@@ -146,7 +147,7 @@ export default function Page() {
         </a>
         <div className="appbar-spacer" />
         <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
-          {(theme ?? "system") === "dark" ? "☀" : "☾"}
+          {theme === "dark" ? "☀" : "☾"}
         </button>
       </header>
       <div className="body">

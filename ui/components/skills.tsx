@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, listFor, Skill, SkillFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
+import FileList from "@/components/file-list";
 
 const SKILL_MD_TEMPLATE = (name: string) =>
   `---\nname: ${name}\ndescription: When and how to use this skill.\n---\n\nInstructions the agent loads when it uses this skill.\n`;
@@ -180,35 +181,29 @@ export default function Skills() {
           </div>
           {skill.description && <p className="muted">{skill.description}</p>}
           {(files[skill.id] ?? []).length > 0 && (
-            <details className="filelist" open={(files[skill.id] ?? []).length <= 5}>
-              <summary>
-                {(files[skill.id] ?? []).length}{" "}
-                {(files[skill.id] ?? []).length === 1 ? "file" : "files"}
-              </summary>
-              <div className="table-wrap">
-                <table>
-                  <tbody>
-                    {[...(files[skill.id] ?? [])].sort(byPath).map((file) => (
-                      <tr key={file.id} className="click" onClick={() => openFile(skill.id, file)}>
-                        <td className="mono">{file.path}</td>
-                        <td className="muted ta-right">{file.size} B</td>
-                        <td className="ta-right" style={{ width: 1 }}>
-                          <button
-                            className="danger"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteFile(skill.id, file);
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
+            <FileList count={(files[skill.id] ?? []).length}>
+              <table>
+                <tbody>
+                  {[...(files[skill.id] ?? [])].sort(byPath).map((file) => (
+                    <tr key={file.id} className="click" onClick={() => openFile(skill.id, file)}>
+                      <td className="mono">{file.path}</td>
+                      <td className="muted ta-right">{file.size} B</td>
+                      <td className="ta-right" style={{ width: 1 }}>
+                        <button
+                          className="danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteFile(skill.id, file);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </FileList>
           )}
         </div>
       ))}

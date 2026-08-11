@@ -137,7 +137,13 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
   }
 
   if (sessionId) {
-    return <Timeline sessionId={sessionId} known={sessions?.find((s) => s.id === sessionId)} />;
+    return (
+      <Timeline
+        key={sessionId}
+        sessionId={sessionId}
+        known={sessions?.find((s) => s.id === sessionId)}
+      />
+    );
   }
 
   return (
@@ -267,6 +273,7 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
 
 function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) {
   const [session, setSession] = useState<Session | null>(known ?? null);
+  const [missing, setMissing] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
@@ -274,15 +281,18 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
   const [connected, setConnected] = useState(true);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const source = useRef<EventSource | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const followed = useRef(false);
 
   useEffect(() => {
     if (known) return;
-    api<Session>(`/v1/sessions/${sessionId}`).then((s) => {
-      setSession(s);
-      setStatus(s.status);
-    });
+    api<Session>(`/v1/sessions/${sessionId}`)
+      .then((s) => {
+        setSession(s);
+        setStatus(s.status);
+      })
+      .catch(() => setMissing(true));
   }, [sessionId, known]);
 
   useEffect(() => {
@@ -319,7 +329,9 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
     // Named SSE events require a listener per type; a catch-all keeps this simple.
     EVENT_TYPES.forEach((type) => es.addEventListener(type, push));
     es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
+    // A CLOSED source never retries (e.g. the session does not exist), so
+    // "reconnecting…" would be a lie; the missing-session state covers it.
+    es.onerror = () => setConnected(es.readyState === EventSource.CLOSED);
     return () => es.close();
   }, [sessionId]);
 
@@ -331,6 +343,7 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
         json: { events: [{ type: "user.message", content: [{ type: "text", text: message }] }] },
       });
       setMessage("");
+      if (composerRef.current) composerRef.current.style.height = "auto";
     } finally {
       setSending(false);
     }
@@ -355,6 +368,23 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
   );
 
   const live = status === "running" || status === "rescheduling";
+
+  if (missing) {
+    return (
+      <div className="panel">
+        <div className="row mb12">
+          <a className="back" href="#sessions" aria-label="back to sessions">
+            <BackIcon />
+          </a>
+          <strong className="mono">{shortId(sessionId)}</strong>
+        </div>
+        <p className="muted">
+          this session could not be loaded — it may have been deleted.{" "}
+          <a href="#sessions">Back to sessions</a>
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="panel">
@@ -420,6 +450,7 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
       </div>
       <div className="composer">
         <textarea
+          ref={composerRef}
           rows={1}
           value={message}
           placeholder="Message the agent…"

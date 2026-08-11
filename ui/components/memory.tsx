@@ -5,6 +5,7 @@ import { api, apiConfirm, listFor, Memory, MemoryStore } from "@/lib/api";
 import { fullTime, relativeTime } from "@/lib/format";
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
+import FileList from "@/components/file-list";
 
 type Editing = {
   storeId: string;
@@ -247,16 +248,11 @@ export default function MemoryStores() {
           {(memories[store.id] ?? []).length === 0 ? (
             <p className="muted mt8">no files in this store yet.</p>
           ) : (
-            <details className="filelist" open={(memories[store.id] ?? []).length <= 5}>
-              <summary>
-                {(memories[store.id] ?? []).length}{" "}
-                {(memories[store.id] ?? []).length === 1 ? "file" : "files"}
-              </summary>
-              <div className="table-wrap">
-                <table>
-                  <tbody>
-                    {(memories[store.id] ?? []).map((memory) => (
-                      <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
+            <FileList count={(memories[store.id] ?? []).length}>
+              <table>
+                <tbody>
+                  {(memories[store.id] ?? []).map((memory) => (
+                    <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
                         <td className="mono">{memory.path}</td>
                         <td className="muted" title={memory.updated_at ? fullTime(memory.updated_at) : undefined}>
                           {memory.updated_at && relativeTime(memory.updated_at)}
@@ -275,11 +271,10 @@ export default function MemoryStores() {
                           </button>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
+                  ))}
+                </tbody>
+              </table>
+            </FileList>
           )}
         </div>
       ))}

@@ -7,17 +7,17 @@ const UNITS: [number, Intl.RelativeTimeFormatUnit][] = [
   [12, "month"],
 ];
 
-const rtf = () => new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" });
+const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "narrow" });
 
 export function relativeTime(iso: string): string {
   let delta = (new Date(iso).getTime() - Date.now()) / 1000;
   if (!Number.isFinite(delta)) return iso;
   if (Math.abs(delta) < 45) return "just now";
   for (const [step, unit] of UNITS) {
-    if (Math.abs(delta) < step) return rtf().format(Math.round(delta), unit);
+    if (Math.abs(delta) < step) return rtf.format(Math.round(delta), unit);
     delta /= step;
   }
-  return rtf().format(Math.round(delta), "year");
+  return rtf.format(Math.round(delta), "year");
 }
 
 export function fullTime(iso: string): string {
