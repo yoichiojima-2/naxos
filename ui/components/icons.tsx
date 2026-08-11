@@ -48,6 +48,13 @@ export const MemoryIcon = () => (
   </svg>
 );
 
+export const ArtifactsIcon = () => (
+  <svg {...base}>
+    <path d="M12 3 4.5 7v10l7.5 4 7.5-4V7z" />
+    <path d="M4.5 7 12 11l7.5-4M12 11v10" />
+  </svg>
+);
+
 export const SkillsIcon = () => (
   <svg {...base}>
     <path d="M12 3.5 14.3 9l5.7.6-4.3 3.8 1.3 5.6-5-3-5 3 1.3-5.6L4 9.6 9.7 9z" />

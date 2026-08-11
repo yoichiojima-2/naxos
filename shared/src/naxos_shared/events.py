@@ -1,4 +1,5 @@
 from enum import StrEnum
+from fnmatch import fnmatchcase
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -27,6 +28,7 @@ class EventType(StrEnum):
     AGENT_THINKING = "agent.thinking"
     AGENT_TOOL_USE = "agent.tool_use"
     AGENT_TOOL_RESULT = "agent.tool_result"
+    AGENT_ARTIFACT = "agent.artifact"
     SESSION_STATUS_RUNNING = "session.status_running"
     SESSION_STATUS_IDLE = "session.status_idle"
     SESSION_STATUS_TERMINATED = "session.status_terminated"
@@ -89,7 +91,7 @@ class PermissionPolicy(BaseModel):
 
     def mode_for(self, tool_name: str) -> PermissionMode:
         for rule in self.rules:
-            if rule.tool == tool_name or rule.tool == "*":
+            if rule.tool == tool_name or fnmatchcase(tool_name, rule.tool):
                 return rule.mode
         return self.default
 

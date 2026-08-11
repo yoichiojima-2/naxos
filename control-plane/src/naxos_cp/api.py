@@ -23,7 +23,7 @@ router = APIRouter(prefix="/v1")
 
 
 def create_app(manage_pool: bool = True) -> FastAPI:
-    from . import deployments, memory, skills, vaults, workspace
+    from . import artifacts, deployments, memory, skills, vaults, workspace
 
     app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
@@ -32,6 +32,7 @@ def create_app(manage_pool: bool = True) -> FastAPI:
     app.include_router(memory.router)
     app.include_router(skills.router)
     app.include_router(workspace.router)
+    app.include_router(artifacts.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))

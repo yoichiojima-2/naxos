@@ -1,0 +1,223 @@
+"""Artifact tools exposed to the agent as an in-process MCP server.
+
+Content is uploaded straight to the environment's session bucket (the env SA
+owns it); only metadata goes through the control plane, which records the
+artifact row, emits the agent.artifact event, and mints share tokens. Every
+tool call passes the PreToolUse permission gate like any other tool, so
+artifact operations are audited and subject to policy and the kill switch.
+"""
+
+import asyncio
+import json
+import logging
+import mimetypes
+import re
+from pathlib import Path
+from typing import Any
+
+import httpx
+from claude_agent_sdk import create_sdk_mcp_server, tool
+from naxos_shared.events import SessionConfig
+
+from .config import MAX_ARTIFACT_BYTES
+from .control import ControlChannel
+
+log = logging.getLogger(__name__)
+
+# Mirrors the control plane's ArtifactIn name rules; checked before the blob
+# upload so a rejected registration cannot leave orphaned or overwritten content.
+NAME_RE = re.compile(r"^[a-zA-Z0-9._/ -]{1,200}$")
+
+
+def _valid_name(name: str) -> bool:
+    return bool(NAME_RE.match(name)) and ".." not in name.split("/") and not name.startswith("/")
+
+
+def _text(message: str) -> dict[str, Any]:
+    return {"content": [{"type": "text", "text": message}]}
+
+
+def _error(message: str) -> dict[str, Any]:
+    return {"content": [{"type": "text", "text": message}], "is_error": True}
+
+
+async def _upload_blob(bucket: str, path: str, source: Path, content_type: str) -> None:
+    from .workspace import _storage_client
+
+    def _upload() -> None:
+        _storage_client().bucket(bucket).blob(path).upload_from_filename(
+            source, content_type=content_type
+        )
+
+    await asyncio.to_thread(_upload)
+
+
+async def _delete_blob(bucket: str, path: str) -> None:
+    from .workspace import _storage_client
+
+    def _delete() -> None:
+        blob = _storage_client().bucket(bucket).blob(path)
+        if blob.exists():
+            blob.delete()
+
+    await asyncio.to_thread(_delete)
+
+
+class ArtifactTools:
+    def __init__(self, channel: ControlChannel, config: SessionConfig, ws: Path) -> None:
+        self.channel = channel
+        self.config = config
+        self.ws = ws
+
+    def _blob_path(self, name: str) -> str:
+        return f"sessions/{self.channel.session_id}/artifacts/{name}"
+
+    def _resolve(self, path: str) -> Path:
+        target = (self.ws / path).resolve()
+        if not target.is_relative_to(self.ws.resolve()):
+            raise ValueError("path must stay inside the workspace")
+        if not target.is_file():
+            raise ValueError(f"no file at {path}")
+        return target
+
+    async def create(self, args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            source = self._resolve(args["path"])
+        except ValueError as exc:
+            return _error(str(exc))
+        name = (args.get("name") or "").strip() or source.name
+        if not _valid_name(name):
+            return _error("artifact names may only contain letters, digits, '. _ / -' and spaces")
+        size = source.stat().st_size
+        if size > MAX_ARTIFACT_BYTES:
+            return _error(f"artifact is {size} bytes; the limit is {MAX_ARTIFACT_BYTES}")
+        content_type = (
+            mimetypes.guess_type(name)[0]
+            or mimetypes.guess_type(source.name)[0]
+            or "application/octet-stream"
+        )
+        await _upload_blob(self.config.session_bucket, self._blob_path(name), source, content_type)
+        record = await self.channel.register_artifact(
+            name=name,
+            content_type=content_type,
+            size_bytes=size,
+            description=args.get("description") or None,
+        )
+        return _text(
+            f"Published artifact '{name}' (id {record['id']}, version {record['version']}, "
+            f"{size} bytes). It is visible in the platform UI; use artifact_share for a "
+            "stable link."
+        )
+
+    async def list(self, args: dict[str, Any]) -> dict[str, Any]:
+        rows = (await self.channel.list_artifacts()).get("data", [])
+        summary = [
+            {
+                "name": r["name"],
+                "description": r.get("description"),
+                "version": r["version"],
+                "size_bytes": r["size_bytes"],
+                "share_url": r.get("share_url"),
+            }
+            for r in rows
+        ]
+        return _text(json.dumps(summary, indent=2))
+
+    async def delete(self, args: dict[str, Any]) -> dict[str, Any]:
+        name = args["name"]
+        await self.channel.delete_artifact(name)
+        try:
+            await _delete_blob(self.config.session_bucket, self._blob_path(name))
+        except Exception:
+            log.exception("artifact blob delete failed for %s", name)
+        return _text(f"Deleted artifact '{name}'.")
+
+    async def share(self, args: dict[str, Any]) -> dict[str, Any]:
+        record = await self.channel.share_artifact(args["name"], shared=True)
+        return _text(
+            f"Artifact '{record['name']}' is shared at {record['share_url']} "
+            "(reachable by anyone in the organization; access still goes through IAP)."
+        )
+
+    async def unshare(self, args: dict[str, Any]) -> dict[str, Any]:
+        record = await self.channel.share_artifact(args["name"], shared=False)
+        return _text(f"Artifact '{record['name']}' is no longer shared; its link is revoked.")
+
+
+def _guarded(handler):
+    async def wrapped(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return await handler(args)
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:500]
+            return _error(
+                f"control plane rejected the request ({exc.response.status_code}): {detail}"
+            )
+        except Exception as exc:
+            log.exception("artifact tool failed")
+            return _error(f"artifact operation failed: {exc}")
+
+    return wrapped
+
+
+def build_server(channel: ControlChannel, config: SessionConfig, ws: Path):
+    tools_ = ArtifactTools(channel, config, ws)
+
+    create = tool(
+        "artifact_create",
+        "Publish a file from your workspace as a named artifact — a durable output "
+        "that outlives this session and is visible to users in the platform. "
+        "Publishing an existing name replaces its content and bumps its version.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "workspace-relative path of the file"},
+                "name": {
+                    "type": "string",
+                    "description": "artifact name; defaults to the filename",
+                },
+                "description": {"type": "string", "description": "what this artifact is"},
+            },
+            "required": ["path"],
+        },
+    )(_guarded(tools_.create))
+
+    list_ = tool(
+        "artifact_list",
+        "List the artifacts this session has published, with versions and share links.",
+        {"type": "object", "properties": {}},
+    )(_guarded(tools_.list))
+
+    delete = tool(
+        "artifact_delete",
+        "Delete an artifact this session published, including its content and share link.",
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    )(_guarded(tools_.delete))
+
+    share = tool(
+        "artifact_share",
+        "Share an artifact: mints a stable org-internal link you can give to users.",
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    )(_guarded(tools_.share))
+
+    unshare = tool(
+        "artifact_unshare",
+        "Revoke an artifact's share link.",
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    )(_guarded(tools_.unshare))
+
+    return create_sdk_mcp_server(
+        name="artifacts", version="1.0.0", tools=[create, list_, delete, share, unshare]
+    )

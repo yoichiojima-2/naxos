@@ -1,20 +1,13 @@
 import asyncio
-import functools
 import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from google.cloud import storage
 
-from . import db
+from . import db, gcs
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
-
-
-@functools.cache
-def _storage() -> storage.Client:
-    return storage.Client()
 
 
 async def _session_bucket(session_id: str) -> str:
@@ -35,7 +28,7 @@ async def list_workspace(session_id: str, _: str = Depends(principal_of)) -> dic
     prefix = f"sessions/{session_id}/ws/"
 
     def _list() -> list[dict]:
-        blobs = _storage().bucket(bucket_name).list_blobs(prefix=prefix)
+        blobs = gcs.client().bucket(bucket_name).list_blobs(prefix=prefix)
         return [
             {"path": blob.name[len(prefix) :], "size": blob.size}
             for blob in blobs
@@ -52,15 +45,7 @@ async def get_workspace_file(
     if ".." in path.split("/"):
         raise HTTPException(400, "path may not contain ..")
     bucket_name = await _session_bucket(session_id)
-    blob_name = f"sessions/{session_id}/ws/{path}"
-
-    def _download() -> bytes | None:
-        blob = _storage().bucket(bucket_name).blob(blob_name)
-        if not blob.exists():
-            return None
-        return blob.download_as_bytes()
-
-    content = await asyncio.to_thread(_download)
+    content = await gcs.download(bucket_name, f"sessions/{session_id}/ws/{path}")
     if content is None:
         raise HTTPException(404, "artifact not found")
     media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
