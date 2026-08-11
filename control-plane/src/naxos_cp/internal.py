@@ -50,7 +50,7 @@ async def _authorize(conn, session_id: str, caller: str) -> Any:
 
 async def _agent_version(conn, row: Any) -> Any:
     return await conn.fetchrow(
-        "SELECT instructions, model, tools, permission_policy, mcp_servers, max_turns "
+        "SELECT instructions, model, tools, permission_policy, mcp_servers, max_turns, effort "
         "FROM agent_versions WHERE agent_id = $1 AND version = $2",
         row["agent_id"],
         row["agent_version"],
@@ -143,6 +143,7 @@ async def session_config(session_id: str, caller: str = Depends(caller_service_a
         budget_usd=float(row["budget_usd"]) if row["budget_usd"] is not None else None,
         cost_usd=float(row["cost_usd"]),
         max_turns=version["max_turns"],
+        effort=version["effort"],
         disabled=row["disabled"],
     ).model_dump(mode="json")
 

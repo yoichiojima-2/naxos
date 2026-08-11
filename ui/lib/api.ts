@@ -92,6 +92,8 @@ export type Agent = {
 export const agentName = (agents: Agent[], id: string) =>
   agents.find((a) => a.id === id)?.name ?? id;
 
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
 export type PermissionMode = "always_ask" | "always_allow";
 export type PermissionRule = { tool: string; mode: PermissionMode };
 export type PermissionPolicy = { default: PermissionMode; rules: PermissionRule[] };
@@ -108,6 +110,7 @@ export type AgentDetail = Agent & {
   skill_ids: string[];
   default_budget_usd: string | number | null;
   max_turns: number | null;
+  effort: EffortLevel | null;
   created_by?: string;
   created_at?: string;
 };
@@ -125,6 +128,7 @@ export type AgentIn = {
   skill_ids: string[];
   default_budget_usd: number | null;
   max_turns: number | null;
+  effort: EffortLevel | null;
 };
 
 export type Session = {

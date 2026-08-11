@@ -181,6 +181,7 @@ class Harness:
             allowed_tools=self.config.tools,
             disallowed_tools=SESSION_LOCAL_SCHEDULER_TOOLS,
             max_turns=self.config.max_turns,
+            effort=self.config.effort,
             resume=self.sdk_session_id,
             setting_sources=[],
             hooks={"PreToolUse": [HookMatcher(hooks=[self._pre_tool_use])]},

@@ -5,6 +5,7 @@ import {
   api,
   AgentDetail,
   AgentIn,
+  EffortLevel,
   Environment,
   MemoryStore,
   PermissionMode,
@@ -18,6 +19,14 @@ export const MODELS = [
   { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
   { id: "claude-fable-5", label: "Claude Fable 5" },
   { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+];
+
+export const EFFORT_LEVELS: { id: EffortLevel; label: string }[] = [
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "Extra high" },
+  { id: "max", label: "Max" },
 ];
 
 const BUILTIN_TOOLS = [
@@ -59,6 +68,7 @@ export default function AgentForm({
   const [maxTurns, setMaxTurns] = useState(
     initial?.max_turns != null ? String(initial.max_turns) : "",
   );
+  const [effort, setEffort] = useState<EffortLevel | "">(initial?.effort ?? "");
   const [mcpJson, setMcpJson] = useState(
     JSON.stringify(initial?.mcp_servers ?? {}, null, 2),
   );
@@ -120,6 +130,7 @@ export default function AgentForm({
         skill_ids: skillIds,
         default_budget_usd: budget === "" ? null : Number(budget),
         max_turns: maxTurns === "" ? null : Number(maxTurns),
+        effort: effort === "" ? null : effort,
       });
     } finally {
       setBusy(false);
@@ -146,6 +157,23 @@ export default function AgentForm({
           </select>
         </div>
       </div>
+
+      <label>Effort</label>
+      <select
+        value={effort}
+        style={{ maxWidth: 260 }}
+        onChange={(e) => setEffort(e.target.value as EffortLevel | "")}
+      >
+        <option value="">Model default</option>
+        {EFFORT_LEVELS.map((l) => (
+          <option key={l.id} value={l.id}>{l.label}</option>
+        ))}
+      </select>
+      <p className="hint">
+        How much reasoning the model spends per response. Lower is faster and
+        cheaper; higher is more thorough. Only some models accept an effort
+        setting — leave it on model default if unsure.
+      </p>
 
       {(editing || environments.length > 1) && (
         <>

@@ -35,6 +35,19 @@ async def test_agent_versions_are_immutable_and_incrementing(client):
     assert v1["instructions"] == "You watch logs."
 
 
+async def test_agent_effort_round_trips_and_rejects_unknown_levels(client):
+    _, agent = await make_agent(client, effort="low")
+    assert agent["effort"] == "low"
+
+    fetched = (await client.get(f"/v1/agents/{agent['id']}")).json()
+    assert fetched["effort"] == "low"
+
+    bad = await client.post(
+        "/v1/agents", json={"environment_id": agent["environment_id"], **AGENT, "effort": "turbo"}
+    )
+    assert bad.status_code == 422
+
+
 async def test_agent_requires_registered_environment(client):
     response = await client.post("/v1/agents", json={"environment_id": "env_missing", **AGENT})
     assert response.status_code == 409

@@ -91,7 +91,7 @@ async def test_warm_session_gets_no_rescheduling_event(client, internal_client, 
 
 
 async def test_config_carries_resolved_agent_version(client, internal_client, launched):
-    agent, session = await start_session(client, launched)
+    agent, session = await start_session(client, launched, effort="high")
     await internal_client.post(f"/internal/sessions/{session['id']}/claim")
 
     config = (await internal_client.get(f"/internal/sessions/{session['id']}/config")).json()
@@ -99,6 +99,7 @@ async def test_config_carries_resolved_agent_version(client, internal_client, la
     assert config["agent_version"] == 1
     assert config["model"] == "claude-sonnet-5"
     assert config["session_bucket"] == "naxos2-sess-default"
+    assert config["effort"] == "high"
 
 
 async def test_always_ask_pauses_then_resumes_after_confirmation(client, internal_client, launched):
