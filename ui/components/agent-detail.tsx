@@ -195,7 +195,8 @@ export default function AgentDetail({
             </dl>
           </div>
 
-          {(detail.vault_ids.length > 0 || detail.memory_store_ids.length > 0 || mcpNames.length > 0) && (
+          {(detail.vault_ids.length > 0 || detail.memory_store_ids.length > 0 ||
+            detail.skill_ids.length > 0 || mcpNames.length > 0) && (
             <div className="panel">
               <strong>Attachments</strong>
               <dl className="kv mt12">
@@ -209,6 +210,12 @@ export default function AgentDetail({
                   <>
                     <dt>Memory stores</dt>
                     <dd className="mono">{detail.memory_store_ids.join(", ")}</dd>
+                  </>
+                )}
+                {detail.skill_ids.length > 0 && (
+                  <>
+                    <dt>Skills</dt>
+                    <dd className="mono">{detail.skill_ids.join(", ")}</dd>
                   </>
                 )}
                 {mcpNames.length > 0 && (

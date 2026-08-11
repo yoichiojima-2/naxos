@@ -66,6 +66,9 @@ class ControlChannel:
     async def fetch_memory(self) -> dict[str, Any]:
         return await self._get("/memory")
 
+    async def fetch_skills(self) -> dict[str, Any]:
+        return await self._get("/skills")
+
     async def writeback_memory(self, stores: dict[str, Any]) -> None:
         await self._post("/memory", {"stores": stores})
 

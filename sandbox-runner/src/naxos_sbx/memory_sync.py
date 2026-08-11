@@ -27,6 +27,9 @@ class MemorySync:
             self.baseline[store_id] = {}
             for path, content in store["files"].items():
                 target = directory / path
+                if not target.resolve().is_relative_to(directory.resolve()):
+                    log.warning("memory file escapes its store dir, skipped: %s", path)
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content)
                 self.baseline[store_id][path] = _digest(content)

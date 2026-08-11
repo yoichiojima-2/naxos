@@ -92,6 +92,7 @@ export type AgentDetail = Agent & {
   mcp_servers: Record<string, unknown>;
   vault_ids: string[];
   memory_store_ids: string[];
+  skill_ids: string[];
   default_budget_usd: string | number | null;
   max_turns: number | null;
   created_by?: string;
@@ -108,6 +109,7 @@ export type AgentIn = {
   mcp_servers: Record<string, unknown>;
   vault_ids: string[];
   memory_store_ids: string[];
+  skill_ids: string[];
   default_budget_usd: number | null;
   max_turns: number | null;
 };
@@ -166,4 +168,6 @@ export type Credential = {
 };
 export type MemoryStore = { id: string; name: string };
 export type Memory = { id: string; path: string; size?: number; content?: string };
+export type Skill = { id: string; name: string; description: string | null; ready: boolean };
+export type SkillFile = { id: string; path: string; size?: number; content?: string };
 export type WorkspaceFile = { path: string; size: number };
