@@ -113,6 +113,13 @@ resource "google_sql_database" "naxos" {
 resource "random_password" "db" {
   length  = 32
   special = false
+
+  # An imported random_password carries the provider defaults, not these args,
+  # so without this the first plan after a state rebuild replaces it and rotates
+  # the live database password.
+  lifecycle {
+    ignore_changes = [special]
+  }
 }
 
 resource "google_sql_user" "api" {
