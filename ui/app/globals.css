@@ -286,6 +286,59 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
 }
 .event.prose pre { font-family: var(--sans); font-size: 14px; line-height: 1.6; }
 
+.event.fold { padding-top: 2px; padding-bottom: 2px; }
+.event.fold summary, .event.fold .fold-line {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--muted); font-size: 13.5px; list-style: none;
+}
+.event.fold summary { cursor: pointer; user-select: none; }
+.event.fold summary::-webkit-details-marker { display: none; }
+.event.fold summary::before, .event.fold .fold-line::before {
+  content: "\25B8"; font-size: 11px; color: var(--faint);
+  transition: transform 0.15s;
+}
+.event.fold .fold-line::before { visibility: hidden; }
+.event.fold details[open] > summary::before { transform: rotate(90deg); }
+.event.fold pre {
+  background: var(--panel2); border-radius: var(--radius-sm); padding: 10px 12px;
+  margin-top: 6px; max-height: 320px; overflow-y: auto;
+}
+
+.event .md { margin-top: 4px; font-size: 14px; line-height: 1.6; }
+.event .md > :first-child { margin-top: 0; }
+.event .md > :last-child { margin-bottom: 0; }
+.event .md p, .event .md ul, .event .md ol, .event .md blockquote, .event .md pre,
+.event .md table { margin: 10px 0; }
+.event .md h1, .event .md h2, .event .md h3, .event .md h4, .event .md h5, .event .md h6 {
+  margin: 18px 0 8px; font-size: 1.05em; line-height: 1.35;
+}
+.event .md h1 { font-size: 1.15em; }
+.event .md h2 { font-size: 1.1em; }
+.event .md ul, .event .md ol { padding-left: 26px; }
+.event .md li { margin: 3px 0; }
+.event .md li > ul, .event .md li > ol { margin: 3px 0; }
+.event .md blockquote {
+  border-left: 3px solid var(--border); padding-left: 14px; color: var(--muted);
+}
+.event .md code {
+  font-family: var(--mono); font-size: 0.85em;
+  background: var(--panel2); border-radius: 5px; padding: 1.5px 5px;
+}
+.event .md pre {
+  background: var(--panel2); border-radius: var(--radius-sm); padding: 12px 14px;
+  overflow-x: auto; white-space: pre; word-break: normal;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+}
+.event .md pre code { background: none; border-radius: 0; padding: 0; font-size: inherit; }
+.event .md a { color: var(--accent); text-decoration: underline; }
+.event .md hr { border: none; border-top: 1px solid var(--panel2); margin: 14px 0; }
+.event .md table { display: block; width: fit-content; max-width: 100%; overflow-x: auto; }
+.event .md th, .event .md td {
+  border: 1px solid var(--panel2); padding: 6px 10px; font-size: 13px;
+}
+.event .md tr:last-child td { border-bottom: 1px solid var(--panel2); }
+.event .md th { color: var(--muted); text-transform: none; letter-spacing: normal; }
+
 .composer { display: flex; gap: 10px; margin-top: 16px; }
 .composer input { flex: 1; }
 

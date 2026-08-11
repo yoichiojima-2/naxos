@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown, { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { agentName, api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
+
+const MD_COMPONENTS: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+};
 
 const BADGE: Record<string, string> = {
   idle: "idle",
@@ -267,17 +273,56 @@ function Event({
     );
   }
 
+  if (
+    event.type === "agent.thinking" ||
+    event.type === "agent.tool_use" ||
+    event.type === "agent.tool_result"
+  ) {
+    let label = "thinking";
+    let name = "";
+    let detail = "";
+    let flag = "";
+    if (event.type === "agent.tool_use") {
+      label = "tool";
+      name = String(payload.tool_name ?? "");
+      detail = JSON.stringify(payload.input ?? {}, null, 2);
+      if (payload.decision === "user_denied") flag = "denied";
+    } else if (event.type === "agent.tool_result") {
+      label = "result";
+      detail = String(payload.content ?? "");
+      if (payload.is_error) flag = "error";
+    } else {
+      detail = String(payload.text ?? "");
+    }
+    const summary = (
+      <>
+        {label}
+        {name && <span className="mono">{name}</span>}
+        {flag && <span className="badge terminated">{flag}</span>}
+      </>
+    );
+    return (
+      <div className="event agent fold">
+        {detail ? (
+          <details>
+            <summary>{summary}</summary>
+            <pre>{detail}</pre>
+          </details>
+        ) : (
+          <span className="fold-line">{summary}</span>
+        )}
+      </div>
+    );
+  }
+
   let body = "";
+  let markdown = "";
   if (event.type === "user.message") {
     body = (payload.content as { text?: string }[] | undefined)
       ?.map((b) => b.text)
       .join("\n") ?? "";
   } else if (event.type === "agent.message") {
-    body = String(payload.text ?? "");
-  } else if (event.type === "agent.tool_use") {
-    body = `${payload.tool_name} ${JSON.stringify(payload.input ?? {})}`;
-  } else if (event.type === "agent.tool_result") {
-    body = String(payload.content ?? "").slice(0, 600);
+    markdown = String(payload.text ?? "");
   } else if (event.type === "session.error") {
     body = String(payload.error ?? "");
   }
@@ -291,6 +336,13 @@ function Event({
       ].join(" ").trim()}
     >
       <span className="muted">{event.type}{event.principal ? ` · ${event.principal}` : ""}</span>
+      {markdown && (
+        <div className="md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {markdown}
+          </ReactMarkdown>
+        </div>
+      )}
       {body && <pre>{body}</pre>}
     </div>
   );
