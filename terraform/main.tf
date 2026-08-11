@@ -198,6 +198,53 @@ resource "google_bigquery_table" "tool_calls" {
   ])
 }
 
+# The audit dataset itself is never grantable to an environment service
+# account. These authorized views are the one way an agent reads the platform's
+# own history: the view holds the access, the caller needs none on the source.
+# With more than one environment, add the tenant filter here.
+
+resource "google_bigquery_dataset" "audit_shared" {
+  dataset_id = "naxos_audit_shared"
+  location   = var.region
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_bigquery_table" "shared_runs" {
+  dataset_id = google_bigquery_dataset.audit_shared.dataset_id
+  table_id   = "runs"
+  view {
+    query          = "SELECT * FROM `${var.project_id}.${google_bigquery_dataset.audit.dataset_id}.${google_bigquery_table.runs.table_id}`"
+    use_legacy_sql = false
+  }
+}
+
+resource "google_bigquery_table" "shared_tool_calls" {
+  dataset_id = google_bigquery_dataset.audit_shared.dataset_id
+  table_id   = "tool_calls"
+  view {
+    query          = "SELECT * FROM `${var.project_id}.${google_bigquery_dataset.audit.dataset_id}.${google_bigquery_table.tool_calls.table_id}`"
+    use_legacy_sql = false
+  }
+}
+
+resource "google_bigquery_dataset_access" "shared_runs" {
+  dataset_id = google_bigquery_dataset.audit.dataset_id
+  view {
+    project_id = var.project_id
+    dataset_id = google_bigquery_dataset.audit_shared.dataset_id
+    table_id   = google_bigquery_table.shared_runs.table_id
+  }
+}
+
+resource "google_bigquery_dataset_access" "shared_tool_calls" {
+  dataset_id = google_bigquery_dataset.audit.dataset_id
+  view {
+    project_id = var.project_id
+    dataset_id = google_bigquery_dataset.audit_shared.dataset_id
+    table_id   = google_bigquery_table.shared_tool_calls.table_id
+  }
+}
+
 # --- service accounts -------------------------------------------------------
 
 resource "google_service_account" "api" {

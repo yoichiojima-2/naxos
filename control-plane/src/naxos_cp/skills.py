@@ -21,6 +21,7 @@ READY = (
     f"EXISTS (SELECT 1 FROM skill_files f "
     f"  WHERE f.skill_id = s.id AND f.path = '{SKILL_ENTRY}') AS ready"
 )
+FILE_COUNT = "(SELECT count(*) FROM skill_files f WHERE f.skill_id = s.id) AS file_count"
 
 
 class SkillIn(BaseModel):
@@ -49,7 +50,8 @@ async def create_skill(body: SkillIn, principal: str = Depends(principal_of)) ->
 async def list_skills(_: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch(
-            f"SELECT s.*, {READY} FROM skills s WHERE s.archived_at IS NULL ORDER BY s.name"
+            f"SELECT s.*, {READY}, {FILE_COUNT} FROM skills s "
+            "WHERE s.archived_at IS NULL ORDER BY s.name"
         )
     return {"data": [dict(r) for r in rows]}
 
@@ -57,7 +59,9 @@ async def list_skills(_: str = Depends(principal_of)) -> dict:
 @router.get("/skills/{skill_id}")
 async def get_skill(skill_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        row = await conn.fetchrow(f"SELECT s.*, {READY} FROM skills s WHERE s.id = $1", skill_id)
+        row = await conn.fetchrow(
+            f"SELECT s.*, {READY}, {FILE_COUNT} FROM skills s WHERE s.id = $1", skill_id
+        )
     if row is None:
         raise HTTPException(404, "skill not found")
     return dict(row)

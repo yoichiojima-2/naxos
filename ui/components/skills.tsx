@@ -23,16 +23,23 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   >(null);
   const favFilter = useFavoriteFilter("skill", skills ?? [], favorites);
 
+  // One request per skill on load costs a round trip each for lists nobody has
+  // opened; load a skill's files the first time it is expanded instead.
+  const loadFiles = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
+    const loaded = await listFor<SkillFile>(ids, (id) => `/v1/skills/${id}/files`);
+    setFiles((prev) => ({ ...prev, ...loaded }));
+  }, []);
+
   const refresh = useCallback(async () => {
     const result = await api<{ data: Skill[] }>("/v1/skills");
     setSkills(result.data);
-    setFiles(
-      await listFor<SkillFile>(
-        result.data.map((s) => s.id),
-        (id) => `/v1/skills/${id}/files`,
-      ),
-    );
-  }, []);
+    setFiles((prev) => {
+      const open = Object.keys(prev);
+      loadFiles(open.filter((id) => result.data.some((s) => s.id === id)));
+      return prev;
+    });
+  }, [loadFiles]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -189,8 +196,11 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
             </div>
           </div>
           {skill.description && <p className="muted">{skill.description}</p>}
-          {(files[skill.id] ?? []).length > 0 && (
-            <FileList count={(files[skill.id] ?? []).length}>
+          {!!skill.file_count && (
+            <FileList
+              count={skill.file_count}
+              onOpen={() => { if (!files[skill.id]) loadFiles([skill.id]); }}
+            >
               <table>
                 <tbody>
                   {[...(files[skill.id] ?? [])].sort(byPath).map((file) => (

@@ -2,6 +2,7 @@
   "default": {
     "cpu": "1",
     "memory": "2Gi",
-    "connectors": ["slack", "atlassian", "notion", "gworkspace"]
+    "connectors": ["slack", "atlassian", "notion", "gworkspace"],
+    "bigquery_datasets": ["naxos_audit_shared"]
   }
 }
