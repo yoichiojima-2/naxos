@@ -45,7 +45,8 @@ def _result_text(content: Any) -> str:
     """Tool result content as the agent saw it, not as Python repr."""
     if isinstance(content, list):
         parts = [
-            block["text"] if isinstance(block, dict) and isinstance(block.get("text"), str)
+            block["text"]
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
             else str(block)
             for block in content
         ]
