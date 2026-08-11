@@ -34,23 +34,31 @@ class ControlChannel:
         token = id_token.fetch_id_token(Request(), self.base_url)
         return {"authorization": f"Bearer {token}"}
 
-    async def _post(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
-        response = await self._client.post(
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        response = await self._client.request(
+            method,
             f"{self.base_url}/internal/sessions/{self.session_id}{path}",
-            json=json or {},
-            headers=self._headers(),
-        )
-        response.raise_for_status()
-        return response.json()
-
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        response = await self._client.get(
-            f"{self.base_url}/internal/sessions/{self.session_id}{path}",
+            json=json,
             params=params,
             headers=self._headers(),
         )
         response.raise_for_status()
         return response.json()
+
+    async def _post(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._request("POST", path, json=json or {})
+
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        return await self._request("GET", path, params=params)
+
+    async def _delete(self, path: str) -> dict[str, Any]:
+        return await self._request("DELETE", path)
 
     async def claim(self) -> str:
         self.lease_id = (await self._post("/claim"))["lease_id"]
@@ -62,14 +70,6 @@ class ControlChannel:
 
     async def config(self) -> SessionConfig:
         return SessionConfig.model_validate(await self._get("/config"))
-
-    async def _delete(self, path: str) -> dict[str, Any]:
-        response = await self._client.delete(
-            f"{self.base_url}/internal/sessions/{self.session_id}{path}",
-            headers=self._headers(),
-        )
-        response.raise_for_status()
-        return response.json()
 
     async def fetch_memory(self) -> dict[str, Any]:
         return await self._get("/memory")

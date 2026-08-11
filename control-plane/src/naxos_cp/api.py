@@ -325,12 +325,15 @@ async def terminate_session(session_id: str, _: str = Depends(principal_of)) -> 
 # --- events ----------------------------------------------------------------
 
 
+class EventsIn(BaseModel):
+    events: list[EventIn] = Field(default_factory=list)
+
+
 @router.post("/sessions/{session_id}/events", status_code=202)
 async def send_events(
-    session_id: str, body: dict[str, Any], principal: str = Depends(principal_of)
+    session_id: str, body: EventsIn, principal: str = Depends(principal_of)
 ) -> dict:
-    events = [EventIn.model_validate(e) for e in body.get("events", [])]
-    if not events:
+    if not body.events:
         raise HTTPException(400, "events must not be empty")
     async with db.transaction() as conn:
         session = await conn.fetchrow(
@@ -346,7 +349,7 @@ async def send_events(
             raise HTTPException(409, "agent is disabled")
 
         created = []
-        for event in events:
+        for event in body.events:
             event.validate_for_send()
             if event.type is EventType.USER_TOOL_CONFIRMATION:
                 decided = await store.decide_confirmation(

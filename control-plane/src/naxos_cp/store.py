@@ -173,6 +173,22 @@ async def running_sandbox_count(conn: asyncpg.Connection, exclude_session_id: st
     )
 
 
+async def upsert_memory(
+    conn: asyncpg.Connection, store_id: str, path: str, content: str, updated_by: str
+) -> asyncpg.Record:
+    return await conn.fetchrow(
+        "INSERT INTO memories (id, store_id, path, content, updated_by) "
+        "VALUES ($1, $2, $3, $4, $5) "
+        "ON CONFLICT (store_id, path) DO UPDATE SET content = EXCLUDED.content, "
+        "  updated_by = EXCLUDED.updated_by, updated_at = now() RETURNING *",
+        new_id("memory"),
+        store_id,
+        path,
+        content,
+        updated_by,
+    )
+
+
 async def upsert_confirmation(
     conn: asyncpg.Connection,
     session_id: str,

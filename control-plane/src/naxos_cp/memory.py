@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from naxos_shared.ids import new_id
+from naxos_shared.paths import unsafe_relpath
 from pydantic import BaseModel, Field
 
-from . import config, db
+from . import config, db, store
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
@@ -42,24 +43,13 @@ class MemoryIn(BaseModel):
 async def put_memory(store_id: str, body: MemoryIn, principal: str = Depends(principal_of)) -> dict:
     if len(body.content.encode()) > config.MAX_MEMORY_BYTES:
         raise HTTPException(413, "memory content exceeds 64KB")
-    segments = body.path.split("/")
-    if ".." in segments or "" in segments:
+    if unsafe_relpath(body.path):
         raise HTTPException(400, "path must be relative with no empty or .. segments")
     async with db.transaction() as conn:
-        store = await conn.fetchval("SELECT 1 FROM memory_stores WHERE id = $1", store_id)
-        if not store:
+        exists = await conn.fetchval("SELECT 1 FROM memory_stores WHERE id = $1", store_id)
+        if not exists:
             raise HTTPException(404, "memory store not found")
-        row = await conn.fetchrow(
-            "INSERT INTO memories (id, store_id, path, content, updated_by) "
-            "VALUES ($1, $2, $3, $4, $5) "
-            "ON CONFLICT (store_id, path) DO UPDATE SET content = EXCLUDED.content, "
-            "  updated_by = EXCLUDED.updated_by, updated_at = now() RETURNING *",
-            new_id("memory"),
-            store_id,
-            body.path,
-            body.content,
-            principal,
-        )
+        row = await store.upsert_memory(conn, store_id, body.path, body.content, principal)
     return dict(row)
 
 
