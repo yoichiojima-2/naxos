@@ -41,6 +41,35 @@ async def test_claim_is_exclusive_and_queue_delivers_once(client, internal_clien
     assert again["events"] == []
 
 
+async def test_queue_poll_ends_with_terminate_when_session_is_deleted(
+    client, internal_client, launched, monkeypatch
+):
+    import asyncio
+
+    from naxos_cp import db, gcs
+
+    async def fake_delete_prefix(bucket, prefix):
+        pass
+
+    monkeypatch.setattr(gcs, "delete_prefix", fake_delete_prefix)
+    _, session = await start_session(client, launched)
+    sid = session["id"]
+    await internal_client.post(f"/internal/sessions/{sid}/claim")
+    await internal_client.get(f"/internal/sessions/{sid}/queue", params={"wait": 0})
+    async with db.transaction() as conn:
+        await conn.execute(
+            "UPDATE sessions SET lease_expires_at = now() - interval '1 second' WHERE id = $1",
+            sid,
+        )
+
+    poll = asyncio.create_task(
+        internal_client.get(f"/internal/sessions/{sid}/queue", params={"wait": 10})
+    )
+    await asyncio.sleep(0.1)
+    assert (await client.delete(f"/v1/sessions/{sid}")).status_code == 200
+    assert (await poll).json()["control"] == "terminate"
+
+
 async def test_config_carries_resolved_agent_version(client, internal_client, launched):
     agent, session = await start_session(client, launched)
     await internal_client.post(f"/internal/sessions/{session['id']}/claim")

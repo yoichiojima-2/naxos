@@ -162,6 +162,8 @@ async def queue(
                 "JOIN agents a ON a.id = s.agent_id WHERE s.id = $1",
                 session_id,
             )
+            if state is None:
+                return {"control": "terminate", "events": []}
             if state["disabled"]:
                 return {"control": "kill", "events": []}
             if state["status"] == str(SessionStatus.TERMINATED):

@@ -85,6 +85,15 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     await bulkApply((id) => api(`/v1/sessions/${id}/terminate`, { json: {} }));
   }
 
+  async function bulkDelete() {
+    const ok = window.confirm(
+      `Permanently delete ${selected.size} ${noun}, including events, workspace files, and ` +
+        "artifacts (shared artifact links stop working)? Sessions with a live sandbox are refused.",
+    );
+    if (!ok) return;
+    await bulkApply((id) => api(`/v1/sessions/${id}`, { method: "DELETE" }));
+  }
+
   if (open) {
     return <Timeline session={open} onBack={() => { setOpen(null); refresh(); }} />;
   }
@@ -97,6 +106,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
             <span className="muted">{selected.size} selected</span>
             <button className="ghost" onClick={bulkSetBudget}>Set budget</button>
             <button className="danger" onClick={bulkTerminate}>Terminate</button>
+            <button className="danger" onClick={bulkDelete}>Delete</button>
             <button className="ghost" onClick={() => setSelected(new Set())}>Clear</button>
           </>
         ) : (
