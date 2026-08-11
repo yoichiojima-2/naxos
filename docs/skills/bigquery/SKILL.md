@@ -11,7 +11,9 @@ The tools appear only in environments an operator opted into BigQuery. If you do
 
 ## Access model
 
-The sandbox runs as its environment's service account, which reads exactly the datasets listed under `bigquery_datasets` in `terraform/environments.json` — read-only, no writes, and never the platform's own audit dataset. `bigquery_list_datasets` names what you can reach.
+The sandbox runs as its environment's service account, which reads exactly the datasets listed under `bigquery_datasets` in `terraform/environments.json` — read-only, no writes. `bigquery_list_datasets` names what you can reach.
+
+The platform's own history is one of those datasets when an operator opted into it. `naxos_audit_shared` exposes `runs` (one row per wake-to-idle burst, with cost) and `tool_calls` (one row per tool call, with the permission decision) as ordinary readable tables. They are authorized views over `naxos_audit`, which stays unreachable — query the shared dataset, not the source.
 
 A denial means the grant is missing or too narrow. Do not retry or look for a workaround: report which dataset you need and stop.
 
