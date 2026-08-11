@@ -224,6 +224,115 @@ async def get_confirmation(
     )
 
 
+async def latch_turn_principal(
+    conn: asyncpg.Connection, session_id: str, events: list[asyncpg.Record]
+) -> None:
+    """Who caused the turn being processed: the principal of the last user event in
+    the batch. Agent-emitted events carry none, so a batch without one leaves the
+    latched value alone."""
+    principal = next((e["principal"] for e in reversed(events) if e["principal"]), None)
+    if principal is not None:
+        await conn.execute(
+            "UPDATE sessions SET turn_principal = $2 WHERE id = $1", session_id, principal
+        )
+
+
+async def set_current_run(conn: asyncpg.Connection, session_id: str, run_id: str) -> None:
+    await conn.execute("UPDATE sessions SET current_run_id = $2 WHERE id = $1", session_id, run_id)
+
+
+async def record_tool_call(
+    conn: asyncpg.Connection,
+    *,
+    session_id: str,
+    run_id: str,
+    agent_id: str,
+    agent_version: int | None,
+    environment_id: str,
+    principal: str | None,
+    approved_by: str | None,
+    tool_name: str,
+    call_hash: str,
+    tool_use_id: str | None,
+    args_json: str,
+    args_truncated: bool,
+    decision: str,
+    result_status: str | None,
+) -> int:
+    return await conn.fetchval(
+        "INSERT INTO tool_calls (session_id, run_id, agent_id, agent_version, environment_id, "
+        "  principal, approved_by, tool_name, call_hash, tool_use_id, args_json, args_truncated, "
+        "  decision, result_status) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id",
+        session_id,
+        run_id,
+        agent_id,
+        agent_version,
+        environment_id,
+        principal,
+        approved_by,
+        tool_name,
+        call_hash,
+        tool_use_id,
+        args_json,
+        args_truncated,
+        decision,
+        result_status,
+    )
+
+
+async def correlate_tool_result(
+    conn: asyncpg.Connection,
+    session_id: str,
+    run_id: str,
+    tool_use_id: str,
+    is_error: bool,
+    content: str,
+) -> bool:
+    """Attach a result to the call it came from. latency_ms is measured control-plane
+    side, gate-return to result-report, so it includes the sandbox's event batching
+    and is an upper bound."""
+    result = await conn.execute(
+        "UPDATE tool_calls SET result_status = CASE WHEN $4 THEN 'error' ELSE 'ok' END, "
+        "  error = CASE WHEN $4 THEN left($5, 2000) ELSE NULL END, resulted_at = now(), "
+        "  latency_ms = GREATEST(0, (EXTRACT(EPOCH FROM (now() - decided_at)) * 1000)::int) "
+        "WHERE id = (SELECT id FROM tool_calls WHERE session_id = $1 AND run_id = $2 "
+        "            AND tool_use_id = $3 AND result_status IS NULL ORDER BY id DESC LIMIT 1)",
+        session_id,
+        run_id,
+        tool_use_id,
+        is_error,
+        content,
+    )
+    return db.rowcount(result) > 0
+
+
+async def close_open_tool_calls(conn: asyncpg.Connection, session_id: str) -> None:
+    """A call still open at the burst boundary never reported a result — the turn
+    ended or the sandbox died mid-call. A paused call is not open: it is waiting."""
+    await conn.execute(
+        "UPDATE tool_calls SET result_status = 'no_result', resulted_at = now() "
+        "WHERE session_id = $1 AND result_status IS NULL "
+        "  AND decision <> 'awaiting_confirmation'",
+        session_id,
+    )
+
+
+async def unexported_tool_calls(conn: asyncpg.Connection, session_id: str) -> list[asyncpg.Record]:
+    return await conn.fetch(
+        "SELECT * FROM tool_calls WHERE session_id = $1 AND exported_at IS NULL "
+        "  AND decision <> 'awaiting_confirmation' ORDER BY id",
+        session_id,
+    )
+
+
+async def mark_tool_calls_exported(conn: asyncpg.Connection, ids: list[int]) -> None:
+    # Marked only after BigQuery accepted the batch, so a failed export retries on
+    # the next checkpoint. The Postgres id is sent as the BigQuery insertId, so a
+    # retry that duplicates an accepted row is de-duplicated on their side.
+    await conn.execute("UPDATE tool_calls SET exported_at = now() WHERE id = ANY($1)", ids)
+
+
 async def decide_confirmation(
     conn: asyncpg.Connection,
     session_id: str,

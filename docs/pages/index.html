@@ -120,7 +120,7 @@
   <section>
     <p class="eyebrow">Why</p>
     <h2>The only reasons this platform exists</h2>
-    <p>Hosted CMA runs the agent loop and the sandbox on Anthropic's cloud. naxos exists for the cases that structurally cannot leave the organization: the <strong>data boundary</strong> (model access via Vertex AI only), <strong>internal-system integration inside that boundary</strong> (self-hosted MCP to closed-network systems), and <strong>execution-level governance</strong> (per-tool-call audit, human approval gates, an instant kill switch, per-tenant IAM). A task that fits none of these axes belongs in the Claude app or hosted CMA — this platform deliberately does not compete on UX or feature velocity.</p>
+    <p>Hosted CMA runs the agent loop and the sandbox on Anthropic's cloud. naxos exists for the cases that structurally cannot leave the organization: the <strong>data boundary</strong> (model access via Vertex AI only), <strong>internal-system integration inside that boundary</strong> (self-hosted MCP to closed-network systems), and <strong>execution-level governance</strong> (human approval gates, an instant kill switch, per-tenant IAM, and a per-tool-call execution record you can hand to an auditor). A task that fits none of these axes belongs in the Claude app or hosted CMA — this platform deliberately does not compete on UX or feature velocity.</p>
   </section>
 
   <section>
@@ -135,9 +135,9 @@
         <div class="card"><h3><code>naxos-sbx-{env}</code></h3><p>One Cloud Run Job per environment; one execution per session wake runs the Claude Agent SDK loop.</p></div>
       </div>
       <div class="lane">
-        <div class="card store"><h3>Cloud SQL · Postgres</h3><p>All control-plane state. 16 tables, in-process migrations. The only always-on cost.</p></div>
+        <div class="card store"><h3>Cloud SQL · Postgres</h3><p>All control-plane state, including the <code>tool_calls</code> execution record. 19 tables, in-process migrations. The only always-on cost.</p></div>
         <div class="card store"><h3>GCS · per-environment buckets</h3><p>Session workspaces, SDK transcripts, published artifacts. Restored on wake, written back at checkpoint.</p></div>
-        <div class="card store"><h3>BigQuery · <code>naxos_audit</code></h3><p><code>runs</code> + <code>tool_calls</code>, written only by the control plane. Read access to <em>other</em> datasets is a per-environment opt-in; the audit dataset is never grantable.</p></div>
+        <div class="card store"><h3>BigQuery · <code>naxos_audit</code></h3><p><code>runs</code> + <code>tool_calls</code>, an append-only export written only by the control plane. Read access to <em>other</em> datasets is a per-environment opt-in; the audit dataset is never grantable.</p></div>
       </div>
     </div>
     <div class="tablewrap">
@@ -164,7 +164,7 @@
   <section>
     <p class="eyebrow">Governance</p>
     <h2>Built into the platform, not retrofitted</h2>
-    <p><strong>Audit</strong> — every tool call streams to <code>audit.tool_calls</code> with its decision (<code>auto_allowed | user_allowed | user_denied | killed</code>); every wake-to-idle burst lands in <code>audit.runs</code> with principal and cost. Only the control plane writes audit rows — the sandbox cannot forge or skip them.</p>
+    <p><strong>An execution record, not a chat log</strong> — every tool call an agent attempted is recorded by the control plane <em>at the permission gate</em>, the one point every call must pass. The row is committed before the tool runs, so a sandbox that dies mid-call still leaves evidence, and the decision is the gate's own rather than something the sandbox reported. One row per call: who asked, who approved it, the exact arguments its <code>call_hash</code> covers, the decision (<code>auto_allowed | user_allowed | user_denied | not_allowed | killed | awaiting_confirmation</code>) and what came back. It has no foreign key to the session, so deleting the conversation cannot erase what was done. Query it over <code>/v1/tool_calls</code>, export it as NDJSON, and read the archive in <code>audit.tool_calls</code>; every wake-to-idle burst lands in <code>audit.runs</code> with principal, tokens and cost.</p>
     <p><strong>Approval gate</strong> — the <code>always_ask</code> policy is enforced by a <code>PreToolUse</code> hook (not <code>can_use_tool</code>, which is shadowed by <code>allowed_tools</code> entries and the CLI's read-only auto-approval). Confirmations are keyed on <code>sha256(tool_name + canonical input)</code> because <code>tool_use_id</code> changes across resume. While a confirmation is pending the session idles with <code>requires_action</code> and the container is released — a blocked agent costs nothing, no matter how long the human takes.</p>
     <p><strong>Kill switch</strong> — <code>agents.disabled</code> is checked at session creation, event accept, wake, permission resolution, heartbeat, queue long-poll, and deployment fire. <strong>Budget</strong> — a per-session hard cap; on breach the session idles with <code>budget_reached</code>, and raising the budget is itself the resume signal.</p>
   </section>

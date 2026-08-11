@@ -46,6 +46,64 @@ async def test_deployment_run_now_creates_a_session(client, launched):
     assert [r["id"] for r in runs] == [run["id"]]
 
 
+async def test_deployment_run_is_settled_when_its_session_goes_idle(
+    client, internal_client, launched
+):
+    """Without this the row is inserted 'running' and never moves, so a scheduled
+    run has no recorded outcome at all."""
+    _, agent = await make_agent(client)
+    deployment = await make_deployment(client, agent)
+    run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
+    sid = run["session_id"]
+
+    lease = (await internal_client.post(f"/internal/sessions/{sid}/claim")).json()["lease_id"]
+    await internal_client.get(f"/internal/sessions/{sid}/queue", params={"wait": 0})
+    await internal_client.post(f"/internal/sessions/{sid}/checkpoint", json={"lease_id": lease})
+
+    (settled,) = (await client.get(f"/v1/deployments/{deployment['id']}/runs")).json()["data"]
+    assert settled["status"] == "succeeded"
+    assert settled["finished_at"] is not None
+
+
+async def test_deployment_run_that_ran_out_of_budget_is_recorded_failed(
+    client, internal_client, launched
+):
+    _, agent = await make_agent(client)
+    deployment = await make_deployment(client, agent)
+    run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
+    sid = run["session_id"]
+
+    lease = (await internal_client.post(f"/internal/sessions/{sid}/claim")).json()["lease_id"]
+    await internal_client.get(f"/internal/sessions/{sid}/queue", params={"wait": 0})
+    await internal_client.post(
+        f"/internal/sessions/{sid}/checkpoint",
+        json={"lease_id": lease, "stop_reason": "budget_reached"},
+    )
+
+    (settled,) = (await client.get(f"/v1/deployments/{deployment['id']}/runs")).json()["data"]
+    assert settled["status"] == "failed"
+    assert settled["error_type"] == "budget_reached"
+
+
+async def test_a_deployment_run_waiting_on_a_human_is_not_settled(
+    client, internal_client, launched
+):
+    _, agent = await make_agent(client)
+    deployment = await make_deployment(client, agent)
+    run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
+    sid = run["session_id"]
+
+    lease = (await internal_client.post(f"/internal/sessions/{sid}/claim")).json()["lease_id"]
+    await internal_client.get(f"/internal/sessions/{sid}/queue", params={"wait": 0})
+    await internal_client.post(
+        f"/internal/sessions/{sid}/checkpoint",
+        json={"lease_id": lease, "stop_reason": "requires_action"},
+    )
+
+    (pending,) = (await client.get(f"/v1/deployments/{deployment['id']}/runs")).json()["data"]
+    assert pending["status"] == "running"
+
+
 async def test_deployment_fire_inherits_agent_vaults(
     client, internal_client, launched, monkeypatch
 ):

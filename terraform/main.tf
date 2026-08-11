@@ -197,11 +197,23 @@ resource "google_bigquery_table" "tool_calls" {
     { name = "ts", type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "tool_use_id", type = "STRING" },
     { name = "tool_name", type = "STRING" },
+    # Superseded by args_json. Kept because dropping a column needs
+    # deletion_protection = false and a table recreate; rows written before the
+    # execution-record change have it populated and args_json NULL.
     { name = "args_redacted", type = "STRING" },
     { name = "decision", type = "STRING" },
     { name = "result_status", type = "STRING" },
     { name = "latency_ms", type = "INTEGER" },
     { name = "error", type = "STRING" },
+    # Appended, never reordered: additive schema changes apply in place, while a
+    # reorder or retype is destructive and blocked by deletion_protection.
+    { name = "tool_call_id", type = "STRING" },
+    { name = "environment_id", type = "STRING" },
+    { name = "agent_version", type = "INTEGER" },
+    { name = "approved_by", type = "STRING" },
+    { name = "call_hash", type = "STRING" },
+    { name = "args_json", type = "STRING" },
+    { name = "args_truncated", type = "BOOL" },
   ])
 }
 
@@ -225,11 +237,14 @@ resource "google_bigquery_table" "shared_runs" {
   }
 }
 
+# Explicit columns, not SELECT *: args_json holds the full tool arguments of
+# every tenant, and error holds tool output. An agent can still correlate calls
+# by call_hash without being handed their contents.
 resource "google_bigquery_table" "shared_tool_calls" {
   dataset_id = google_bigquery_dataset.audit_shared.dataset_id
   table_id   = "tool_calls"
   view {
-    query          = "SELECT * FROM `${var.project_id}.${google_bigquery_dataset.audit.dataset_id}.${google_bigquery_table.tool_calls.table_id}`"
+    query          = "SELECT tool_call_id, run_id, session_id, agent_id, agent_version, environment_id, principal, approved_by, ts, tool_use_id, tool_name, call_hash, decision, result_status, latency_ms FROM `${var.project_id}.${google_bigquery_dataset.audit.dataset_id}.${google_bigquery_table.tool_calls.table_id}`"
     use_legacy_sql = false
   }
 }

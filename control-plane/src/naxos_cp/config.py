@@ -23,6 +23,7 @@ MAX_CONCURRENT_SANDBOXES = int(os.environ.get("MAX_CONCURRENT_SANDBOXES", "5"))
 MAX_WAKE_RETRIES = int(os.environ.get("MAX_WAKE_RETRIES", "3"))
 LEASE_TTL_SECONDS = int(os.environ.get("LEASE_TTL_SECONDS", "90"))
 MAX_EVENT_PAYLOAD_BYTES = 64 * 1024
+MAX_TOOL_ARGS_BYTES = int(os.environ.get("MAX_TOOL_ARGS_BYTES", str(4 * 1024)))
 MAX_MEMORY_BYTES = 64 * 1024
 # Sized for the Anthropic sample skills: their largest reference files
 # (OOXML schemas) are ~240KB.

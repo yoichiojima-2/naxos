@@ -7,10 +7,9 @@ from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
 
-DECIDED_TOOL_USE = (
-    "type = 'agent.tool_use' AND created_at >= $1 "
-    "  AND COALESCE(payload->>'decision', '') != 'awaiting_confirmation'"
-)
+# Counted from tool_calls, not session_events: the event log cascades away with
+# its session, so the operator view would silently lose history on a delete.
+DECIDED = "decided_at >= $1 AND decision <> 'awaiting_confirmation'"
 
 
 @router.get("/monitoring/summary")
@@ -25,7 +24,7 @@ async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principa
             since,
         )
         tool_calls = await conn.fetchval(
-            f"SELECT count(*) FROM session_events WHERE {DECIDED_TOOL_USE}",
+            f"SELECT count(*) FROM tool_calls WHERE {DECIDED}",
             since,
         )
         all_time = await conn.fetchrow(
@@ -54,11 +53,11 @@ async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principa
             "SELECT status, count(*) AS count FROM sessions GROUP BY 1 ORDER BY 1"
         )
         tool_usage = await conn.fetch(
-            "SELECT payload->>'tool_name' AS tool_name, count(*) AS calls, "
-            "  count(*) FILTER (WHERE payload->>'decision' IN ('user_denied', 'not_allowed')) "
-            "  AS denied "
-            f"FROM session_events WHERE {DECIDED_TOOL_USE} "
-            "  AND payload->>'tool_name' IS NOT NULL "
+            "SELECT tool_name, count(*) AS calls, "
+            "  count(*) FILTER (WHERE decision IN ('user_denied', 'not_allowed', 'killed')) "
+            "  AS denied, "
+            "  count(*) FILTER (WHERE result_status = 'error') AS errors "
+            f"FROM tool_calls WHERE {DECIDED} "
             "GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 12",
             since,
         )
