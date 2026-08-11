@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from . import config, db, gcs
+from . import config, db, favorites, gcs
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
@@ -180,6 +180,7 @@ async def delete_artifact(artifact_id: str, _: str = Depends(principal_of)) -> d
     async with db.transaction() as conn:
         row = await _fetch_with_bucket(conn, artifact_id)
         await conn.execute("DELETE FROM artifacts WHERE id = $1", artifact_id)
+        await favorites.clear_for_entities(conn, artifact_id)
     await gcs.delete(row["session_bucket"], blob_path(row["session_id"], row["name"]))
     return {"id": artifact_id, "deleted": True}
 

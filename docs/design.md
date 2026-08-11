@@ -182,6 +182,11 @@ skill_files (id, skill_id, path, UNIQUE (skill_id, path),
         content,              -- ≤64KB per file
         updated_by, created_at, updated_at)
         -- agent_versions.skill_ids / sessions.skill_ids reference these
+
+favorites (id, principal, entity_type CHECK IN ('agent','session','artifact','skill'),
+        entity_id, UNIQUE (principal, entity_type, entity_id), created_at)
+        -- no FK: entity_type spans tables. Session/artifact hard-delete handlers
+        -- clear matching rows; archived agents/skills just drop out of list views
 ```
 
 ### Artifacts
@@ -333,13 +338,16 @@ POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 
 GET    /v1/monitoring/summary?days=N       cost/usage aggregates from session_runs
+
+GET    /v1/favorites · POST /v1/favorites  per-principal stars on agents / sessions /
+DELETE /v1/favorites/{type}/{id}           artifacts / skills, surfaced first in UI lists
 ```
 
 Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)`, plus `deployments/{id}/fire` and `reconcile`.
 
 Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_rescheduling` (deviation: extends the CMA status events so the §1 "waking up" UI state is observable over SSE — the `rescheduling` status itself is CMA's), `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
 
-Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks initially.
+Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks initially; per-principal favorites as a naxos-only convenience surface.
 
 ## 8. Security model
 

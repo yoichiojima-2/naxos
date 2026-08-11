@@ -18,7 +18,7 @@ from naxos_shared.ids import new_id
 from naxos_shared.paths import unsafe_relpath
 from pydantic import BaseModel, Field
 
-from . import artifacts, audit, config, db, deployments, store, wake
+from . import artifacts, audit, config, db, deployments, favorites, store, wake
 from .auth import caller_service_account
 
 log = logging.getLogger(__name__)
@@ -512,6 +512,7 @@ async def delete_session_artifact(
         )
         if record is None:
             raise HTTPException(404, "artifact not found")
+        await favorites.clear_for_entities(conn, record["id"])
         await _emit_artifact_event(conn, session_id, "deleted", record)
     return {"id": record["id"], "deleted": True}
 

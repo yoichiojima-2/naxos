@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { agentName, api, favKey, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
+import FavoriteStar, { FavoriteProps } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import Markdown from "@/components/markdown";
 import FilterInput from "@/components/filter-input";
@@ -12,7 +13,11 @@ const STATUS_FILTERS = ["needs approval", "running", "idle", "rescheduling", "te
 const statusOf = (s: Session) =>
   s.status === "idle" && s.stop_reason === "requires_action" ? "needs approval" : s.status;
 
-export default function Sessions({ agents }: { agents: Agent[] }) {
+export default function Sessions({
+  agents,
+  favorites,
+  onToggleFavorite,
+}: { agents: Agent[] } & FavoriteProps) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [open, setOpen] = useState<Session | null>(null);
   const [agentId, setAgentId] = useState("");
@@ -20,6 +25,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   const [query, setQuery] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [favOnly, setFavOnly] = useState(false);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Session[] }>("/v1/sessions?limit=200");
@@ -64,9 +70,14 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
       .toLowerCase()
       .includes(q);
   });
-  const filtered = base.filter((s) => !statusFilter || statusOf(s) === statusFilter);
-  const hasFilters = !!(q || agentFilter || statusFilter);
+  const isFav = (s: Session) => favorites.has(favKey("session", s.id));
+  const filtered = base
+    .filter((s) => !statusFilter || statusOf(s) === statusFilter)
+    .filter((s) => !favOnly || isFav(s))
+    .sort((a, b) => Number(isFav(b)) - Number(isFav(a)));
+  const hasFilters = !!(q || agentFilter || statusFilter || favOnly);
 
+  const favCount = base.filter(isFav).length;
   const statusCounts = new Map<string, number>();
   for (const s of base) {
     const status = statusOf(s);
@@ -77,6 +88,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     setQuery("");
     setAgentFilter("");
     setStatusFilter("");
+    setFavOnly(false);
   }
 
   const allSelected = !!filtered.length && filtered.every((s) => selected.has(s.id));
@@ -183,6 +195,14 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
+          {(favCount > 0 || favOnly) && (
+            <button
+              className={`chip ${favOnly ? "on" : ""}`}
+              onClick={() => setFavOnly(!favOnly)}
+            >
+              favorites {favCount}
+            </button>
+          )}
           {STATUS_FILTERS.filter(
             (status) => statusCounts.get(status) || status === statusFilter,
           ).map((status) => (
@@ -215,18 +235,19 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
                   aria-label="select all sessions"
                 />
               </th>
+              <th />
               <th>title</th><th>agent</th><th>status</th><th>principal</th><th>cost</th><th>created</th>
             </tr>
           </thead>
           <tbody>
             {sessions === null && (
-              <tr><td className="empty" colSpan={7}>loading…</td></tr>
+              <tr><td className="empty" colSpan={8}>loading…</td></tr>
             )}
             {sessions?.length === 0 && (
-              <tr><td className="empty" colSpan={7}>no sessions yet — pick an agent above and start one.</td></tr>
+              <tr><td className="empty" colSpan={8}>no sessions yet — pick an agent above and start one.</td></tr>
             )}
             {!!sessions?.length && filtered.length === 0 && (
-              <tr><td className="empty" colSpan={7}>no sessions match the current filters.</td></tr>
+              <tr><td className="empty" colSpan={8}>no sessions match the current filters.</td></tr>
             )}
             {filtered.map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
@@ -238,6 +259,14 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
                       checked={selected.has(s.id)}
                       onChange={() => toggle(s.id)}
                       aria-label={`select ${s.title ?? s.id}`}
+                    />
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()} style={{ width: 1 }}>
+                    <FavoriteStar
+                      type="session"
+                      id={s.id}
+                      favorites={favorites}
+                      onToggleFavorite={onToggleFavorite}
                     />
                   </td>
                   <td>{s.title ?? s.id}</td>

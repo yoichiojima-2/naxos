@@ -229,3 +229,8 @@ export type Memory = {
 export type Skill = { id: string; name: string; description: string | null; ready: boolean };
 export type SkillFile = { id: string; path: string; size?: number; content?: string };
 export type WorkspaceFile = { path: string; size: number };
+
+export type FavoriteType = "agent" | "session" | "artifact" | "skill";
+export type Favorite = { entity_type: FavoriteType; entity_id: string };
+
+export const favKey = (type: FavoriteType, id: string) => `${type}:${id}`;

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/v1")
 
 
 def create_app(manage_pool: bool = True) -> FastAPI:
-    from . import artifacts, deployments, memory, monitoring, skills, vaults, workspace
+    from . import artifacts, deployments, favorites, memory, monitoring, skills, vaults, workspace
 
     app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
@@ -38,6 +38,7 @@ def create_app(manage_pool: bool = True) -> FastAPI:
     app.include_router(skills.router)
     app.include_router(workspace.router)
     app.include_router(artifacts.router)
+    app.include_router(favorites.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
@@ -330,6 +331,12 @@ async def delete_session(session_id: str, principal: str = Depends(principal_of)
         )
         if row is None:
             raise HTTPException(404, "session not found")
+        # Favorites have no FK (entity_type spans tables); the 409 below rolls this back.
+        await conn.execute(
+            "DELETE FROM favorites WHERE entity_id = $1 "
+            "OR entity_id IN (SELECT id FROM artifacts WHERE session_id = $1)",
+            session_id,
+        )
         # Conditional DELETE so the liveness check and the delete are one atomic
         # statement — a claim landing in between makes the condition fail, not race.
         result = await conn.execute(

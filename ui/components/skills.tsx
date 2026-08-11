@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, apiConfirm, listFor, Skill, SkillFile } from "@/lib/api";
+import { api, apiConfirm, favKey, listFor, Skill, SkillFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
+import FavoriteStar, { FavoriteProps } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 
 const SKILL_MD_TEMPLATE = (name: string) =>
   `---\nname: ${name}\ndescription: When and how to use this skill.\n---\n\nInstructions the agent loads when it uses this skill.\n`;
 
-export default function Skills() {
+export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [files, setFiles] = useState<Record<string, SkillFile[]>>({});
   const [skillName, setSkillName] = useState("");
@@ -140,10 +141,22 @@ export default function Skills() {
           Create
         </button>
       </CountHeader>
-      {skills.map((skill) => (
+      {[...skills]
+        .sort(
+          (a, b) =>
+            Number(favorites.has(favKey("skill", b.id))) -
+            Number(favorites.has(favKey("skill", a.id))),
+        )
+        .map((skill) => (
         <div className="panel" key={skill.id}>
           <div className="row between">
             <div className="row">
+              <FavoriteStar
+                type="skill"
+                id={skill.id}
+                favorites={favorites}
+                onToggleFavorite={onToggleFavorite}
+              />
               <strong>{skill.name}</strong>
               {!skill.ready && (
                 <span className="muted" title="Add a SKILL.md file so agents can load this skill">

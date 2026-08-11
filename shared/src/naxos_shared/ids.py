@@ -17,6 +17,7 @@ PREFIXES = {
     "skill_file": "skf",
     "confirmation": "conf",
     "run": "run",
+    "favorite": "fav",
 }
 
 

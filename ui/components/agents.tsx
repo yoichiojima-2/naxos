@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { api, Agent, AgentIn, Environment } from "@/lib/api";
+import { api, favKey, Agent, AgentIn, Environment } from "@/lib/api";
 import AgentForm from "@/components/agent-form";
+import FavoriteStar, { FavoriteProps } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
 
@@ -10,13 +11,16 @@ export default function Agents({
   agents,
   environments,
   onChange,
+  favorites,
+  onToggleFavorite,
 }: {
   agents: Agent[];
   environments: Environment[];
   onChange: () => void;
-}) {
+} & FavoriteProps) {
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
+  const [favOnly, setFavOnly] = useState(false);
 
   async function create(body: AgentIn) {
     const created = await api<Agent>("/v1/agents", { json: body });
@@ -33,15 +37,25 @@ export default function Agents({
   const envName = (id: string) => environments.find((e) => e.id === id)?.name ?? id;
 
   const q = query.trim().toLowerCase();
-  const filtered = agents.filter(
-    (a) => !q || `${a.name} ${a.id} ${envName(a.environment_id)}`.toLowerCase().includes(q),
-  );
+  const isFav = (a: Agent) => favorites.has(favKey("agent", a.id));
+  const favCount = agents.filter(isFav).length;
+  const filtered = agents
+    .filter(
+      (a) => !q || `${a.name} ${a.id} ${envName(a.environment_id)}`.toLowerCase().includes(q),
+    )
+    .filter((a) => !favOnly || isFav(a))
+    .sort((a, b) => Number(isFav(b)) - Number(isFav(a)));
 
   return (
     <>
       <CountHeader count={filtered.length} of={agents.length} noun="agent">
         {agents.length > 0 && (
           <FilterInput placeholder="Filter agents…" value={query} onChange={setQuery} />
+        )}
+        {(favCount > 0 || favOnly) && (
+          <button className={`chip ${favOnly ? "on" : ""}`} onClick={() => setFavOnly(!favOnly)}>
+            favorites {favCount}
+          </button>
         )}
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New agent"}
@@ -61,14 +75,14 @@ export default function Agents({
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Name</th><th>Environment</th><th>Version</th><th>Status</th><th /></tr>
+              <tr><th /><th>Name</th><th>Environment</th><th>Version</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
               {agents.length === 0 && (
-                <tr><td className="empty" colSpan={5}>no agents yet — create one to get started.</td></tr>
+                <tr><td className="empty" colSpan={6}>no agents yet — create one to get started.</td></tr>
               )}
               {agents.length > 0 && filtered.length === 0 && (
-                <tr><td className="empty" colSpan={5}>no agents match the current filter.</td></tr>
+                <tr><td className="empty" colSpan={6}>no agents match the current filter.</td></tr>
               )}
               {filtered.map((agent) => (
                 <tr
@@ -76,6 +90,14 @@ export default function Agents({
                   className="click"
                   onClick={() => { window.location.hash = `#agents/${agent.id}`; }}
                 >
+                  <td onClick={(e) => e.stopPropagation()} style={{ width: 1 }}>
+                    <FavoriteStar
+                      type="agent"
+                      id={agent.id}
+                      favorites={favorites}
+                      onToggleFavorite={onToggleFavorite}
+                    />
+                  </td>
                   <td>
                     {agent.name}{" "}
                     <span className="muted mono">{agent.id}</span>

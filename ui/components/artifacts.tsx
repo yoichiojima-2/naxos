@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
+import { api, apiConfirm, favKey, Agent, agentName, Artifact } from "@/lib/api";
+import FavoriteStar, { FavoriteProps } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
 
@@ -11,10 +12,15 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-export default function Artifacts({ agents }: { agents: Agent[] }) {
+export default function Artifacts({
+  agents,
+  favorites,
+  onToggleFavorite,
+}: { agents: Agent[] } & FavoriteProps) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [favOnly, setFavOnly] = useState(false);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Artifact[] }>("/v1/artifacts");
@@ -53,19 +59,29 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
   }
 
   const q = query.trim().toLowerCase();
-  const filtered = artifacts.filter(
-    (a) =>
-      !q ||
-      `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
-        .toLowerCase()
-        .includes(q),
-  );
+  const isFav = (a: Artifact) => favorites.has(favKey("artifact", a.id));
+  const favCount = artifacts.filter(isFav).length;
+  const filtered = artifacts
+    .filter(
+      (a) =>
+        !q ||
+        `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
+          .toLowerCase()
+          .includes(q),
+    )
+    .filter((a) => !favOnly || isFav(a))
+    .sort((a, b) => Number(isFav(b)) - Number(isFav(a)));
 
   return (
     <>
       <CountHeader count={filtered.length} of={artifacts.length} noun="artifact">
         {artifacts.length > 0 && (
           <FilterInput placeholder="Filter artifacts…" value={query} onChange={setQuery} />
+        )}
+        {(favCount > 0 || favOnly) && (
+          <button className={`chip ${favOnly ? "on" : ""}`} onClick={() => setFavOnly(!favOnly)}>
+            favorites {favCount}
+          </button>
         )}
       </CountHeader>
       <div className="panel">
@@ -82,6 +98,7 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
             <table>
               <thead>
                 <tr>
+                  <th />
                   <th>Name</th>
                   <th>Agent</th>
                   <th>Size</th>
@@ -97,6 +114,14 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
                     className="click"
                     onClick={() => { window.location.hash = `#artifacts/${artifact.id}`; }}
                   >
+                    <td onClick={(e) => e.stopPropagation()} style={{ width: 1 }}>
+                      <FavoriteStar
+                        type="artifact"
+                        id={artifact.id}
+                        favorites={favorites}
+                        onToggleFavorite={onToggleFavorite}
+                      />
+                    </td>
                     <td>
                       <a
                         className="mono"
