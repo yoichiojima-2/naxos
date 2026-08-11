@@ -8,7 +8,7 @@ Ready-to-upload skills in the [Agent Skills](https://docs.claude.com/en/docs/age
 NAXOS_API=https://<naxos-api-url> scripts/upload_skill.sh docs/skills/bigquery
 ```
 
-The script creates the skill (or reuses the existing one with the same name) and upserts every file in the folder. Set `NAXOS_AUTH` to an extra request header if your access path needs one; against a dev-mode control plane no auth is required.
+The script creates the skill (or reuses the existing one with the same name) and syncs the folder: local files are upserted, remote files that no longer exist locally are deleted. Set `NAXOS_AUTH` to an extra request header if your access path needs one; against a dev-mode control plane no auth is required.
 
 Then attach the returned `skill_id` to an agent version (`skill_ids` on `POST /v1/agents/{id}/versions`) or per session at creation.
 
