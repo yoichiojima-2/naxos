@@ -1,3 +1,4 @@
+import functools
 import logging
 
 from google.cloud import run_v2
@@ -5,14 +6,11 @@ from google.cloud import run_v2
 from . import config
 
 log = logging.getLogger(__name__)
-_client: run_v2.JobsAsyncClient | None = None
 
 
+@functools.cache
 def _jobs() -> run_v2.JobsAsyncClient:
-    global _client
-    if _client is None:
-        _client = run_v2.JobsAsyncClient()
-    return _client
+    return run_v2.JobsAsyncClient()
 
 
 async def launch(job_name: str, session_id: str) -> str:

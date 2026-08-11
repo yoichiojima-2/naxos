@@ -1,13 +1,12 @@
 import logging
-import os
 from typing import Any
 
 import httpx
+from naxos_shared.events import SessionConfig
+
+from .config import DEV_SA, INTERNAL_URL
 
 log = logging.getLogger(__name__)
-
-INTERNAL_URL = os.environ.get("INTERNAL_URL", "http://localhost:8001")
-DEV_SA = os.environ.get("NAXOS_DEV_SA", "")
 
 
 class ControlChannel:
@@ -61,8 +60,14 @@ class ControlChannel:
         result = await self._post("/heartbeat", {"lease_id": self.lease_id})
         return not result.get("disabled")
 
-    async def config(self) -> dict[str, Any]:
-        return await self._get("/config")
+    async def config(self) -> SessionConfig:
+        return SessionConfig.model_validate(await self._get("/config"))
+
+    async def fetch_memory(self) -> dict[str, Any]:
+        return await self._get("/memory")
+
+    async def writeback_memory(self, stores: dict[str, Any]) -> None:
+        await self._post("/memory", {"stores": stores})
 
     async def poll_queue(self, wait: int = 25) -> dict[str, Any]:
         return await self._get("/queue", {"wait": wait})

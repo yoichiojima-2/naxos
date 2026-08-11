@@ -1,7 +1,5 @@
-import asyncio
 import json
 import os
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -18,49 +16,25 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import config, db, store, wake
+from . import config, db, notify, sessions, store, wake
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    pool = await db.connect()
-    async with pool.acquire() as conn:
-        await db.migrate(conn)
-    yield
-    await db.disconnect()
+def create_app(manage_pool: bool = True) -> FastAPI:
+    from . import deployments, memory, vaults, workspace
 
-
-def create_app() -> FastAPI:
-    from . import deployments, memory, vaults
-
-    app = FastAPI(title="naxos", lifespan=lifespan)
+    app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
     app.include_router(deployments.router)
     app.include_router(vaults.router)
     app.include_router(memory.router)
+    app.include_router(workspace.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
     return app
-
-
-def create_app_without_lifespan() -> FastAPI:
-    """For tests, which manage the pool themselves."""
-    from . import deployments, memory, vaults
-
-    app = FastAPI(title="naxos")
-    app.include_router(router)
-    app.include_router(deployments.router)
-    app.include_router(vaults.router)
-    app.include_router(memory.router)
-    return app
-
-
-def _row(record: Any) -> dict[str, Any]:
-    return {k: v for k, v in dict(record).items()}
 
 
 # --- agents ----------------------------------------------------------------
@@ -149,7 +123,7 @@ async def _agent_with_version(conn, agent_id: str, version: int) -> dict:
     )
     if row is None:
         raise HTTPException(404, "agent version not found")
-    out = _row(row)
+    out = dict(row)
     out["version"] = version
     return out
 
@@ -160,7 +134,7 @@ async def list_agents(_: str = Depends(principal_of)) -> dict:
         rows = await conn.fetch(
             "SELECT * FROM agents WHERE archived_at IS NULL ORDER BY created_at DESC"
         )
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 @router.get("/agents/{agent_id}")
@@ -186,7 +160,7 @@ async def patch_agent(agent_id: str, body: AgentPatch, _: str = Depends(principa
             agent_id,
             body.disabled,
         )
-        if not result.endswith(" 1"):
+        if db.rowcount(result) != 1:
             raise HTTPException(404, "agent not found")
     return {"id": agent_id, "disabled": body.disabled}
 
@@ -231,14 +205,14 @@ async def create_environment(body: EnvironmentIn, _: str = Depends(principal_of)
             body.cpu,
             body.memory,
         )
-    return _row(row)
+    return dict(row)
 
 
 @router.get("/environments")
 async def list_environments(_: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch("SELECT * FROM environments ORDER BY created_at")
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 # --- sessions --------------------------------------------------------------
@@ -262,44 +236,23 @@ class SessionIn(BaseModel):
 @router.post("/sessions", status_code=201)
 async def create_session(body: SessionIn, principal: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        agent = await conn.fetchrow(
-            "SELECT a.*, v.default_budget_usd, v.vault_ids, v.memory_store_ids "
-            "FROM agents a JOIN agent_versions v ON v.agent_id = a.id "
-            "  AND v.version = COALESCE($2, a.latest_version) "
-            "WHERE a.id = $1 AND a.archived_at IS NULL",
-            body.agent.id,
-            body.agent.version,
-        )
+        agent = await sessions.resolve_agent(conn, body.agent.id, body.agent.version)
         if agent is None:
             raise HTTPException(404, "agent or version not found")
         if agent["disabled"]:
             raise HTTPException(409, "agent is disabled")
-        version = body.agent.version or agent["latest_version"]
-        session_id = new_id("session")
-        await conn.execute(
-            "INSERT INTO sessions (id, agent_id, agent_version, environment_id, title, "
-            "  budget_usd, vault_ids, memory_store_ids, resources, created_by) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            session_id,
-            agent["id"],
-            version,
-            agent["environment_id"],
-            body.title,
-            body.budget_usd if body.budget_usd is not None else agent["default_budget_usd"],
-            body.vault_ids or list(agent["vault_ids"]),
-            body.memory_store_ids or list(agent["memory_store_ids"]),
-            body.resources,
-            principal,
+        row = await sessions.create(
+            conn,
+            agent,
+            initial_events=body.initial_events,
+            principal=principal,
+            title=body.title,
+            budget_usd=body.budget_usd,
+            vault_ids=body.vault_ids or None,
+            memory_store_ids=body.memory_store_ids or None,
+            resources=body.resources or None,
         )
-        for event in body.initial_events:
-            event.validate_for_send()
-            await store.append_event(
-                conn, session_id, event.type, event.model_dump(mode="json"), principal
-            )
-        if body.initial_events:
-            await wake.wake(conn, session_id)
-        out = _row(await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id))
-    return out
+    return dict(row)
 
 
 @router.get("/sessions")
@@ -317,7 +270,7 @@ async def list_sessions(
             str(status) if status else None,
             limit,
         )
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 @router.get("/sessions/{session_id}")
@@ -326,7 +279,7 @@ async def get_session(session_id: str, _: str = Depends(principal_of)) -> dict:
         row = await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id)
     if row is None:
         raise HTTPException(404, "session not found")
-    return _row(row)
+    return dict(row)
 
 
 class SessionPatch(BaseModel):
@@ -350,7 +303,7 @@ async def patch_session(
             raise HTTPException(404, "session not found")
         if body.budget_usd is not None and row["stop_reason"] == "budget_reached":
             await wake.wake(conn, session_id)
-    return _row(row)
+    return dict(row)
 
 
 @router.post("/sessions/{session_id}/terminate")
@@ -427,15 +380,14 @@ async def get_events(
         )
     async with db.transaction() as conn:
         rows = await store.list_events(conn, session_id, after, limit)
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 async def _sse(session_id: str, after: int):
-    """Replay from `after`, then tail. Frame ids are the per-session seq."""
+    """Replay from `after`, then tail on LISTEN/NOTIFY. Frame ids are the seq."""
     cursor = after
-    since_ping = 0.0
     while True:
-        async with db.transaction() as conn:
+        async with db.pool().acquire() as conn:
             rows = await store.list_events(conn, session_id, cursor, 200)
         for row in rows:
             cursor = row["seq"]
@@ -453,12 +405,8 @@ async def _sse(session_id: str, after: int):
             if row["type"] == str(EventType.SESSION_STATUS_TERMINATED):
                 return
         if rows:
-            since_ping = 0.0
             continue
-        await asyncio.sleep(config.SSE_POLL_SECONDS)
-        since_ping += config.SSE_POLL_SECONDS
-        if since_ping >= config.SSE_PING_SECONDS:
-            since_ping = 0.0
+        if not await notify.wait(session_id, config.SSE_PING_SECONDS):
             yield ": ping\n\n"
 
 

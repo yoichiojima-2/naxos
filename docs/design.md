@@ -248,7 +248,11 @@ Runaway protection: a control-plane global cap on concurrent sandbox executions 
 ## 10. Repo layout
 
 ```
-control-plane/     Python 3.13 + uv + FastAPI; entrypoints: api | internal; alembic migrations
+control-plane/     Python 3.13 + uv + FastAPI; entrypoints: api | internal; plain-SQL
+                   migrations (sorted migrations/*.sql, applied at boot, schema_migrations
+                   table). DB access is raw SQL over asyncpg — no ORM: the load-bearing
+                   queries (seq assignment via UPDATE…RETURNING, SKIP LOCKED claims, lease
+                   CAS, LISTEN/NOTIFY) don't fit one, and CRUD is the thin minority.
 sandbox-runner/    Python + claude-agent-sdk: main, harness, permissions, budget,
                    workspace, control_channel, memory_sync
 egress-proxy/      credential-substituting proxy (FastAPI/httpx)

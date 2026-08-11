@@ -16,8 +16,7 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import audit, config, db, store, wake
-from .api import lifespan
+from . import audit, config, db, deployments, store, wake
 from .auth import caller_service_account
 
 log = logging.getLogger(__name__)
@@ -26,26 +25,17 @@ router = APIRouter(prefix="/internal")
 QUEUE_POLL_SECONDS = 0.5
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="naxos-internal", lifespan=lifespan)
-    app.include_router(router)
-    return app
-
-
-def create_app_without_lifespan() -> FastAPI:
-    """For tests, which manage the pool themselves."""
-    app = FastAPI(title="naxos-internal")
+def create_app(manage_pool: bool = True) -> FastAPI:
+    app = FastAPI(title="naxos-internal", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
     return app
 
 
 async def _authorize(conn, session_id: str, caller: str) -> Any:
     row = await conn.fetchrow(
-        "SELECT s.*, e.service_account_email, e.session_bucket, a.disabled, "
-        "  v.instructions, v.model, v.tools, v.permission_policy, v.mcp_servers, v.max_turns "
+        "SELECT s.*, e.service_account_email, e.session_bucket, a.disabled "
         "FROM sessions s JOIN environments e ON e.id = s.environment_id "
         "JOIN agents a ON a.id = s.agent_id "
-        "JOIN agent_versions v ON v.agent_id = s.agent_id AND v.version = s.agent_version "
         "WHERE s.id = $1",
         session_id,
     )
@@ -56,8 +46,13 @@ async def _authorize(conn, session_id: str, caller: str) -> Any:
     return row
 
 
-class ClaimIn(BaseModel):
-    pass
+async def _agent_version(conn, row: Any) -> Any:
+    return await conn.fetchrow(
+        "SELECT instructions, model, tools, permission_policy, mcp_servers, max_turns "
+        "FROM agent_versions WHERE agent_id = $1 AND version = $2",
+        row["agent_id"],
+        row["agent_version"],
+    )
 
 
 @router.post("/sessions/{session_id}/claim")
@@ -81,15 +76,11 @@ async def heartbeat(
     session_id: str, body: dict[str, str], caller: str = Depends(caller_service_account)
 ) -> dict:
     async with db.transaction() as conn:
-        await _authorize(conn, session_id, caller)
+        row = await _authorize(conn, session_id, caller)
         ok = await store.heartbeat(conn, session_id, body["lease_id"])
         if not ok:
             raise HTTPException(409, "lease lost")
-        killed = await conn.fetchval(
-            "SELECT a.disabled FROM sessions s JOIN agents a ON a.id = s.agent_id WHERE s.id = $1",
-            session_id,
-        )
-    return {"ok": True, "disabled": bool(killed)}
+    return {"ok": True, "disabled": bool(row["disabled"])}
 
 
 async def _resolve_egress(conn, session_id: str, vault_ids: list[str], mcp_servers: dict) -> dict:
@@ -129,25 +120,26 @@ async def _resolve_egress(conn, session_id: str, vault_ids: list[str], mcp_serve
 async def session_config(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
+        version = await _agent_version(conn, row)
         await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
         mcp_servers = await _resolve_egress(
-            conn, session_id, list(row["vault_ids"] or []), row["mcp_servers"] or {}
+            conn, session_id, list(row["vault_ids"] or []), version["mcp_servers"] or {}
         )
     return SessionConfig(
         session_id=session_id,
         agent_id=row["agent_id"],
         agent_version=row["agent_version"],
         environment_id=row["environment_id"],
-        instructions=row["instructions"],
-        model=row["model"],
-        tools=list(row["tools"] or []),
-        permission_policy=PermissionPolicy.model_validate(row["permission_policy"] or {}),
+        instructions=version["instructions"],
+        model=version["model"],
+        tools=list(version["tools"] or []),
+        permission_policy=PermissionPolicy.model_validate(version["permission_policy"] or {}),
         mcp_servers=mcp_servers,
         session_bucket=row["session_bucket"],
         sdk_session_id=row["sdk_session_id"],
         budget_usd=float(row["budget_usd"]) if row["budget_usd"] is not None else None,
         cost_usd=float(row["cost_usd"]),
-        max_turns=row["max_turns"],
+        max_turns=version["max_turns"],
         disabled=row["disabled"],
     ).model_dump(mode="json")
 
@@ -158,12 +150,18 @@ async def queue(
 ) -> dict:
     """Long-poll for queued client events and control signals."""
     deadline = asyncio.get_running_loop().time() + max(0, min(wait, 55))
+    async with db.transaction() as conn:
+        await _authorize(conn, session_id, caller)
     while True:
         async with db.transaction() as conn:
-            row = await _authorize(conn, session_id, caller)
-            if row["disabled"]:
+            state = await conn.fetchrow(
+                "SELECT s.status, a.disabled FROM sessions s "
+                "JOIN agents a ON a.id = s.agent_id WHERE s.id = $1",
+                session_id,
+            )
+            if state["disabled"]:
                 return {"control": "kill", "events": []}
-            if row["status"] == str(SessionStatus.TERMINATED):
+            if state["status"] == str(SessionStatus.TERMINATED):
                 return {"control": "terminate", "events": []}
             events = await store.claim_queued_events(conn, session_id)
         if events:
@@ -194,21 +192,25 @@ async def sandbox_events(
     session_id: str, body: dict[str, Any], caller: str = Depends(caller_service_account)
 ) -> dict:
     events = [SandboxEvent.model_validate(e) for e in body.get("events", [])]
+    audit_rows = []
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
         for event in events:
             await store.append_event(conn, session_id, event.type, event.payload, processed=True)
             if event.type is EventType.AGENT_TOOL_USE:
-                audit.log_tool_call(
-                    run_id=body.get("run_id", session_id),
-                    session_id=session_id,
-                    agent_id=row["agent_id"],
-                    principal=row["created_by"],
-                    tool_name=event.payload.get("tool_name", ""),
-                    args_redacted=str(event.payload.get("input", ""))[:2000],
-                    decision=event.payload.get("decision", "auto_allowed"),
-                    tool_use_id=event.payload.get("tool_use_id"),
+                audit_rows.append(
+                    audit.tool_call_row(
+                        run_id=body.get("run_id", session_id),
+                        session_id=session_id,
+                        agent_id=row["agent_id"],
+                        principal=row["created_by"],
+                        tool_name=event.payload.get("tool_name", ""),
+                        args_redacted=str(event.payload.get("input", ""))[:2000],
+                        decision=event.payload.get("decision", "auto_allowed"),
+                        tool_use_id=event.payload.get("tool_use_id"),
+                    )
                 )
+    await audit.log_tool_calls(audit_rows)
     return {"ok": True, "count": len(events)}
 
 
@@ -228,14 +230,19 @@ async def permission(
         row = await _authorize(conn, session_id, caller)
         if row["disabled"]:
             return {"decision": "deny", "reason": "agent disabled", "killed": True}
-        policy = PermissionPolicy.model_validate(row["permission_policy"] or {})
+        version = await _agent_version(conn, row)
+        policy = PermissionPolicy.model_validate(version["permission_policy"] or {})
         if policy.mode_for(body.tool_name) is PermissionMode.ALWAYS_ALLOW:
-            return {"decision": "allow"}
+            return {"decision": "allow", "by": "policy"}
         existing = await store.get_confirmation(conn, session_id, body.call_hash)
         if existing and existing["status"] == "allowed":
-            return {"decision": "allow"}
+            return {"decision": "allow", "by": "user"}
         if existing and existing["status"] == "denied":
-            return {"decision": "deny", "reason": existing["deny_message"] or "denied by operator"}
+            return {
+                "decision": "deny",
+                "by": "user",
+                "reason": existing["deny_message"] or "denied by operator",
+            }
         await store.upsert_confirmation(
             conn, session_id, body.call_hash, body.tool_name, body.input, body.tool_use_id
         )
@@ -259,6 +266,7 @@ async def checkpoint(
 ) -> dict:
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
+        version = await _agent_version(conn, row)
         previous_cost = float(row["cost_usd"])
         await conn.execute(
             "UPDATE sessions SET sdk_session_id = COALESCE($2, sdk_session_id), "
@@ -280,7 +288,7 @@ async def checkpoint(
             await wake.wake(conn, session_id)
 
     created_by = row["created_by"] or ""
-    audit.log_run(
+    await audit.log_run(
         run_id=body.run_id or f"{session_id}-{int(datetime.now(UTC).timestamp())}",
         session_id=session_id,
         agent_id=row["agent_id"],
@@ -292,7 +300,7 @@ async def checkpoint(
         stop_reason=str(body.stop_reason),
         num_turns=body.num_turns,
         cost_usd=(body.cost_usd or previous_cost) - previous_cost,
-        model=row["model"],
+        model=version["model"],
     )
     return {"ok": True}
 
@@ -336,7 +344,10 @@ async def session_memory_writeback(
                         path,
                     )
                     continue
-                if len(str(content).encode()) > 64 * 1024:
+                if len(str(content).encode()) > config.MAX_MEMORY_BYTES:
+                    log.warning(
+                        "memory writeback skipped, %s/%s exceeds size limit", store_id, path
+                    )
                     continue
                 await conn.execute(
                     "INSERT INTO memories (id, store_id, path, content, updated_by) "
@@ -379,10 +390,7 @@ async def egress_route(token: str, caller: str = Depends(caller_service_account)
 
 @router.post("/deployments/{deployment_id}/fire")
 async def fire_deployment(deployment_id: str, _: str = Depends(caller_service_account)) -> dict:
-    from . import deployments
-
-    async with db.transaction() as conn:
-        return await deployments.fire(conn, deployment_id, trigger="schedule")
+    return await deployments.fire(deployment_id, trigger="schedule")
 
 
 @router.post("/reconcile")

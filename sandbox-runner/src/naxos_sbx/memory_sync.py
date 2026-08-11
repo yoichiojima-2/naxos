@@ -19,7 +19,7 @@ class MemorySync:
         self.store_dirs: dict[str, Path] = {}
 
     async def materialise(self) -> None:
-        payload = await self.channel._get("/memory")
+        payload = await self.channel.fetch_memory()
         for store_id, store in payload.get("stores", {}).items():
             directory = self.root / store["name"]
             directory.mkdir(parents=True, exist_ok=True)
@@ -49,7 +49,7 @@ class MemorySync:
             if files:
                 changes[store_id] = files
         if changes:
-            await self.channel._post("/memory", {"stores": changes})
+            await self.channel.writeback_memory(changes)
             log.info("memory writeback: %s stores", len(changes))
 
 

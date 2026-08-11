@@ -1,3 +1,4 @@
+import functools
 import logging
 from typing import Any
 
@@ -11,43 +12,46 @@ from .auth import principal_of
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
 
-_secrets = None
 
-
+@functools.cache
 def _secrets_client():
-    global _secrets
-    if _secrets is None:
-        from google.cloud import secretmanager
+    from google.cloud import secretmanager
 
-        _secrets = secretmanager.SecretManagerServiceAsyncClient()
-    return _secrets
+    return secretmanager.SecretManagerServiceAsyncClient()
 
 
-async def _store_secret(credential_id: str, value: str) -> str:
-    """Write the credential value to Secret Manager and return the resource name.
+def _secret_name(credential_id: str) -> str:
+    return f"projects/{config.PROJECT_ID}/secrets/vault-{credential_id}"
+
+
+async def _store_secret(credential_id: str, value: str) -> None:
+    """Write the credential value to Secret Manager.
 
     The value never touches Postgres; without a project (local dev) it is
     refused rather than stored somewhere weaker.
     """
     if not config.PROJECT_ID:
         raise HTTPException(503, "Secret Manager is not configured")
+    from google.api_core.exceptions import AlreadyExists
     from google.cloud import secretmanager
 
     client = _secrets_client()
-    parent = f"projects/{config.PROJECT_ID}"
     secret_id = f"vault-{credential_id}"
-    await client.create_secret(
-        request=secretmanager.CreateSecretRequest(
-            parent=parent,
-            secret_id=secret_id,
-            secret=secretmanager.Secret(
-                replication=secretmanager.Replication(
-                    automatic=secretmanager.Replication.Automatic()
-                )
-            ),
+    try:
+        await client.create_secret(
+            request=secretmanager.CreateSecretRequest(
+                parent=f"projects/{config.PROJECT_ID}",
+                secret_id=secret_id,
+                secret=secretmanager.Secret(
+                    replication=secretmanager.Replication(
+                        automatic=secretmanager.Replication.Automatic()
+                    )
+                ),
+            )
         )
-    )
-    name = f"{parent}/secrets/{secret_id}"
+    except AlreadyExists:
+        log.warning("secret %s already exists; adding a new version", secret_id)
+    name = _secret_name(credential_id)
     await client.add_secret_version(
         request=secretmanager.AddSecretVersionRequest(
             parent=name,
@@ -61,7 +65,6 @@ async def _store_secret(credential_id: str, value: str) -> str:
             members=[f"serviceAccount:{config.EGRESS_SA}"],
         )
         await client.set_iam_policy(request={"resource": name, "policy": policy})
-    return name
 
 
 async def _delete_secret(secret_ref: str) -> None:
@@ -126,7 +129,7 @@ async def create_credential(
         if not vault:
             raise HTTPException(404, "vault not found or archived")
         credential_id = new_id("credential")
-        secret_ref = await _store_secret(credential_id, body.value)
+        secret_ref = _secret_name(credential_id)
         row = await conn.fetchrow(
             "INSERT INTO vault_credentials (id, vault_id, name, type, secret_ref, target) "
             "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, vault_id, name, type, target, "
@@ -138,6 +141,7 @@ async def create_credential(
             secret_ref,
             body.target,
         )
+        await _store_secret(credential_id, body.value)
     return dict(row)
 
 

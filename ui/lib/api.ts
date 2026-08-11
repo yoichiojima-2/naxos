@@ -8,7 +8,13 @@ export async function api<T = unknown>(
     options.body = JSON.stringify(init.json);
     options.headers = { "content-type": "application/json", ...init.headers };
   }
-  const response = await fetch(path, options);
+  let response: Response;
+  try {
+    response = await fetch(path, options);
+  } catch (e) {
+    window.dispatchEvent(new CustomEvent("api-error", { detail: "network error — is the API reachable?" }));
+    throw e;
+  }
   if (!response.ok) {
     let detail = response.statusText;
     try {
@@ -16,10 +22,48 @@ export async function api<T = unknown>(
     } catch {
       /* keep statusText */
     }
-    throw new Error(`${response.status}: ${detail}`);
+    const message = `${response.status}: ${detail}`;
+    window.dispatchEvent(new CustomEvent("api-error", { detail: message }));
+    throw new Error(message);
   }
   return response.json();
 }
+
+export async function listFor<T>(
+  ids: string[],
+  path: (id: string) => string,
+): Promise<Record<string, T[]>> {
+  const results = await Promise.all(ids.map((id) => api<{ data: T[] }>(path(id))));
+  return Object.fromEntries(ids.map((id, i) => [id, results[i].data]));
+}
+
+export async function apiConfirm(
+  message: string,
+  path: string,
+  init?: RequestInit & { json?: unknown },
+): Promise<boolean> {
+  if (!window.confirm(message)) return false;
+  await api(path, init ?? { json: {} });
+  return true;
+}
+
+// Mirrors naxos_shared.events.EventType.
+export const EVENT_TYPES = [
+  "user.message",
+  "user.interrupt",
+  "user.tool_confirmation",
+  "user.custom_tool_result",
+  "agent.message",
+  "agent.thinking",
+  "agent.tool_use",
+  "agent.tool_result",
+  "session.status_running",
+  "session.status_idle",
+  "session.status_terminated",
+  "session.error",
+  "span.model_request_start",
+  "span.model_request_end",
+] as const;
 
 export type Agent = {
   id: string;
@@ -30,6 +74,42 @@ export type Agent = {
   disabled: boolean;
   model?: string;
   instructions?: string | null;
+};
+
+export const agentName = (agents: Agent[], id: string) =>
+  agents.find((a) => a.id === id)?.name ?? id;
+
+export type PermissionMode = "always_ask" | "always_allow";
+export type PermissionRule = { tool: string; mode: PermissionMode };
+export type PermissionPolicy = { default: PermissionMode; rules: PermissionRule[] };
+
+export type AgentDetail = Agent & {
+  version: number;
+  model: string;
+  instructions: string | null;
+  tools: string[];
+  permission_policy: PermissionPolicy;
+  mcp_servers: Record<string, unknown>;
+  vault_ids: string[];
+  memory_store_ids: string[];
+  default_budget_usd: string | number | null;
+  max_turns: number | null;
+  created_by?: string;
+  created_at?: string;
+};
+
+export type AgentIn = {
+  name: string;
+  environment_id: string;
+  model: string;
+  instructions: string | null;
+  tools: string[];
+  permission_policy: PermissionPolicy;
+  mcp_servers: Record<string, unknown>;
+  vault_ids: string[];
+  memory_store_ids: string[];
+  default_budget_usd: number | null;
+  max_turns: number | null;
 };
 
 export type Session = {
@@ -57,9 +137,14 @@ export type Deployment = {
   id: string;
   name: string;
   agent_id: string;
+  agent_version: number | null;
   cron: string;
   timezone: string;
   paused: boolean;
+  initial_events: { type: string; content?: { type: string; text?: string }[] }[];
+  budget_usd: string | null;
+  created_by: string;
+  created_at: string;
 };
 
 export type DeploymentRun = {
@@ -72,6 +157,13 @@ export type DeploymentRun = {
 
 export type Environment = { id: string; name: string };
 export type Vault = { id: string; name: string };
-export type Credential = { id: string; name: string; type: string; target: Record<string, string> };
+export type Credential = {
+  id: string;
+  name: string;
+  type: string;
+  target: Record<string, string>;
+  created_at: string;
+};
 export type MemoryStore = { id: string; name: string };
 export type Memory = { id: string; path: string; size?: number; content?: string };
+export type WorkspaceFile = { path: string; size: number };

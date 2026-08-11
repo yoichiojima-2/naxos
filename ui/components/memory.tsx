@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, Memory, MemoryStore } from "@/lib/api";
+import { api, apiConfirm, listFor, Memory, MemoryStore } from "@/lib/api";
+import { BackIcon } from "@/components/icons";
+import CountHeader from "@/components/list-header";
 
 export default function MemoryStores() {
   const [stores, setStores] = useState<MemoryStore[]>([]);
@@ -12,10 +14,12 @@ export default function MemoryStores() {
   const refresh = useCallback(async () => {
     const result = await api<{ data: MemoryStore[] }>("/v1/memory_stores");
     setStores(result.data);
-    for (const store of result.data) {
-      const items = await api<{ data: Memory[] }>(`/v1/memory_stores/${store.id}/memories`);
-      setMemories((prev) => ({ ...prev, [store.id]: items.data }));
-    }
+    setMemories(
+      await listFor<Memory>(
+        result.data.map((s) => s.id),
+        (id) => `/v1/memory_stores/${id}/memories`,
+      ),
+    );
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -40,12 +44,30 @@ export default function MemoryStores() {
     refresh();
   }
 
+  async function deleteMemory(storeId: string, memory: Memory) {
+    if (
+      await apiConfirm(
+        `Delete "${memory.path}"?`,
+        `/v1/memory_stores/${storeId}/memories/${memory.id}`,
+        { method: "DELETE" },
+      )
+    ) {
+      refresh();
+    }
+  }
+
   if (editing) {
     return (
       <div className="panel">
-        <div className="row between" style={{ marginBottom: 12 }}>
+        <div className="row between mb12">
           <div className="row">
-            <button className="ghost" onClick={() => setEditing(null)}>&larr;</button>
+            <button
+              className="ghost flex-inline"
+              onClick={() => setEditing(null)}
+              aria-label="back"
+            >
+              <BackIcon />
+            </button>
             <span className="mono">{editing.path}</span>
           </div>
           <button className="primary" onClick={save}>Save</button>
@@ -60,21 +82,18 @@ export default function MemoryStores() {
   }
 
   return (
-    <div className="panel">
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Memory stores</strong>
-        <div className="row">
-          <input
-            placeholder="new store name"
-            value={storeName}
-            onChange={(e) => setStoreName(e.target.value)}
-            style={{ width: 220 }}
-          />
-          <button className="primary" onClick={createStore} disabled={!storeName}>Create</button>
-        </div>
-      </div>
+    <>
+      <CountHeader count={stores.length} noun="store">
+        <input
+          placeholder="new store name"
+          value={storeName}
+          onChange={(e) => setStoreName(e.target.value)}
+          style={{ width: 220 }}
+        />
+        <button className="primary" onClick={createStore} disabled={!storeName}>Create</button>
+      </CountHeader>
       {stores.map((store) => (
-        <div className="panel" style={{ background: "var(--panel2)" }} key={store.id}>
+        <div className="panel" key={store.id}>
           <div className="row between">
             <strong>{store.name}</strong>
             <button
@@ -86,18 +105,31 @@ export default function MemoryStores() {
               New file
             </button>
           </div>
-          <table>
-            <tbody>
-              {(memories[store.id] ?? []).map((memory) => (
-                <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
-                  <td className="mono">{memory.path}</td>
-                  <td className="muted" style={{ textAlign: "right" }}>{memory.size} B</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {(memories[store.id] ?? []).map((memory) => (
+                  <tr key={memory.id} className="click" onClick={() => openMemory(store.id, memory)}>
+                    <td className="mono">{memory.path}</td>
+                    <td className="muted ta-right">{memory.size} B</td>
+                    <td className="ta-right" style={{ width: 1 }}>
+                      <button
+                        className="danger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteMemory(store.id, memory);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
-    </div>
+    </>
   );
 }

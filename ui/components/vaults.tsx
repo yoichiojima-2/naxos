@@ -1,22 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, Credential, Vault } from "@/lib/api";
+import { api, apiConfirm, listFor, Credential, Vault } from "@/lib/api";
+
+function targetLabel(cred: Credential) {
+  if (cred.type === "header" && cred.target.mcp_server) {
+    return `mcp:${cred.target.mcp_server} · ${cred.target.header ?? "authorization"}`;
+  }
+  if (cred.type === "env" && cred.target.env_var) {
+    return `env:${cred.target.env_var}`;
+  }
+  return JSON.stringify(cred.target);
+}
 
 export default function Vaults() {
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [credentials, setCredentials] = useState<Record<string, Credential[]>>({});
   const [vaultName, setVaultName] = useState("");
   const [form, setForm] = useState({ vaultId: "", name: "", value: "", mcpServer: "" });
-  const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Vault[] }>("/v1/vaults");
     setVaults(result.data);
-    for (const vault of result.data) {
-      const creds = await api<{ data: Credential[] }>(`/v1/vaults/${vault.id}/credentials`);
-      setCredentials((prev) => ({ ...prev, [vault.id]: creds.data }));
-    }
+    setCredentials(
+      await listFor<Credential>(
+        result.data.map((v) => v.id),
+        (id) => `/v1/vaults/${id}/credentials`,
+      ),
+    );
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -28,30 +39,44 @@ export default function Vaults() {
   }
 
   async function addCredential() {
-    try {
-      await api(`/v1/vaults/${form.vaultId || vaults[0]?.id}/credentials`, {
-        json: {
-          name: form.name,
-          type: "header",
-          value: form.value,
-          target: { mcp_server: form.mcpServer, header: "authorization", prefix: "Bearer " },
-        },
-      });
-      setForm({ vaultId: "", name: "", value: "", mcpServer: "" });
+    await api(`/v1/vaults/${form.vaultId || vaults[0]?.id}/credentials`, {
+      json: {
+        name: form.name,
+        type: "header",
+        value: form.value,
+        target: { mcp_server: form.mcpServer, header: "authorization", prefix: "Bearer " },
+      },
+    });
+    setForm({ vaultId: "", name: "", value: "", mcpServer: "" });
+    refresh();
+  }
+
+  async function deleteVault(vault: Vault) {
+    if (
+      await apiConfirm(
+        `Delete vault "${vault.name}"? Agents using it lose its credentials.`,
+        `/v1/vaults/${vault.id}/archive`,
+      )
+    ) {
+      setVaults((prev) => prev.filter((v) => v.id !== vault.id));
+    }
+  }
+
+  async function deleteCredential(vaultId: string, cred: Credential) {
+    if (
+      await apiConfirm(
+        `Delete credential "${cred.name}"?`,
+        `/v1/vaults/${vaultId}/credentials/${cred.id}`,
+        { method: "DELETE" },
+      )
+    ) {
       refresh();
-    } catch (e) {
-      setError(String(e));
     }
   }
 
   return (
-    <div className="panel">
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Vaults</strong>
-        <span className="muted">values are write-only; the sandbox never sees them</span>
-      </div>
-
-      <div className="row" style={{ marginBottom: 16 }}>
+    <>
+      <div className="row mb16">
         <input
           placeholder="new vault name"
           value={vaultName}
@@ -62,37 +87,47 @@ export default function Vaults() {
       </div>
 
       {vaults.map((vault) => (
-        <div className="panel" style={{ background: "var(--panel2)" }} key={vault.id}>
+        <div className="panel" key={vault.id}>
           <div className="row between">
             <strong>{vault.name}</strong>
-            <span className="muted mono">{vault.id}</span>
+            <span className="row">
+              <span className="muted mono">{vault.id}</span>
+              <button className="danger" onClick={() => deleteVault(vault)}>Delete</button>
+            </span>
           </div>
-          <table>
-            <tbody>
-              {(credentials[vault.id] ?? []).map((cred) => (
-                <tr key={cred.id}>
-                  <td>{cred.name}</td>
-                  <td className="muted">{cred.type} → mcp:{cred.target.mcp_server}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <button
-                      className="danger"
-                      onClick={async () => {
-                        await api(`/v1/vaults/${vault.id}/credentials/${cred.id}`, { method: "DELETE" });
-                        refresh();
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>name</th><th>type</th><th>target</th><th>value</th><th>created</th><th /></tr>
+              </thead>
+              <tbody>
+                {(credentials[vault.id] ?? []).length === 0 && (
+                  <tr><td className="empty" colSpan={6}>no credentials registered in this vault.</td></tr>
+                )}
+                {(credentials[vault.id] ?? []).map((cred) => (
+                  <tr key={cred.id}>
+                    <td>{cred.name}</td>
+                    <td className="muted">{cred.type}</td>
+                    <td className="muted mono">{targetLabel(cred)}</td>
+                    <td className="muted" title="Secret values are write-only: stored in Secret Manager, injected by the egress proxy, never returned by the API.">
+                      •••• <span className="muted">write-only</span>
+                    </td>
+                    <td className="muted">{new Date(cred.created_at).toLocaleDateString()}</td>
+                    <td className="ta-right">
+                      <button className="danger" onClick={() => deleteCredential(vault.id, cred)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
 
       {vaults.length > 0 && (
-        <div className="panel" style={{ background: "var(--panel2)" }}>
+        <div className="panel">
           <strong>Add credential</strong>
           <div className="grid2">
             <div>
@@ -114,14 +149,13 @@ export default function Vaults() {
               <input type="password" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
             </div>
           </div>
-          {error && <p className="muted" style={{ color: "var(--danger)" }}>{error}</p>}
-          <div style={{ marginTop: 12 }}>
+          <div className="mt12">
             <button className="primary" onClick={addCredential} disabled={!form.name || !form.value}>
               Store credential
             </button>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -6,7 +6,8 @@ import asyncpg
 from naxos_shared.events import EventType, SessionStatus, StopReason
 from naxos_shared.ids import new_id
 
-from . import config
+from . import config, notify
+from .db import rowcount
 
 
 async def append_event(
@@ -33,7 +34,7 @@ async def append_event(
     )
     if seq is None:
         raise LookupError(session_id)
-    return await conn.fetchrow(
+    record = await conn.fetchrow(
         "INSERT INTO session_events (session_id, seq, type, payload, principal, processed_at) "
         "VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN now() ELSE NULL END) RETURNING *",
         session_id,
@@ -43,6 +44,8 @@ async def append_event(
         principal,
         processed,
     )
+    await conn.execute("SELECT pg_notify($1, $2)", notify.CHANNEL, session_id)
+    return record
 
 
 async def list_events(
@@ -74,7 +77,6 @@ async def set_status(
     session_id: str,
     status: SessionStatus,
     stop_reason: StopReason | None = None,
-    emit: bool = True,
 ) -> None:
     await conn.execute(
         "UPDATE sessions SET status = $2, stop_reason = $3, updated_at = now(), "
@@ -84,8 +86,6 @@ async def set_status(
         str(status),
         str(stop_reason) if stop_reason else None,
     )
-    if not emit:
-        return
     event_type = {
         SessionStatus.RUNNING: EventType.SESSION_STATUS_RUNNING,
         SessionStatus.IDLE: EventType.SESSION_STATUS_IDLE,
@@ -139,7 +139,7 @@ async def heartbeat(conn: asyncpg.Connection, session_id: str, lease_id: str) ->
         lease_id,
         config.LEASE_TTL_SECONDS,
     )
-    return result.endswith(" 1")
+    return rowcount(result) == 1
 
 
 async def release_lease(conn: asyncpg.Connection, session_id: str, lease_id: str) -> None:
@@ -218,4 +218,4 @@ async def decide_confirmation(
         principal,
         deny_message,
     )
-    return result.endswith(" 1")
+    return rowcount(result) == 1

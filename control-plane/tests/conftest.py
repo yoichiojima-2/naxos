@@ -5,6 +5,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres@/naxos?host=/tmp&port=55432")
+os.environ.setdefault("NAXOS_DEV_MODE", "1")
 
 from naxos_cp import api, db, internal, wake
 
@@ -34,14 +35,14 @@ async def clean(pool):
 
 @pytest_asyncio.fixture
 async def client(pool):
-    transport = ASGITransport(app=api.create_app_without_lifespan())
+    transport = ASGITransport(app=api.create_app(manage_pool=False))
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
 @pytest_asyncio.fixture
 async def internal_client(pool):
-    transport = ASGITransport(app=internal.create_app_without_lifespan())
+    transport = ASGITransport(app=internal.create_app(manage_pool=False))
     async with AsyncClient(transport=transport, base_url="http://internal") as c:
         yield c
 

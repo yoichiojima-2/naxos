@@ -1,17 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, Agent, Session, SessionEvent } from "@/lib/api";
+import ReactMarkdown, { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { BackIcon } from "@/components/icons";
+import CountHeader from "@/components/list-header";
 
-const BADGE: Record<string, string> = {
-  idle: "idle",
-  running: "running",
-  rescheduling: "rescheduling",
-  terminated: "terminated",
+const MD_COMPONENTS: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
 };
 
 export default function Sessions({ agents }: { agents: Agent[] }) {
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessions, setSessions] = useState<Session[] | null>(null);
   const [open, setOpen] = useState<Session | null>(null);
   const [agentId, setAgentId] = useState("");
 
@@ -41,37 +42,53 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
   }
 
   return (
-    <div className="panel">
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <strong>Sessions</strong>
-        <div className="row">
-          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ width: 220 }}>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-          <button className="primary" onClick={createSession} disabled={!agents.length}>
-            New session
-          </button>
+    <>
+      <CountHeader count={sessions === null ? null : sessions.length} noun="session">
+        <select value={agentId} onChange={(e) => setAgentId(e.target.value)} style={{ width: 220 }}>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+        <button className="primary" onClick={createSession} disabled={!agents.length}>
+          New session
+        </button>
+      </CountHeader>
+      <div className="panel flush">
+        <div className="table-wrap">
+          <table>
+          <thead>
+            <tr><th>title</th><th>agent</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
+          </thead>
+          <tbody>
+            {sessions === null && (
+              <tr><td className="empty" colSpan={6}>loading…</td></tr>
+            )}
+            {sessions?.length === 0 && (
+              <tr><td className="empty" colSpan={6}>no sessions yet — pick an agent above and start one.</td></tr>
+            )}
+            {(sessions ?? []).map((s) => {
+              const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
+              return (
+                <tr key={s.id} className="click" onClick={() => setOpen(s)}>
+                  <td>{s.title ?? s.id}</td>
+                  <td className="muted">{agentName(agents, s.agent_id)}</td>
+                  <td>
+                    <span className={`badge ${needsAction ? "requires_action" : s.status}`}>
+                      {needsAction ? "needs approval" : s.status}
+                      {s.stop_reason && !needsAction ? `:${s.stop_reason}` : ""}
+                    </span>
+                  </td>
+                  <td className="muted">{s.created_by}</td>
+                  <td className="mono">${Number(s.cost_usd).toFixed(4)}</td>
+                  <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
         </div>
       </div>
-      <table>
-        <thead>
-          <tr><th>title</th><th>status</th><th>principal</th><th>cost</th><th>created</th></tr>
-        </thead>
-        <tbody>
-          {sessions.map((s) => (
-            <tr key={s.id} className="click" onClick={() => setOpen(s)}>
-              <td>{s.title ?? s.id}</td>
-              <td><span className={`badge ${BADGE[s.status]}`}>{s.status}{s.stop_reason ? `:${s.stop_reason}` : ""}</span></td>
-              <td className="muted">{s.created_by}</td>
-              <td className="mono">${Number(s.cost_usd).toFixed(4)}</td>
-              <td className="muted">{new Date(s.created_at).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    </>
   );
 }
 
@@ -79,7 +96,26 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState(session.status);
+  const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const source = useRef<EventSource | null>(null);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const followed = useRef(false);
+
+  useEffect(() => {
+    if (!events.length) return;
+    const nearBottom =
+      window.innerHeight + window.scrollY >= document.body.offsetHeight - 240;
+    if (!followed.current || nearBottom) {
+      endRef.current?.scrollIntoView({ block: "end" });
+      followed.current = true;
+    }
+  }, [events.length]);
+
+  async function loadFiles() {
+    if (files) { setFiles(null); return; }
+    const result = await api<{ data: WorkspaceFile[] }>(`/v1/sessions/${session.id}/workspace`);
+    setFiles(result.data);
+  }
 
   useEffect(() => {
     const es = new EventSource(`/v1/sessions/${session.id}/events?stream=sse`);
@@ -92,12 +128,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
       if (event.type === "session.status_terminated") setStatus("terminated");
     };
     // Named SSE events require a listener per type; a catch-all keeps this simple.
-    [
-      "user.message", "user.interrupt", "user.tool_confirmation", "user.custom_tool_result",
-      "agent.message", "agent.thinking", "agent.tool_use", "agent.tool_result",
-      "session.status_running", "session.status_idle", "session.status_terminated",
-      "session.error", "span.model_request_start", "span.model_request_end",
-    ].forEach((type) => es.addEventListener(type, push));
+    EVENT_TYPES.forEach((type) => es.addEventListener(type, push));
     return () => es.close();
   }, [session.id]);
 
@@ -129,17 +160,41 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
 
   return (
     <div className="panel">
-      <div className="row between" style={{ marginBottom: 12 }}>
+      <div className="row between mb12">
         <div className="row">
-          <button className="ghost" onClick={onBack}>&larr;</button>
+          <button className="ghost flex-inline" onClick={onBack} aria-label="back">
+            <BackIcon />
+          </button>
           <strong>{session.title ?? session.id}</strong>
-          <span className={`badge ${BADGE[status]}`}>{status}</span>
+          <span className={`badge ${status}`}>{status}</span>
         </div>
         <div className="row">
+          <button className="ghost" onClick={loadFiles}>Files</button>
           <button className="ghost" onClick={interrupt}>Interrupt</button>
         </div>
       </div>
+      {files && (
+        <div className="panel mb12">
+          {files.length === 0 && <span className="muted">workspace is empty</span>}
+          {files.map((f) => (
+            <div className="row between" key={f.path}>
+              <a
+                className="mono"
+                href={`/v1/sessions/${session.id}/workspace/${f.path}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {f.path}
+              </a>
+              <span className="muted mono">{f.size} B</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="timeline">
+        {events.length === 0 && status !== "rescheduling" && (
+          <span className="muted">no messages yet — say something below to begin.</span>
+        )}
         {events.map((event) => (
           <Event
             key={event.seq}
@@ -158,10 +213,12 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
           placeholder="Message the agent…"
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
+          onFocus={(e) => e.target.scrollIntoView({ block: "center" })}
           disabled={status === "terminated"}
         />
         <button className="primary" onClick={send} disabled={status === "terminated"}>Send</button>
       </div>
+      <div ref={endRef} />
     </div>
   );
 }
@@ -175,42 +232,100 @@ function Event({
   decided: Set<string>;
   onConfirm: (hash: string, result: "allow" | "deny") => void;
 }) {
-  const kind = event.type.split(".")[0];
-  const payload = event.payload as Record<string, any>;
-
-  if (event.type === "agent.tool_use" && payload.decision === "awaiting_confirmation") {
-    const hash = String(payload.call_hash);
-    const pending = !decided.has(hash);
-    return (
-      <div className="event ask">
-        <div className="row between">
-          <span>
-            <span className="badge requires_action">approval</span>{" "}
-            <strong>{payload.tool_name}</strong>
-          </span>
-          {pending && (
-            <span className="row">
-              <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
-              <button className="danger" onClick={() => onConfirm(hash, "deny")}>Deny</button>
-            </span>
-          )}
-        </div>
-        <pre>{JSON.stringify(payload.input, null, 2)}</pre>
-      </div>
-    );
+  if (event.type === "agent.tool_use" && event.payload.decision === "awaiting_confirmation") {
+    return <ApprovalEvent event={event} decided={decided} onConfirm={onConfirm} />;
   }
+  if (
+    event.type === "agent.thinking" ||
+    event.type === "agent.tool_use" ||
+    event.type === "agent.tool_result"
+  ) {
+    return <FoldedEvent event={event} />;
+  }
+  return <MessageEvent event={event} />;
+}
 
+function ApprovalEvent({
+  event,
+  decided,
+  onConfirm,
+}: {
+  event: SessionEvent;
+  decided: Set<string>;
+  onConfirm: (hash: string, result: "allow" | "deny") => void;
+}) {
+  const hash = String(event.payload.call_hash);
+  const pending = !decided.has(hash);
+  return (
+    <div className="event ask">
+      <div className="row between">
+        <span>
+          <span className="badge requires_action">approval</span>{" "}
+          <strong>{String(event.payload.tool_name ?? "")}</strong>
+        </span>
+        {pending && (
+          <span className="row">
+            <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
+            <button className="danger" onClick={() => onConfirm(hash, "deny")}>Deny</button>
+          </span>
+        )}
+      </div>
+      <pre>{JSON.stringify(event.payload.input, null, 2)}</pre>
+    </div>
+  );
+}
+
+function FoldedEvent({ event }: { event: SessionEvent }) {
+  const payload = event.payload;
+  let label = "thinking";
+  let name = "";
+  let detail = "";
+  let flag = "";
+  if (event.type === "agent.tool_use") {
+    label = "tool";
+    name = String(payload.tool_name ?? "");
+    detail = JSON.stringify(payload.input ?? {}, null, 2);
+    if (payload.decision === "user_denied") flag = "denied";
+    if (payload.decision === "killed") flag = "killed";
+  } else if (event.type === "agent.tool_result") {
+    label = "result";
+    detail = String(payload.content ?? "");
+    if (payload.is_error) flag = "error";
+  } else {
+    detail = String(payload.text ?? "");
+  }
+  const summary = (
+    <>
+      {label}
+      {name && <span className="mono">{name}</span>}
+      {flag && <span className="badge terminated">{flag}</span>}
+    </>
+  );
+  return (
+    <div className="event agent fold">
+      {detail ? (
+        <details>
+          <summary>{summary}</summary>
+          <pre>{detail}</pre>
+        </details>
+      ) : (
+        <span className="fold-line">{summary}</span>
+      )}
+    </div>
+  );
+}
+
+function MessageEvent({ event }: { event: SessionEvent }) {
+  const kind = event.type.split(".")[0];
+  const payload = event.payload;
   let body = "";
+  let markdown = "";
   if (event.type === "user.message") {
     body = (payload.content as { text?: string }[] | undefined)
       ?.map((b) => b.text)
       .join("\n") ?? "";
   } else if (event.type === "agent.message") {
-    body = String(payload.text ?? "");
-  } else if (event.type === "agent.tool_use") {
-    body = `${payload.tool_name} ${JSON.stringify(payload.input ?? {})}`;
-  } else if (event.type === "agent.tool_result") {
-    body = String(payload.content ?? "").slice(0, 600);
+    markdown = String(payload.text ?? "");
   } else if (event.type === "session.error") {
     body = String(payload.error ?? "");
   }
@@ -224,6 +339,13 @@ function Event({
       ].join(" ").trim()}
     >
       <span className="muted">{event.type}{event.principal ? ` · ${event.principal}` : ""}</span>
+      {markdown && (
+        <div className="md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {markdown}
+          </ReactMarkdown>
+        </div>
+      )}
       {body && <pre>{body}</pre>}
     </div>
   );

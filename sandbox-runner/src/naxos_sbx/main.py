@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from naxos_shared.events import EventType, StopReason
 
+from .config import IDLE_LINGER_SECONDS
 from .control import ControlChannel
 from .harness import CONTINUE_PROMPT, Harness
 from .memory_sync import MemorySync
@@ -13,7 +14,6 @@ from .workspace import Workspace
 
 log = logging.getLogger(__name__)
 
-IDLE_LINGER_SECONDS = float(os.environ.get("IDLE_LINGER_SECONDS", "120"))
 HEARTBEAT_SECONDS = 30.0
 QUEUE_WAIT_SECONDS = 25
 
@@ -76,6 +76,39 @@ async def _heartbeat(channel: ControlChannel, stop: asyncio.Event) -> None:
             continue
 
 
+async def _finalize(
+    channel: ControlChannel,
+    harness: Harness | None,
+    workspace: Workspace | None,
+    memory: MemorySync | None,
+    started_at: str,
+    stop_reason: StopReason,
+) -> None:
+    """Best-effort teardown: every step runs even when earlier ones fail."""
+    if memory is not None:
+        try:
+            await memory.writeback()
+        except Exception:
+            log.exception("memory writeback failed")
+    if workspace is not None:
+        try:
+            workspace.checkpoint()
+        except Exception:
+            log.exception("workspace checkpoint failed")
+    try:
+        await channel.checkpoint(
+            sdk_session_id=harness.sdk_session_id if harness else None,
+            cost_usd=harness.cost_usd if harness else None,
+            stop_reason=str(stop_reason),
+            run_id=harness.run_id if harness else None,
+            started_at=started_at,
+            num_turns=harness.num_turns if harness else 0,
+        )
+    except Exception:
+        log.exception("control-plane checkpoint failed")
+    await channel.aclose()
+
+
 async def run_session(session_id: str) -> None:
     channel = ControlChannel(session_id)
     started_at = datetime.now(UTC).isoformat()
@@ -88,7 +121,7 @@ async def run_session(session_id: str) -> None:
     try:
         await channel.claim()
         config = await channel.config()
-        workspace = Workspace(session_id, config["session_bucket"])
+        workspace = Workspace(session_id, config.session_bucket)
         workspace.restore()
         memory = MemorySync(channel, workspace.ws)
         await memory.materialise()
@@ -129,28 +162,7 @@ async def run_session(session_id: str) -> None:
         stop.set()
         if heartbeat_task is not None:
             heartbeat_task.cancel()
-        if memory is not None:
-            try:
-                await memory.writeback()
-            except Exception:
-                log.exception("memory writeback failed")
-        if workspace is not None:
-            try:
-                workspace.checkpoint()
-            except Exception:
-                log.exception("workspace checkpoint failed")
-        try:
-            await channel.checkpoint(
-                sdk_session_id=harness.sdk_session_id if harness else None,
-                cost_usd=harness.cost_usd if harness else None,
-                stop_reason=str(stop_reason),
-                run_id=harness.run_id if harness else None,
-                started_at=started_at,
-                num_turns=harness.num_turns if harness else 0,
-            )
-        except Exception:
-            log.exception("control-plane checkpoint failed")
-        await channel.aclose()
+        await _finalize(channel, harness, workspace, memory, started_at, stop_reason)
 
 
 def main() -> None:
