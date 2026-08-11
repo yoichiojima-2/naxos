@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown, { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { agentName, api, Agent, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+
+const MD_COMPONENTS: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+};
 
 const BADGE: Record<string, string> = {
   idle: "idle",
@@ -261,12 +267,13 @@ function Event({
   }
 
   let body = "";
+  let markdown = "";
   if (event.type === "user.message") {
     body = (payload.content as { text?: string }[] | undefined)
       ?.map((b) => b.text)
       .join("\n") ?? "";
   } else if (event.type === "agent.message") {
-    body = String(payload.text ?? "");
+    markdown = String(payload.text ?? "");
   } else if (event.type === "agent.tool_use") {
     body = `${payload.tool_name} ${JSON.stringify(payload.input ?? {})}`;
   } else if (event.type === "agent.tool_result") {
@@ -284,6 +291,13 @@ function Event({
       ].join(" ").trim()}
     >
       <span className="muted">{event.type}{event.principal ? ` · ${event.principal}` : ""}</span>
+      {markdown && (
+        <div className="md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {markdown}
+          </ReactMarkdown>
+        </div>
+      )}
       {body && <pre>{body}</pre>}
     </div>
   );
