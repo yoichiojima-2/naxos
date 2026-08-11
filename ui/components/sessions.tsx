@@ -5,16 +5,30 @@ import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFil
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
 import Markdown from "@/components/markdown";
+import FilterInput from "@/components/filter-input";
+
+const STATUS_FILTERS = ["needs approval", "running", "idle", "rescheduling", "terminated"] as const;
+
+const statusOf = (s: Session) =>
+  s.status === "idle" && s.stop_reason === "requires_action" ? "needs approval" : s.status;
 
 export default function Sessions({ agents }: { agents: Agent[] }) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [open, setOpen] = useState<Session | null>(null);
   const [agentId, setAgentId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const refresh = useCallback(async () => {
-    const result = await api<{ data: Session[] }>("/v1/sessions");
+    const result = await api<{ data: Session[] }>("/v1/sessions?limit=200");
     setSessions(result.data);
+    setSelected((prev) => {
+      const ids = new Set(result.data.map((s) => s.id));
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
   }, []);
 
   useEffect(() => {
@@ -42,10 +56,41 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     });
   }
 
-  const allSelected = !!sessions?.length && sessions.every((s) => selected.has(s.id));
+  const q = query.trim().toLowerCase();
+  const base = (sessions ?? []).filter((s) => {
+    if (agentFilter && s.agent_id !== agentFilter) return false;
+    if (!q) return true;
+    return `${s.title ?? ""} ${s.id} ${s.created_by ?? ""} ${agentName(agents, s.agent_id)}`
+      .toLowerCase()
+      .includes(q);
+  });
+  const filtered = base.filter((s) => !statusFilter || statusOf(s) === statusFilter);
+  const hasFilters = !!(q || agentFilter || statusFilter);
+
+  const statusCounts = new Map<string, number>();
+  for (const s of base) {
+    const status = statusOf(s);
+    statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+  }
+
+  function clearFilters() {
+    setQuery("");
+    setAgentFilter("");
+    setStatusFilter("");
+  }
+
+  const allSelected = !!filtered.length && filtered.every((s) => selected.has(s.id));
+  const hiddenSelected = selected.size - filtered.filter((s) => selected.has(s.id)).length;
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set((sessions ?? []).map((s) => s.id)));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const s of filtered) {
+        if (allSelected) next.delete(s.id);
+        else next.add(s.id);
+      }
+      return next;
+    });
   }
 
   const noun = selected.size === 1 ? "session" : "sessions";
@@ -95,10 +140,13 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
 
   return (
     <>
-      <CountHeader count={sessions === null ? null : sessions.length} noun="session">
+      <CountHeader count={sessions === null ? null : filtered.length} of={sessions?.length} noun="session">
         {selected.size > 0 ? (
           <>
-            <span className="muted">{selected.size} selected</span>
+            <span className="muted">
+              {selected.size} selected
+              {hiddenSelected > 0 && ` (${hiddenSelected} hidden by filters)`}
+            </span>
             <button className="ghost" onClick={bulkSetBudget}>Set budget</button>
             <button className="danger" onClick={bulkTerminate}>Terminate</button>
             <button className="danger" onClick={bulkDelete}>Delete</button>
@@ -117,6 +165,43 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
           </>
         )}
       </CountHeader>
+      {!!sessions?.length && (
+        <div className="row mb12">
+          <FilterInput
+            placeholder="Filter by title, id, or principal…"
+            value={query}
+            onChange={setQuery}
+          />
+          <select
+            className="filter-input"
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            aria-label="filter by agent"
+          >
+            <option value="">all agents</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          {STATUS_FILTERS.filter(
+            (status) => statusCounts.get(status) || status === statusFilter,
+          ).map((status) => (
+            <button
+              key={status}
+              className={`chip ${statusFilter === status ? "on" : ""}`}
+              onClick={() => setStatusFilter(statusFilter === status ? "" : status)}
+            >
+              {status} {statusCounts.get(status) ?? 0}
+            </button>
+          ))}
+          {hasFilters && (
+            <button className="ghost" onClick={clearFilters}>Clear filters</button>
+          )}
+          {sessions?.length === 200 && (
+            <span className="muted">showing the newest 200 sessions</span>
+          )}
+        </div>
+      )}
       <div className="panel flush">
         <div className="table-wrap">
           <table>
@@ -140,7 +225,10 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
             {sessions?.length === 0 && (
               <tr><td className="empty" colSpan={7}>no sessions yet — pick an agent above and start one.</td></tr>
             )}
-            {(sessions ?? []).map((s) => {
+            {!!sessions?.length && filtered.length === 0 && (
+              <tr><td className="empty" colSpan={7}>no sessions match the current filters.</td></tr>
+            )}
+            {filtered.map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
               return (
                 <tr key={s.id} className="click" onClick={() => setOpen(s)}>
@@ -207,6 +295,7 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
       setEvents((prev) => (prev.some((e) => e.seq === event.seq) ? prev : [...prev, event]));
       if (event.type === "session.status_running") setStatus("running");
       if (event.type === "session.status_idle") setStatus("idle");
+      if (event.type === "session.status_rescheduling") setStatus("rescheduling");
       if (event.type === "session.status_terminated") setStatus("terminated");
     };
     // Named SSE events require a listener per type; a catch-all keeps this simple.
@@ -286,7 +375,9 @@ function Timeline({ session, onBack }: { session: Session; onBack: () => void })
           />
         ))}
         {status === "rescheduling" && (
-          <div className="event system"><span className="muted">session is waking up…</span></div>
+          <div className="event system">
+            <span className="muted"><span className="spinner" />session is waking up…</span>
+          </div>
         )}
       </div>
       <div className="composer">

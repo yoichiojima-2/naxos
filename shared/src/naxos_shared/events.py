@@ -31,6 +31,7 @@ class EventType(StrEnum):
     AGENT_ARTIFACT = "agent.artifact"
     SESSION_STATUS_RUNNING = "session.status_running"
     SESSION_STATUS_IDLE = "session.status_idle"
+    SESSION_STATUS_RESCHEDULING = "session.status_rescheduling"
     SESSION_STATUS_TERMINATED = "session.status_terminated"
     SESSION_ERROR = "session.error"
     SPAN_MODEL_REQUEST_START = "span.model_request_start"

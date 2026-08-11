@@ -237,6 +237,8 @@ label {
 .hint { color: var(--faint); font-size: 12.5px; margin-top: 6px; }
 .hint.error { color: var(--danger); }
 
+.filter-input { width: 200px; flex: none; }
+
 /* --- tables --------------------------------------------------------------- */
 
 table { width: 100%; border-collapse: collapse; }
@@ -260,6 +262,7 @@ tr.click:hover td { background: var(--bg); }
 .badge.idle { color: var(--muted); }
 .badge.running { color: var(--ok); background: var(--ok-soft); }
 .badge.rescheduling { color: var(--warn); background: var(--warn-soft); }
+.badge.rescheduling::before { animation: pulse 1.2s ease-in-out infinite; }
 .badge.terminated { color: var(--danger); background: var(--danger-soft); }
 .badge.requires_action { color: var(--warn); background: var(--warn-soft); }
 
@@ -292,6 +295,17 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
   border-left: 3px solid var(--warn); background: var(--warn-soft);
   border-radius: 4px var(--radius-sm) var(--radius-sm) 4px; padding: 12px 14px;
 }
+.spinner {
+  display: inline-block; width: 12px; height: 12px; margin-right: 8px;
+  vertical-align: -2px; border: 2px solid var(--border); border-top-color: currentColor;
+  border-radius: 999px; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner, .badge.rescheduling::before { animation: none; }
+}
+
 .event pre {
   white-space: pre-wrap; word-break: break-word;
   font-family: var(--mono); font-size: 12.5px; margin-top: 4px;

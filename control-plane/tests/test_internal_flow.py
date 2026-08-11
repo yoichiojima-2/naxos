@@ -70,6 +70,26 @@ async def test_queue_poll_ends_with_terminate_when_session_is_deleted(
     assert (await poll).json()["control"] == "terminate"
 
 
+async def test_warm_session_gets_no_rescheduling_event(client, internal_client, launched):
+    _, session = await start_session(client, launched)
+    sid = session["id"]
+    await internal_client.post(f"/internal/sessions/{sid}/claim")
+
+    await client.post(
+        f"/v1/sessions/{sid}/events",
+        json={"events": [{"type": "user.message", "content": [{"type": "text", "text": "more"}]}]},
+    )
+
+    types = [e["type"] for e in (await client.get(f"/v1/sessions/{sid}/events")).json()["data"]]
+    assert types == [
+        "user.message",
+        "session.status_rescheduling",
+        "session.status_running",
+        "user.message",
+    ]
+    assert [s for _, s in launched] == [sid]
+
+
 async def test_config_carries_resolved_agent_version(client, internal_client, launched):
     agent, session = await start_session(client, launched)
     await internal_client.post(f"/internal/sessions/{session['id']}/claim")
@@ -103,6 +123,11 @@ async def test_always_ask_pauses_then_resumes_after_confirmation(client, interna
         },
     )
     assert approve.status_code == 202
+
+    # The wake preserves the pause cause while the session is rescheduling.
+    woken = (await client.get(f"/v1/sessions/{sid}")).json()
+    assert woken["status"] == "rescheduling"
+    assert woken["stop_reason"] == "requires_action"
 
     # A fresh sandbox replays the same call with a different tool_use_id.
     await internal_client.post(f"/internal/sessions/{sid}/claim")
@@ -230,6 +255,7 @@ async def test_events_from_the_sandbox_land_on_the_stream(client, internal_clien
     types = [e["type"] for e in (await client.get(f"/v1/sessions/{sid}/events")).json()["data"]]
     assert types == [
         "user.message",
+        "session.status_rescheduling",
         "session.status_running",
         "agent.message",
         "agent.tool_use",

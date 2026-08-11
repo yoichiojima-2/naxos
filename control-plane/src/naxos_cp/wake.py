@@ -43,6 +43,18 @@ async def wake(conn: asyncpg.Connection, session_id: str) -> bool:
         log.warning("sandbox concurrency cap reached; %s stays queued", session_id)
         return False
 
+    # Emit session.status_rescheduling only on a real transition — re-wakes of a
+    # still-unclaimed session would otherwise append a duplicate event per attempt.
+    # Re-read the status here: the advisory lock is transaction-scoped, so a
+    # competing wake (e.g. the reconciler) has committed by the time it's acquired,
+    # and the pre-lock snapshot in `row` can be stale.
+    prev_status = await conn.fetchval(
+        "SELECT status FROM sessions WHERE id = $1", session_id
+    )
+    if prev_status != str(SessionStatus.RESCHEDULING):
+        await store.append_event(
+            conn, session_id, EventType.SESSION_STATUS_RESCHEDULING, {}, processed=True
+        )
     await conn.execute(
         "UPDATE sessions SET status = 'rescheduling', retry_count = retry_count + 1, "
         "updated_at = now() WHERE id = $1",

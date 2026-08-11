@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
 import CountHeader from "@/components/list-header";
+import FilterInput from "@/components/filter-input";
 
 function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -13,6 +14,7 @@ function formatSize(bytes: number): string {
 export default function Artifacts({ agents }: { agents: Agent[] }) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Artifact[] }>("/v1/artifacts");
@@ -50,16 +52,32 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
     setTimeout(() => setCopied(null), 1500);
   }
 
+  const q = query.trim().toLowerCase();
+  const filtered = artifacts.filter(
+    (a) =>
+      !q ||
+      `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
+        .toLowerCase()
+        .includes(q),
+  );
+
   return (
     <>
-      <CountHeader count={artifacts.length} noun="artifact" />
+      <CountHeader count={filtered.length} of={artifacts.length} noun="artifact">
+        {artifacts.length > 0 && (
+          <FilterInput placeholder="Filter artifacts…" value={query} onChange={setQuery} />
+        )}
+      </CountHeader>
       <div className="panel">
         {artifacts.length === 0 && (
           <span className="muted">
             no artifacts yet — agents publish them with the artifact_create tool.
           </span>
         )}
-        {artifacts.length > 0 && (
+        {artifacts.length > 0 && filtered.length === 0 && (
+          <span className="muted">no artifacts match the current filter.</span>
+        )}
+        {filtered.length > 0 && (
           <div className="table-wrap">
             <table>
               <thead>
@@ -73,7 +91,7 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
                 </tr>
               </thead>
               <tbody>
-                {artifacts.map((artifact) => (
+                {filtered.map((artifact) => (
                   <tr
                     key={artifact.id}
                     className="click"
