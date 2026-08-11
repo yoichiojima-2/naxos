@@ -1,3 +1,6 @@
+import logging
+from pathlib import Path
+
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from naxos_shared.ids import new_id
@@ -7,9 +10,13 @@ from pydantic import BaseModel, Field
 from . import config, db
 from .auth import principal_of
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/v1")
 
 SKILL_ENTRY = "SKILL.md"
+SEED_DIR = Path(__file__).resolve().parents[3] / "docs" / "skills"
+SEED_PRINCIPAL = "system:seed"
 READY = (
     f"EXISTS (SELECT 1 FROM skill_files f "
     f"  WHERE f.skill_id = s.id AND f.path = '{SKILL_ENTRY}') AS ready"
@@ -120,6 +127,65 @@ async def get_file(skill_id: str, file_id: str, _: str = Depends(principal_of)) 
     if row is None:
         raise HTTPException(404, "skill file not found")
     return dict(row)
+
+
+async def seed_samples(conn: asyncpg.Connection, root: Path = SEED_DIR) -> list[str]:
+    """Create-once import of the bundled sample skills.
+
+    A folder is seeded only while no skill — active or archived — has ever
+    used its name, so operator edits and archivals are never overridden;
+    updates after creation flow through the API like any other skill."""
+    if not root.is_dir():
+        return []
+    seeded: list[str] = []
+    for entry in sorted(p for p in root.iterdir() if (p / SKILL_ENTRY).is_file()):
+        taken = await conn.fetchval("SELECT 1 FROM skills WHERE name = $1 LIMIT 1", entry.name)
+        if taken:
+            continue
+        description = _frontmatter_description((entry / SKILL_ENTRY).read_text())
+        try:
+            async with conn.transaction():
+                skill_id = new_id("skill")
+                await conn.execute(
+                    "INSERT INTO skills (id, name, description, created_by) "
+                    "VALUES ($1, $2, $3, $4)",
+                    skill_id,
+                    entry.name,
+                    description,
+                    SEED_PRINCIPAL,
+                )
+                for file in sorted(f for f in entry.rglob("*") if f.is_file()):
+                    rel = file.relative_to(entry).as_posix()
+                    if any(part.startswith(".") for part in file.relative_to(entry).parts):
+                        continue
+                    content = file.read_text()
+                    if len(content.encode()) > config.MAX_MEMORY_BYTES:
+                        raise ValueError(f"{rel} exceeds the {config.MAX_MEMORY_BYTES}B file cap")
+                    await conn.execute(
+                        "INSERT INTO skill_files (id, skill_id, path, content, updated_by) "
+                        "VALUES ($1, $2, $3, $4, $5)",
+                        new_id("skill_file"),
+                        skill_id,
+                        rel,
+                        content,
+                        SEED_PRINCIPAL,
+                    )
+        except asyncpg.UniqueViolationError:
+            continue
+        except (ValueError, UnicodeDecodeError) as exc:
+            log.warning("sample skill %s not seeded: %s", entry.name, exc)
+            continue
+        seeded.append(entry.name)
+    if seeded:
+        log.info("seeded sample skills: %s", ", ".join(seeded))
+    return seeded
+
+
+def _frontmatter_description(text: str) -> str | None:
+    for line in text.splitlines():
+        if line.startswith("description:"):
+            return line.split(":", 1)[1].strip() or None
+    return None
 
 
 @router.delete("/skills/{skill_id}/files/{file_id}")

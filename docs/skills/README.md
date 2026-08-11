@@ -1,6 +1,10 @@
 # Sample skills
 
-Ready-to-upload skills in the [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills) format: a folder with a `SKILL.md` entry file plus optional supporting files. Skills live in Postgres and are attached to agents via `agent_versions.skill_ids` — these folders are only source material; nothing in this directory is read at runtime.
+Skills in the [Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills) format: a folder with a `SKILL.md` entry file plus optional supporting files. Skills live in Postgres and are attached to agents via `agent_versions.skill_ids` — these folders are source material, never read at runtime.
+
+## Seeding
+
+The control plane seeds every folder here on startup, create-once: a folder is imported only while no skill (active or archived) has ever used its name. After that the Postgres copy is the live one — edits through the API/UI are never overwritten by a restart, archiving a seeded skill does not resurrect it, and later changes to these folders reach an existing deployment only via the upload script below (which syncs files into the existing skill).
 
 ## Uploading
 

@@ -15,6 +15,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY control-plane/src /app/control-plane/src
 COPY control-plane/migrations /app/control-plane/migrations
+COPY docs/skills /app/docs/skills
 RUN uv sync --frozen --no-dev
 COPY --from=ui /ui/out /app/ui
 
