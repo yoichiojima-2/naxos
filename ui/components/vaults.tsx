@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, listFor, Credential, Vault } from "@/lib/api";
 
+function targetLabel(cred: Credential) {
+  if (cred.type === "header" && cred.target.mcp_server) {
+    return `mcp:${cred.target.mcp_server} · ${cred.target.header ?? "authorization"}`;
+  }
+  if (cred.type === "env" && cred.target.env_var) {
+    return `env:${cred.target.env_var}`;
+  }
+  return JSON.stringify(cred.target);
+}
+
 export default function Vaults() {
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [credentials, setCredentials] = useState<Record<string, Credential[]>>({});
@@ -87,11 +97,22 @@ export default function Vaults() {
           </div>
           <div className="table-wrap">
             <table>
+              <thead>
+                <tr><th>name</th><th>type</th><th>target</th><th>value</th><th>created</th><th /></tr>
+              </thead>
               <tbody>
+                {(credentials[vault.id] ?? []).length === 0 && (
+                  <tr><td className="empty" colSpan={6}>no credentials registered in this vault.</td></tr>
+                )}
                 {(credentials[vault.id] ?? []).map((cred) => (
                   <tr key={cred.id}>
                     <td>{cred.name}</td>
-                    <td className="muted">{cred.type} → mcp:{cred.target.mcp_server}</td>
+                    <td className="muted">{cred.type}</td>
+                    <td className="muted mono">{targetLabel(cred)}</td>
+                    <td className="muted" title="Secret values are write-only: stored in Secret Manager, injected by the egress proxy, never returned by the API.">
+                      •••• <span className="muted">write-only</span>
+                    </td>
+                    <td className="muted">{new Date(cred.created_at).toLocaleDateString()}</td>
                     <td className="ta-right">
                       <button className="danger" onClick={() => deleteCredential(vault.id, cred)}>
                         Delete

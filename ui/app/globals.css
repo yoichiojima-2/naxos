@@ -170,10 +170,7 @@ body {
 
 .mb12 { margin-bottom: 12px; }
 .mb16 { margin-bottom: 16px; }
-.mt8 { margin-top: 8px; }
 .mt12 { margin-top: 12px; }
-.mt16 { margin-top: 16px; }
-.hint.error { color: var(--danger); }
 .ta-right { text-align: right; }
 .flex-inline { display: inline-flex; }
 .panel.flush { padding: 0; overflow: hidden; }
