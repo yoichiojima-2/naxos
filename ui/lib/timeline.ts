@@ -26,7 +26,7 @@ const HIDDEN = new Set([
   "span.model_request_start",
 ]);
 
-const RESULT_TYPES = new Set(["agent.tool_result", "user.custom_tool_result"]);
+const RESULT_TYPE = "agent.tool_result";
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
@@ -73,12 +73,15 @@ export function groupEvents(events: SessionEvent[]): {
     if (event.type === "agent.tool_use") {
       // A resumed call replays with a new tool_use_id but the same call_hash;
       // it settles the row that asked for approval instead of adding another.
+      // The pause denied the call, so its result is the "needs approval"
+      // notice — the replay supersedes it.
       const pendingApproval = byCallHash.get(text(payload.call_hash));
       if (
         payload.decision !== "awaiting_confirmation" &&
         pendingApproval?.use.payload.decision === "awaiting_confirmation"
       ) {
         pendingApproval.use = event;
+        pendingApproval.result = undefined;
         index(pendingApproval);
       } else {
         const block: ToolBlock = { kind: "tool", key: event.seq, use: event };
@@ -88,7 +91,7 @@ export function groupEvents(events: SessionEvent[]): {
       continue;
     }
 
-    if (RESULT_TYPES.has(event.type)) {
+    if (event.type === RESULT_TYPE) {
       const matched = byToolUseId.get(text(payload.tool_use_id));
       const target =
         matched && !matched.result
@@ -140,23 +143,22 @@ const PYTHON_ESCAPES: Record<string, string> = {
 
 function textsOf(value: unknown): string[] {
   if (!Array.isArray(value) || !value.length) return [];
-  const texts = value.map((item) =>
-    item && typeof item === "object" && typeof (item as { text?: unknown }).text === "string"
-      ? (item as { text: string }).text
-      : null,
-  );
+  const texts = value.map((item) => {
+    const block = item as { type?: unknown; text?: unknown };
+    return block?.type === "text" && typeof block.text === "string" ? block.text : null;
+  });
   return texts.every((t) => t !== null) ? (texts as string[]) : [];
 }
 
-// Tool results reach older sessions as the Python repr of a content-block list;
-// show the text the agent actually saw rather than the wrapper.
+// Sessions from before the harness sent plain text hold the Python repr of a
+// content-block list; show the text the agent saw rather than the wrapper.
+// Anything that is not recognisably that wrapper is left exactly as recorded.
 export function prettifyResult(content: string): string {
   const trimmed = content.trim();
-  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return content;
+  if (!trimmed.startsWith("[")) return content;
   try {
-    const parsed = JSON.parse(trimmed);
-    const texts = textsOf(parsed);
-    return texts.length ? texts.join("\n\n") : JSON.stringify(parsed, null, 2);
+    const texts = textsOf(JSON.parse(trimmed));
+    return texts.length ? texts.join("\n\n") : content;
   } catch {
     const segments = [...trimmed.matchAll(PYTHON_TEXT)].map((match) =>
       (match[1] ?? match[2] ?? "").replace(/\\(.)/g, (raw, char) => PYTHON_ESCAPES[char] ?? raw),
