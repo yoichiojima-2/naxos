@@ -120,6 +120,34 @@ async def test_tool_confirmation_requires_a_pending_request(client, launched):
     assert response.status_code == 409
 
 
+async def test_sandbox_cap_counts_launched_but_unclaimed_sessions(client, launched, monkeypatch):
+    from naxos_cp import config, db, wake
+
+    monkeypatch.setattr(config, "MAX_CONCURRENT_SANDBOXES", 1)
+    _, agent = await make_agent(client)
+    hello = {"type": "user.message", "content": [{"type": "text", "text": "hello"}]}
+
+    first = (
+        await client.post(
+            "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [hello]}
+        )
+    ).json()
+    assert first["status"] == "rescheduling"
+
+    second = (
+        await client.post(
+            "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [hello]}
+        )
+    ).json()
+    assert second["status"] == "idle"
+    assert [s for _, s in launched] == [first["id"]]
+
+    # A re-wake of the launched-but-unclaimed session must not count itself.
+    async with db.transaction() as conn:
+        assert await wake.wake(conn, first["id"]) is True
+    assert [s for _, s in launched] == [first["id"], first["id"]]
+
+
 async def test_event_sequence_is_per_session_and_monotonic(client, launched):
     _, agent = await make_agent(client)
     session = (await client.post("/v1/sessions", json={"agent": {"id": agent["id"]}})).json()

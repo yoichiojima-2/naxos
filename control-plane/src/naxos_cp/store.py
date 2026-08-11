@@ -164,8 +164,13 @@ async def stale_wakeable_sessions(conn: asyncpg.Connection) -> list[asyncpg.Reco
     )
 
 
-async def running_sandbox_count(conn: asyncpg.Connection) -> int:
-    return await conn.fetchval("SELECT count(*) FROM sessions WHERE lease_expires_at > now()")
+async def running_sandbox_count(conn: asyncpg.Connection, exclude_session_id: str) -> int:
+    """Leased sandboxes plus launched-but-unclaimed ones ('rescheduling', no lease yet)."""
+    return await conn.fetchval(
+        "SELECT count(*) FROM sessions WHERE id <> $1 "
+        "  AND (lease_expires_at > now() OR status = 'rescheduling')",
+        exclude_session_id,
+    )
 
 
 async def upsert_confirmation(
