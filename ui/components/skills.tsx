@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiConfirm, listFor, Skill, SkillFile } from "@/lib/api";
-import { BackIcon } from "@/components/icons";
 import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FileList from "@/components/file-list";
+import FileEditor, { PATH_PATTERN } from "@/components/file-editor";
+import LoadingPanel from "@/components/loading-panel";
 
 const SKILL_MD_TEMPLATE = (name: string) =>
   `---\nname: ${name}\ndescription: When and how to use this skill.\n---\n\nInstructions the agent loads when it uses this skill.\n`;
@@ -93,41 +94,17 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
 
   if (editing) {
     return (
-      <div className="panel">
-        <div className="row between mb12">
-          <div className="row">
-            <button
-              className="ghost flex-inline"
-              onClick={() => setEditing(null)}
-              aria-label="back"
-            >
-              <BackIcon />
-            </button>
-            {editing.isNew ? (
-              <input
-                className="mono"
-                value={editing.path}
-                style={{ width: 260 }}
-                onChange={(e) => setEditing({ ...editing, path: e.target.value })}
-              />
-            ) : (
-              <span className="mono">{editing.path}</span>
-            )}
-          </div>
-          <button
-            className="primary"
-            onClick={save}
-            disabled={!/^[a-zA-Z0-9._/-]{1,200}$/.test(editing.path)}
-          >
-            Save
-          </button>
-        </div>
-        <textarea
-          style={{ minHeight: 360 }}
-          value={editing.content}
-          onChange={(e) => setEditing({ ...editing, content: e.target.value })}
-        />
-      </div>
+      <FileEditor
+        path={editing.path}
+        onPathChange={editing.isNew ? (path) => setEditing({ ...editing, path }) : undefined}
+        pathInputProps={{ style: { width: 260 } }}
+        content={editing.content}
+        onContentChange={(content) => setEditing({ ...editing, content })}
+        onBack={() => setEditing(null)}
+        onSave={save}
+        saveDisabled={!PATH_PATTERN.test(editing.path)}
+        saveLabel="Save"
+      />
     );
   }
 
@@ -155,7 +132,7 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
           Create
         </button>
       </CountHeader>
-      {skills === null && <div className="panel"><span className="muted">loading…</span></div>}
+      {skills === null && <LoadingPanel />}
       {skills?.length === 0 && (
         <div className="panel">
           <span className="muted">no skills yet — create one above to share know-how across agents.</span>

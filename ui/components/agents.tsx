@@ -6,6 +6,7 @@ import AgentForm from "@/components/agent-form";
 import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
+import TableStates from "@/components/table-states";
 
 export default function Agents({
   agents,
@@ -77,12 +78,13 @@ export default function Agents({
               <tr><th /><th>Name</th><th>Environment</th><th>Version</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
-              {agents.length === 0 && (
-                <tr><td className="empty" colSpan={6}>no agents yet — create one to get started.</td></tr>
-              )}
-              {agents.length > 0 && filtered.length === 0 && (
-                <tr><td className="empty" colSpan={6}>no agents match the current filter.</td></tr>
-              )}
+              <TableStates
+                items={agents}
+                filtered={filtered}
+                colSpan={6}
+                empty="no agents yet — create one to get started."
+                noMatch="no agents match the current filter."
+              />
               {filtered.map((agent) => (
                 <tr
                   key={agent.id}

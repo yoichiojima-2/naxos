@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, listFor, Credential, Vault } from "@/lib/api";
+import LoadingPanel from "@/components/loading-panel";
 
 function targetLabel(cred: Credential) {
   if (cred.type === "header" && cred.target.mcp_server) {
@@ -86,7 +87,7 @@ export default function Vaults() {
         <button className="primary" onClick={createVault} disabled={!vaultName}>Create vault</button>
       </div>
 
-      {vaults === null && <div className="panel"><span className="muted">loading…</span></div>}
+      {vaults === null && <LoadingPanel />}
       {vaults?.length === 0 && (
         <div className="panel">
           <span className="muted">no vaults yet — create one above to store credentials for agents.</span>

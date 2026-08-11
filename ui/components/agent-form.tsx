@@ -111,12 +111,6 @@ export default function AgentForm({
     (c) => c.requires_vault && mcpServers && c.name in mcpServers && vaultIds.length === 0,
   );
 
-  function toggleTool(tool: string) {
-    setTools((prev) =>
-      prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool],
-    );
-  }
-
   function addCustomTool() {
     const tool = customTool.trim();
     if (tool && !tools.includes(tool)) setTools((prev) => [...prev, tool]);
@@ -223,7 +217,7 @@ export default function AgentForm({
             key={tool}
             type="button"
             className={`chip ${tools.includes(tool) ? "on" : ""}`}
-            onClick={() => toggleTool(tool)}
+            onClick={() => toggleId(tools, setTools, tool)}
           >
             {tool}
           </button>
@@ -234,7 +228,7 @@ export default function AgentForm({
             type="button"
             className="chip on"
             title="Remove"
-            onClick={() => toggleTool(tool)}
+            onClick={() => toggleId(tools, setTools, tool)}
           >
             {tool} ×
           </button>

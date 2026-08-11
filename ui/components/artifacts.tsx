@@ -5,12 +5,7 @@ import { api, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
 import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${bytes} B`;
-}
+import { formatSize } from "@/lib/format";
 
 export default function Artifacts({
   agents,
@@ -29,13 +24,8 @@ export default function Artifacts({
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  async function share(artifact: Artifact) {
-    await api(`/v1/artifacts/${artifact.id}/share`, { json: {} });
-    refresh();
-  }
-
-  async function unshare(artifact: Artifact) {
-    await api(`/v1/artifacts/${artifact.id}/share`, { method: "DELETE" });
+  async function setShared(artifact: Artifact, shared: boolean) {
+    await api(`/v1/artifacts/${artifact.id}/share`, shared ? { json: {} } : { method: "DELETE" });
     refresh();
   }
 
@@ -162,14 +152,14 @@ export default function Artifacts({
                         {artifact.share_token ? (
                           <button
                             className="ghost"
-                            onClick={(e) => { e.stopPropagation(); unshare(artifact); }}
+                            onClick={(e) => { e.stopPropagation(); setShared(artifact, false); }}
                           >
                             Unshare
                           </button>
                         ) : (
                           <button
                             className="ghost"
-                            onClick={(e) => { e.stopPropagation(); share(artifact); }}
+                            onClick={(e) => { e.stopPropagation(); setShared(artifact, true); }}
                           >
                             Share
                           </button>

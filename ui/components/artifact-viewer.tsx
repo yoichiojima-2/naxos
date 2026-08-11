@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBlob, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
 import Markdown from "@/components/markdown";
+import { formatSize, fullTime } from "@/lib/format";
 
 const MAX_RENDERED_CHARS = 1_000_000;
 const MAX_PRETTY_JSON_BYTES = 2 * 1024 * 1024;
@@ -29,12 +30,6 @@ function kindOf(contentType: string, name: string): Kind {
   if (mime === "application/pdf" || ext === "pdf") return "pdf";
   if (mime.startsWith("text/") || TEXT_EXT.has(ext)) return "text";
   return "binary";
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${bytes} B`;
 }
 
 function parseDelimited(text: string, delimiter: string): string[][] {
@@ -100,7 +95,7 @@ export default function ArtifactViewer({
         const meta = await api<Artifact>(metaPath);
         if (cancelled) return;
         setArtifact(meta);
-        const content = await apiBlob(`${metaPath}/content`);
+        const content = await apiBlob(contentPath);
         if (cancelled) return;
         setBlob(content);
         const k = kindOf(meta.content_type, meta.name);
@@ -113,7 +108,7 @@ export default function ArtifactViewer({
       }
     })();
     return () => { cancelled = true; };
-  }, [metaPath]);
+  }, [metaPath, contentPath]);
 
   useEffect(() => {
     if (!blob || !kind || !["image", "svg", "pdf"].includes(kind)) return;
@@ -281,9 +276,10 @@ export default function ArtifactViewer({
   }
 
   async function setShared(shared: boolean) {
-    const updated = shared
-      ? await api<Artifact>(`/v1/artifacts/${artifact!.id}/share`, { json: {} })
-      : await api<Artifact>(`/v1/artifacts/${artifact!.id}/share`, { method: "DELETE" });
+    const updated = await api<Artifact>(
+      `/v1/artifacts/${artifact!.id}/share`,
+      shared ? { json: {} } : { method: "DELETE" },
+    );
     setArtifact(updated);
   }
 
@@ -332,7 +328,7 @@ export default function ArtifactViewer({
           <dt>Session</dt><dd className="mono">{artifact.session_id}</dd>
           <dt>Type</dt><dd className="mono">{artifact.content_type}</dd>
           <dt>Size</dt><dd>{formatSize(artifact.size_bytes)} · v{artifact.version}</dd>
-          <dt>Updated</dt><dd>{new Date(artifact.updated_at).toLocaleString()}</dd>
+          <dt>Updated</dt><dd>{fullTime(artifact.updated_at)}</dd>
           {artifact.description && <><dt>Description</dt><dd>{artifact.description}</dd></>}
         </dl>
       </div>

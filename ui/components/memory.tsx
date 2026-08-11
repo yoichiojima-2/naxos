@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, listFor, Memory, MemoryStore } from "@/lib/api";
 import { fullTime, relativeTime } from "@/lib/format";
-import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
 import FileList from "@/components/file-list";
+import FileEditor, { PATH_PATTERN } from "@/components/file-editor";
+import LoadingPanel from "@/components/loading-panel";
 
 type Editing = {
   storeId: string;
@@ -18,7 +19,7 @@ type Editing = {
 const pathValid = (path: string) => {
   const segments = path.split("/");
   return (
-    /^[a-zA-Z0-9._/-]{1,200}$/.test(path) &&
+    PATH_PATTERN.test(path) &&
     !segments.includes("..") &&
     !segments.includes("")
   );
@@ -132,43 +133,32 @@ export default function MemoryStores() {
   if (editing) {
     const invalid = !pathValid(editing.path);
     return (
-      <div className="panel">
-        <div className="row between mb12">
-          <div className="row">
-            <button
-              className="ghost flex-inline"
-              onClick={() => setEditing(null)}
-              aria-label="back"
-            >
-              <BackIcon />
-            </button>
-            <input
-              className="mono"
-              placeholder="path, e.g. notes.md"
-              value={editing.path}
-              onChange={(e) => setEditing({ ...editing, path: e.target.value })}
-              style={{ width: 280 }}
-              aria-label="file path"
-            />
-            {editing.originalPath && editing.originalPath !== editing.path && (
-              <span className="muted">renaming {editing.originalPath}</span>
-            )}
-          </div>
-          <button className="primary" onClick={save} disabled={invalid || saving}>
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
+      <FileEditor
+        path={editing.path}
+        onPathChange={(path) => setEditing({ ...editing, path })}
+        pathInputProps={{
+          placeholder: "path, e.g. notes.md",
+          style: { width: 280 },
+          "aria-label": "file path",
+        }}
+        pathExtra={
+          editing.originalPath && editing.originalPath !== editing.path && (
+            <span className="muted">renaming {editing.originalPath}</span>
+          )
+        }
+        content={editing.content}
+        onContentChange={(content) => setEditing({ ...editing, content })}
+        onBack={() => setEditing(null)}
+        onSave={save}
+        saveDisabled={invalid || saving}
+        saveLabel={saving ? "Saving…" : "Save"}
+      >
         {invalid && editing.path !== "" && (
           <p className="muted mb12">
             paths may only use letters, digits, and <span className="mono">. _ / -</span>
           </p>
         )}
-        <textarea
-          style={{ minHeight: 360 }}
-          value={editing.content}
-          onChange={(e) => setEditing({ ...editing, content: e.target.value })}
-        />
-      </div>
+      </FileEditor>
     );
   }
 
@@ -183,7 +173,7 @@ export default function MemoryStores() {
         />
         <button className="primary" onClick={createStore} disabled={!storeName}>Create</button>
       </CountHeader>
-      {stores === null && <div className="panel"><span className="muted">loading…</span></div>}
+      {stores === null && <LoadingPanel />}
       {stores?.length === 0 && (
         <div className="panel">
           <span className="muted">no memory stores yet — create one above to give agents durable memory.</span>

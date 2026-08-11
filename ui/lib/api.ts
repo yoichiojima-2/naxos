@@ -83,10 +83,7 @@ export type Agent = {
   name: string;
   environment_id: string;
   latest_version: number;
-  version?: number;
   disabled: boolean;
-  model?: string;
-  instructions?: string | null;
 };
 
 export const agentName = (agents: Agent[], id: string) =>
@@ -134,12 +131,10 @@ export type AgentIn = {
 export type Session = {
   id: string;
   agent_id: string;
-  agent_version: number;
   title: string | null;
   status: "idle" | "running" | "rescheduling" | "terminated";
   stop_reason: string | null;
   cost_usd: string | number;
-  budget_usd: string | number | null;
   created_by: string | null;
   created_at: string;
 };
@@ -179,13 +174,11 @@ export type Vault = { id: string; name: string };
 export type Connector = {
   name: string;
   title: string;
-  shape: "remote" | "hosted";
   type: "http" | "sse";
   url: string;
   available: boolean;
   requires_vault: boolean;
   credential: string;
-  upstream: string;
   tool_glob: string;
 };
 export type Credential = {
@@ -205,16 +198,13 @@ export type Artifact = {
   size_bytes: number;
   version: number;
   share_token: string | null;
-  share_url?: string;
-  shared_by: string | null;
-  created_by: string | null;
   updated_at: string;
 };
 
 export type MonitoringSummary = {
   window_days: number;
   totals: { cost_usd: number; runs: number; num_turns: number; tool_calls: number };
-  all_time: { cost_usd: number; sessions: number };
+  all_time: { cost_usd: number };
   cost_by_day: { day: string; cost_usd: number; runs: number }[];
   cost_by_agent: {
     agent_id: string;
