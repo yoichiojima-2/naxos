@@ -238,7 +238,7 @@ tr.click:hover td { background: var(--bg); }
   white-space: pre-wrap; word-break: break-word;
   font-family: var(--mono); font-size: 13.5px; margin-top: 4px;
 }
-.event.prose pre { font-family: var(--sans); font-size: 16px; line-height: 1.6; }
+.event.prose pre { font-family: var(--sans); font-size: 15px; line-height: 1.6; }
 
 .event.fold { padding-top: 2px; padding-bottom: 2px; }
 .event.fold summary, .event.fold .fold-line {
@@ -258,7 +258,7 @@ tr.click:hover td { background: var(--bg); }
   margin-top: 6px; max-height: 320px; overflow-y: auto;
 }
 
-.event .md { margin-top: 4px; font-size: 16px; line-height: 1.6; }
+.event .md { margin-top: 4px; font-size: 15px; line-height: 1.6; }
 .event .md > :first-child { margin-top: 0; }
 .event .md > :last-child { margin-bottom: 0; }
 .event .md p, .event .md ul, .event .md ol, .event .md blockquote, .event .md pre,
