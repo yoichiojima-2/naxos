@@ -15,6 +15,7 @@ export default function Agents({
   onChange: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
 
   async function create(body: AgentIn) {
     const created = await api<Agent>("/v1/agents", { json: body });
@@ -30,9 +31,22 @@ export default function Agents({
 
   const envName = (id: string) => environments.find((e) => e.id === id)?.name ?? id;
 
+  const q = query.trim().toLowerCase();
+  const filtered = agents.filter(
+    (a) => !q || `${a.name} ${a.id} ${envName(a.environment_id)}`.toLowerCase().includes(q),
+  );
+
   return (
     <>
-      <CountHeader count={agents.length} noun="agent">
+      <CountHeader count={filtered.length} of={agents.length} noun="agent">
+        {agents.length > 0 && (
+          <input
+            className="filter-input"
+            placeholder="Filter agents…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New agent"}
         </button>
@@ -57,7 +71,10 @@ export default function Agents({
               {agents.length === 0 && (
                 <tr><td className="empty" colSpan={5}>no agents yet — create one to get started.</td></tr>
               )}
-              {agents.map((agent) => (
+              {agents.length > 0 && filtered.length === 0 && (
+                <tr><td className="empty" colSpan={5}>no agents match the current filter.</td></tr>
+              )}
+              {filtered.map((agent) => (
                 <tr
                   key={agent.id}
                   className="click"

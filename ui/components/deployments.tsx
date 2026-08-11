@@ -9,6 +9,7 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
   const [runs, setRuns] = useState<Record<string, DeploymentRun[]>>({});
   const [openId, setOpenId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
   const [name, setName] = useState("");
   const [agentId, setAgentId] = useState("");
   const [cron, setCron] = useState("0 9 * * *");
@@ -63,9 +64,22 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
     loadRuns(id);
   }
 
+  const q = query.trim().toLowerCase();
+  const filtered = deployments.filter(
+    (d) => !q || `${d.name} ${d.cron} ${agentName(agents, d.agent_id)}`.toLowerCase().includes(q),
+  );
+
   return (
     <>
-      <CountHeader count={deployments.length} noun="deployment">
+      <CountHeader count={filtered.length} of={deployments.length} noun="deployment">
+        {deployments.length > 0 && (
+          <input
+            className="filter-input"
+            placeholder="Filter deployments…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New deployment"}
         </button>
@@ -105,7 +119,10 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
             {deployments.length === 0 && (
               <tr><td className="empty" colSpan={4}>no deployments yet — schedule an agent to run unattended.</td></tr>
             )}
-            {deployments.map((d) => (
+            {deployments.length > 0 && filtered.length === 0 && (
+              <tr><td className="empty" colSpan={4}>no deployments match the current filter.</td></tr>
+            )}
+            {filtered.map((d) => (
               <DeploymentRow
                 key={d.id}
                 deployment={d}

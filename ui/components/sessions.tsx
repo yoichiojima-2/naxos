@@ -11,14 +11,22 @@ const MD_COMPONENTS: Components = {
   a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
 };
 
+const STATUS_FILTERS = ["needs approval", "running", "idle", "rescheduling", "terminated"] as const;
+
+const statusOf = (s: Session) =>
+  s.status === "idle" && s.stop_reason === "requires_action" ? "needs approval" : s.status;
+
 export default function Sessions({ agents }: { agents: Agent[] }) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [open, setOpen] = useState<Session | null>(null);
   const [agentId, setAgentId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
+  const [agentFilter, setAgentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const refresh = useCallback(async () => {
-    const result = await api<{ data: Session[] }>("/v1/sessions");
+    const result = await api<{ data: Session[] }>("/v1/sessions?limit=200");
     setSessions(result.data);
   }, []);
 
@@ -47,10 +55,33 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
     });
   }
 
-  const allSelected = !!sessions?.length && sessions.every((s) => selected.has(s.id));
+  const q = query.trim().toLowerCase();
+  const filtered = (sessions ?? []).filter((s) => {
+    if (agentFilter && s.agent_id !== agentFilter) return false;
+    if (statusFilter && statusOf(s) !== statusFilter) return false;
+    if (!q) return true;
+    return `${s.title ?? ""} ${s.id} ${s.created_by ?? ""} ${agentName(agents, s.agent_id)}`
+      .toLowerCase()
+      .includes(q);
+  });
+  const hasFilters = !!(q || agentFilter || statusFilter);
+
+  const statusCounts = new Map<string, number>();
+  for (const s of sessions ?? []) {
+    const status = statusOf(s);
+    statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
+  }
+
+  function clearFilters() {
+    setQuery("");
+    setAgentFilter("");
+    setStatusFilter("");
+  }
+
+  const allSelected = !!filtered.length && filtered.every((s) => selected.has(s.id));
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set((sessions ?? []).map((s) => s.id)));
+    setSelected(allSelected ? new Set() : new Set(filtered.map((s) => s.id)));
   }
 
   const noun = selected.size === 1 ? "session" : "sessions";
@@ -91,7 +122,7 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
 
   return (
     <>
-      <CountHeader count={sessions === null ? null : sessions.length} noun="session">
+      <CountHeader count={sessions === null ? null : filtered.length} of={sessions?.length} noun="session">
         {selected.size > 0 ? (
           <>
             <span className="muted">{selected.size} selected</span>
@@ -112,6 +143,39 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
           </>
         )}
       </CountHeader>
+      {!!sessions?.length && (
+        <div className="row mb12">
+          <input
+            className="filter-input"
+            placeholder="Filter by title, id, or principal…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <select
+            className="filter-input"
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            aria-label="filter by agent"
+          >
+            <option value="">all agents</option>
+            {agents.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          {STATUS_FILTERS.filter((status) => statusCounts.get(status)).map((status) => (
+            <button
+              key={status}
+              className={`chip ${statusFilter === status ? "on" : ""}`}
+              onClick={() => setStatusFilter(statusFilter === status ? "" : status)}
+            >
+              {status} {statusCounts.get(status)}
+            </button>
+          ))}
+          {hasFilters && (
+            <button className="ghost" onClick={clearFilters}>Clear filters</button>
+          )}
+        </div>
+      )}
       <div className="panel flush">
         <div className="table-wrap">
           <table>
@@ -135,7 +199,10 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
             {sessions?.length === 0 && (
               <tr><td className="empty" colSpan={7}>no sessions yet — pick an agent above and start one.</td></tr>
             )}
-            {(sessions ?? []).map((s) => {
+            {!!sessions?.length && filtered.length === 0 && (
+              <tr><td className="empty" colSpan={7}>no sessions match the current filters.</td></tr>
+            )}
+            {filtered.map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
               return (
                 <tr key={s.id} className="click" onClick={() => setOpen(s)}>
