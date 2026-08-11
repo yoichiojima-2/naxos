@@ -394,14 +394,17 @@ function Timeline({
       .map((e) => [String(e.payload.call_hash), String(e.payload.result)]),
   );
 
-  const { blocks, costUsd } = useMemo(() => groupEvents(events), [events]);
+  const { blocks, costUsd, modelRequestOpen } = useMemo(() => groupEvents(events), [events]);
 
   const live = status === "running" || status === "rescheduling";
   // A run stays "running" until the idle checkpoint, well after the agent has
-  // answered; only an unanswered turn or an unfinished tool call is real work.
+  // answered, so the status alone would keep claiming work that is over. Real
+  // work is a model request in flight, a tool still running, or a turn the
+  // agent has not started answering yet.
   const last = blocks[blocks.length - 1];
   const working =
-    live && (last?.kind === "user" || (last?.kind === "tool" && !last.result));
+    live &&
+    (modelRequestOpen || last?.kind === "user" || (last?.kind === "tool" && !last.result));
 
   if (missing) {
     return (

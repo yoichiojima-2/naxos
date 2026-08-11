@@ -14,16 +14,15 @@ export type Block =
   | ToolBlock
   | { kind: "artifact" | "error" | "interrupt" | "raw"; key: number; event: SessionEvent };
 
-// Status events drive the header badge, confirmations drive the approval
-// buttons, and a request start carries no payload — showing them again as rows
-// only adds noise.
+// Status events drive the header badge and confirmations drive the approval
+// buttons — showing them again as rows only adds noise. The model request spans
+// are consumed above, for cost and for whether a request is still open.
 const HIDDEN = new Set([
   "session.status_running",
   "session.status_idle",
   "session.status_rescheduling",
   "session.status_terminated",
   "user.tool_confirmation",
-  "span.model_request_start",
 ]);
 
 const RESULT_TYPE = "agent.tool_result";
@@ -33,10 +32,16 @@ const text = (value: unknown) => (typeof value === "string" ? value : "");
 export function groupEvents(events: SessionEvent[]): {
   blocks: Block[];
   costUsd: number | null;
+  modelRequestOpen: boolean;
 } {
   const blocks: Block[] = [];
   const byToolUseId = new Map<string, ToolBlock>();
   let costUsd: number | null = null;
+  // A start with no end yet means the model is generating — thinking and a
+  // half-streamed message both sit inside that span, and it closes as soon as
+  // the turn is answered even though the session stays running until the idle
+  // checkpoint.
+  let openRequests = 0;
 
   const awaiting = (hash: string) =>
     blocks.find(
@@ -49,7 +54,12 @@ export function groupEvents(events: SessionEvent[]): {
   for (const event of events) {
     const payload = event.payload;
 
+    if (event.type === "span.model_request_start") {
+      openRequests += 1;
+      continue;
+    }
     if (event.type === "span.model_request_end") {
+      openRequests = Math.max(0, openRequests - 1);
       const cost = Number(payload.cost_usd);
       if (Number.isFinite(cost)) costUsd = cost;
       continue;
@@ -115,7 +125,7 @@ export function groupEvents(events: SessionEvent[]): {
     blocks.push({ kind, key: event.seq, event });
   }
 
-  return { blocks, costUsd };
+  return { blocks, costUsd, modelRequestOpen: openRequests > 0 };
 }
 
 const SUMMARY_KEYS = ["command", "file_path", "path", "pattern", "query", "url", "name", "prompt"];

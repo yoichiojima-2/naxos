@@ -544,7 +544,9 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
     flex-direction: row; align-items: center; gap: 4px;
     overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border);
     padding: 8px 12px;
-    /* The row scrolls; without the fade the items past the edge read as absent. */
+    /* The row scrolls; without the fade the items past the edge read as absent.
+       Safari needs the prefix to mask a non-SVG element. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
     mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   }
   .nav-label { display: none; }
