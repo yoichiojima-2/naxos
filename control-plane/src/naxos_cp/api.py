@@ -18,7 +18,24 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import config, db, favorites, gcs, notify, sessions, store, wake
+from . import (
+    artifacts,
+    config,
+    connectors,
+    db,
+    deployments,
+    favorites,
+    gcs,
+    memory,
+    monitoring,
+    notify,
+    sessions,
+    skills,
+    store,
+    vaults,
+    wake,
+    workspace,
+)
 from .auth import principal_of
 
 log = logging.getLogger(__name__)
@@ -27,17 +44,6 @@ router = APIRouter(prefix="/v1")
 
 
 def create_app(manage_pool: bool = True) -> FastAPI:
-    from . import (
-        artifacts,
-        connectors,
-        deployments,
-        memory,
-        monitoring,
-        skills,
-        vaults,
-        workspace,
-    )
-
     app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
     app.include_router(monitoring.router)
@@ -290,10 +296,10 @@ async def create_session(body: SessionIn, principal: str = Depends(principal_of)
             principal=principal,
             title=body.title,
             budget_usd=body.budget_usd,
-            vault_ids=body.vault_ids or None,
-            memory_store_ids=body.memory_store_ids or None,
-            skill_ids=body.skill_ids or None,
-            resources=body.resources or None,
+            vault_ids=body.vault_ids,
+            memory_store_ids=body.memory_store_ids,
+            skill_ids=body.skill_ids,
+            resources=body.resources,
         )
     return dict(row)
 
@@ -391,7 +397,7 @@ async def terminate_session(session_id: str, _: str = Depends(principal_of)) -> 
         if not exists:
             raise HTTPException(404, "session not found")
         await store.set_status(conn, session_id, SessionStatus.TERMINATED)
-        await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
+        await store.clear_egress_routes(conn, session_id)
     return {"id": session_id, "status": "terminated"}
 
 

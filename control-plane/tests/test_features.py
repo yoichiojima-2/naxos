@@ -7,6 +7,16 @@ from .test_session_flow import make_agent
 MESSAGE = {"type": "user.message", "content": [{"type": "text", "text": "run the check"}]}
 
 
+async def make_deployment(client, agent, **overrides):
+    payload = {
+        "name": "nightly",
+        "agent_id": agent["id"],
+        "cron": "0 3 * * *",
+        "initial_events": [MESSAGE],
+    } | overrides
+    return (await client.post("/v1/deployments", json=payload)).json()
+
+
 @pytest.fixture(autouse=True)
 def no_gcp(monkeypatch):
     async def fake_store(credential_id: str, value: str) -> None:
@@ -22,17 +32,7 @@ def no_gcp(monkeypatch):
 
 async def test_deployment_run_now_creates_a_session(client, launched):
     _, agent = await make_agent(client)
-    deployment = (
-        await client.post(
-            "/v1/deployments",
-            json={
-                "name": "nightly",
-                "agent_id": agent["id"],
-                "cron": "0 3 * * *",
-                "initial_events": [MESSAGE],
-            },
-        )
-    ).json()
+    deployment = await make_deployment(client, agent)
 
     run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
     assert run["status"] == "running"
@@ -67,17 +67,7 @@ async def test_deployment_fire_inherits_agent_vaults(
         mcp_servers={"github": {"type": "http", "url": "https://api.githubcopilot.com/mcp/"}},
         vault_ids=[vault["id"]],
     )
-    deployment = (
-        await client.post(
-            "/v1/deployments",
-            json={
-                "name": "nightly",
-                "agent_id": agent["id"],
-                "cron": "0 3 * * *",
-                "initial_events": [MESSAGE],
-            },
-        )
-    ).json()
+    deployment = await make_deployment(client, agent)
 
     run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
     assert run["status"] == "running"
@@ -97,17 +87,7 @@ async def test_deployment_fire_failure_is_recorded(client, monkeypatch):
 
     monkeypatch.setattr(wake.sandbox, "launch", boom)
     _, agent = await make_agent(client)
-    deployment = (
-        await client.post(
-            "/v1/deployments",
-            json={
-                "name": "nightly",
-                "agent_id": agent["id"],
-                "cron": "0 3 * * *",
-                "initial_events": [MESSAGE],
-            },
-        )
-    ).json()
+    deployment = await make_deployment(client, agent)
 
     run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
     assert run["status"] == "failed"
@@ -120,17 +100,7 @@ async def test_deployment_fire_failure_is_recorded(client, monkeypatch):
 
 async def test_deployment_records_failure_when_agent_disabled(client, launched):
     _, agent = await make_agent(client)
-    deployment = (
-        await client.post(
-            "/v1/deployments",
-            json={
-                "name": "nightly",
-                "agent_id": agent["id"],
-                "cron": "0 3 * * *",
-                "initial_events": [MESSAGE],
-            },
-        )
-    ).json()
+    deployment = await make_deployment(client, agent)
     await client.patch(f"/v1/agents/{agent['id']}", json={"disabled": True})
 
     run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
@@ -187,17 +157,7 @@ async def test_agent_created_schedule_is_a_governed_deployment(client, internal_
 async def test_agent_cannot_archive_operator_deployments(client, internal_client, launched):
     env, agent = await make_agent(client)
     session_id = await _make_session(client, agent)
-    operator_deployment = (
-        await client.post(
-            "/v1/deployments",
-            json={
-                "name": "nightly",
-                "agent_id": agent["id"],
-                "cron": "0 3 * * *",
-                "initial_events": [MESSAGE],
-            },
-        )
-    ).json()
+    operator_deployment = await make_deployment(client, agent)
 
     agent_view = (await internal_client.get(f"/internal/sessions/{session_id}/deployments")).json()[
         "data"

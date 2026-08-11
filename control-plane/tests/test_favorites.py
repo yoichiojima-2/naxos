@@ -7,6 +7,22 @@ from .test_session_flow import make_agent
 MESSAGE = {"type": "user.message", "content": [{"type": "text", "text": "hello"}]}
 
 
+async def make_agent_session_artifact(client, internal_client):
+    _, agent = await make_agent(client)
+    session = (
+        await client.post(
+            "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [MESSAGE]}
+        )
+    ).json()
+    artifact = (
+        await internal_client.post(
+            f"/internal/sessions/{session['id']}/artifacts",
+            json={"name": "report.md", "content_type": "text/markdown", "size_bytes": 1},
+        )
+    ).json()
+    return agent, session, artifact
+
+
 async def favorite(client, entity_type, entity_id):
     return await client.post(
         "/v1/favorites", json={"entity_type": entity_type, "entity_id": entity_id}
@@ -43,18 +59,7 @@ async def test_unknown_entity_and_type_are_rejected(client):
 
 @pytest.mark.parametrize("entity_type", ["agent", "session", "artifact", "skill"])
 async def test_every_entity_type_round_trips(client, internal_client, launched, entity_type):
-    _, agent = await make_agent(client)
-    session = (
-        await client.post(
-            "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [MESSAGE]}
-        )
-    ).json()
-    artifact = (
-        await internal_client.post(
-            f"/internal/sessions/{session['id']}/artifacts",
-            json={"name": "report.md", "content_type": "text/markdown", "size_bytes": 1},
-        )
-    ).json()
+    agent, session, artifact = await make_agent_session_artifact(client, internal_client)
     skill = (await client.post("/v1/skills", json={"name": "notes"})).json()
     ids = {
         "agent": agent["id"],
@@ -87,18 +92,7 @@ async def test_session_delete_clears_session_and_artifact_favorites(
         pass
 
     monkeypatch.setattr(gcs, "delete_prefix", fake_delete_prefix)
-    _, agent = await make_agent(client)
-    session = (
-        await client.post(
-            "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [MESSAGE]}
-        )
-    ).json()
-    artifact = (
-        await internal_client.post(
-            f"/internal/sessions/{session['id']}/artifacts",
-            json={"name": "report.md", "content_type": "text/markdown", "size_bytes": 1},
-        )
-    ).json()
+    agent, session, artifact = await make_agent_session_artifact(client, internal_client)
     await favorite(client, "session", session["id"])
     await favorite(client, "artifact", artifact["id"])
     await favorite(client, "agent", agent["id"])
@@ -120,18 +114,7 @@ async def test_artifact_delete_clears_its_favorite(client, internal_client, laun
         pass
 
     monkeypatch.setattr(gcs, "delete", fake_delete)
-    _, agent = await make_agent(client)
-    session = (
-        await client.post(
-            "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [MESSAGE]}
-        )
-    ).json()
-    artifact = (
-        await internal_client.post(
-            f"/internal/sessions/{session['id']}/artifacts",
-            json={"name": "report.md", "content_type": "text/markdown", "size_bytes": 1},
-        )
-    ).json()
+    _, session, artifact = await make_agent_session_artifact(client, internal_client)
     await favorite(client, "artifact", artifact["id"])
 
     assert (await client.delete(f"/v1/artifacts/{artifact['id']}")).status_code == 200
