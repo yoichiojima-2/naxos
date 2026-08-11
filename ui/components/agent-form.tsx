@@ -5,6 +5,7 @@ import {
   api,
   AgentDetail,
   AgentIn,
+  Connector,
   EffortLevel,
   Environment,
   MemoryStore,
@@ -77,6 +78,7 @@ export default function AgentForm({
     initial?.memory_store_ids ?? [],
   );
   const [skillIds, setSkillIds] = useState<string[]>(initial?.skill_ids ?? []);
+  const [connectors, setConnectors] = useState<Connector[]>([]);
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [stores, setStores] = useState<MemoryStore[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -86,6 +88,7 @@ export default function AgentForm({
     api<{ data: Vault[] }>("/v1/vaults").then((r) => setVaults(r.data));
     api<{ data: MemoryStore[] }>("/v1/memory_stores").then((r) => setStores(r.data));
     api<{ data: Skill[] }>("/v1/skills").then((r) => setSkills(r.data));
+    api<{ data: Connector[] }>("/v1/connectors").then((r) => setConnectors(r.data));
   }, []);
 
   let mcpServers: Record<string, unknown> | null = null;
@@ -97,6 +100,12 @@ export default function AgentForm({
   }
 
   const customTools = tools.filter((t) => !BUILTIN_TOOLS.includes(t));
+
+  // A remote connector is reached through the egress proxy, which only rewrites
+  // its URL when one of the session's vaults holds a matching credential.
+  const missingVault = connectors.filter(
+    (c) => c.requires_vault && mcpServers && c.name in mcpServers && vaultIds.length === 0,
+  );
 
   function toggleTool(tool: string) {
     setTools((prev) =>
@@ -112,6 +121,16 @@ export default function AgentForm({
 
   function toggleId(list: string[], set: (v: string[]) => void, id: string) {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  }
+
+  function toggleConnector(connector: Connector) {
+    const servers = { ...(mcpServers ?? {}) };
+    if (connector.name in servers) {
+      delete servers[connector.name];
+    } else {
+      servers[connector.name] = { type: connector.type, url: connector.url };
+    }
+    setMcpJson(JSON.stringify(servers, null, 2));
   }
 
   async function submit() {
@@ -373,6 +392,42 @@ export default function AgentForm({
               </button>
             ))}
           </div>
+        </>
+      )}
+
+      {connectors.length > 0 && (
+        <>
+          <label>Connectors</label>
+          <div className="chips">
+            {connectors.map((c) => (
+              <button
+                key={c.name}
+                type="button"
+                className={`chip ${mcpServers && c.name in mcpServers ? "on" : ""}`}
+                disabled={!c.available || mcpServers === null}
+                title={
+                  c.available
+                    ? `${c.credential} Tools appear as ${c.tool_glob}.`
+                    : "Not deployed in this project."
+                }
+                onClick={() => toggleConnector(c)}
+              >
+                {c.title}{c.available ? "" : " (not deployed)"}
+              </button>
+            ))}
+          </div>
+          <p className="hint">
+            Connectors are existing MCP servers, reached either through the egress proxy
+            with a vault credential or as a self-hosted service in this project. Their
+            tools still pass the permission policy and are audited like any other call —
+            add a rule for the tool glob to control them.
+          </p>
+          {missingVault.length > 0 && (
+            <p className="hint error">
+              {missingVault.map((c) => c.title).join(", ")} needs a vault holding its
+              credential; select one above or its calls will fail unauthenticated.
+            </p>
+          )}
         </>
       )}
 

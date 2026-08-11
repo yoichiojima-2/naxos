@@ -110,12 +110,14 @@ async def archive_vault(vault_id: str, _: str = Depends(principal_of)) -> dict:
 
 
 class CredentialIn(BaseModel):
+    # Only 'header' credentials exist: the egress proxy injects them into MCP
+    # traffic for the named server. 'env' placeholders were never substituted
+    # anywhere, so accepting them silently produced dead credentials.
     name: str
-    type: str = Field(pattern="^(env|header)$")
+    type: str = Field(pattern="^header$")
     value: str
     target: dict[str, Any] = Field(default_factory=dict)
-    # env:    {"env_var": "GITHUB_TOKEN"} — placeholder exported into the sandbox
-    # header: {"host": "api.github.com", "header": "authorization", "prefix": "Bearer "}
+    # {"mcp_server": "github", "header": "authorization", "prefix": "Bearer "}
 
 
 @router.post("/vaults/{vault_id}/credentials", status_code=201)

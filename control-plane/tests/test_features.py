@@ -429,8 +429,11 @@ async def test_session_config_rewrites_mcp_urls_through_egress(
     resolved = (await internal_client.get(f"/internal/sessions/{session['id']}/config")).json()
     url = resolved["mcp_servers"]["github"]["url"]
     assert url.startswith("https://egress.example/r/")
+    # Trailing slash: without it the proxy answers the route root with a
+    # redirect, which would take the SDK off its OIDC-minting forwarder.
+    assert url.endswith("/")
 
-    token = url.rsplit("/", 1)[1]
+    token = url.rstrip("/").rsplit("/", 1)[1]
     route = (await internal_client.get(f"/internal/egress/routes/{token}")).json()
     assert route["target_url"] == "https://api.githubcopilot.com/mcp/"
     assert route["header"] == "authorization"

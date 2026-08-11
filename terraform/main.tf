@@ -418,6 +418,15 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "INTERNAL_URL"
         value = google_cloud_run_v2_service.internal.uri
       }
+      # The connector catalog lists a self-hosted connector as available only
+      # when its service URL is present here.
+      dynamic "env" {
+        for_each = local.connectors
+        content {
+          name  = "NAXOS_MCP_${upper(env.key)}_URL"
+          value = google_cloud_run_v2_service.connector[env.key].uri
+        }
+      }
       # Audience of the IAP JWT for IAP enabled directly on Cloud Run v2.
       # Optional override: when empty, the app derives the same value from the
       # metadata server at runtime (auth._derive_audience).
