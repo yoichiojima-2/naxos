@@ -34,14 +34,14 @@ async def clean(pool):
 
 @pytest_asyncio.fixture
 async def client(pool):
-    transport = ASGITransport(app=api.create_app_without_lifespan())
+    transport = ASGITransport(app=api.create_app(manage_pool=False))
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
 @pytest_asyncio.fixture
 async def internal_client(pool):
-    transport = ASGITransport(app=internal.create_app_without_lifespan())
+    transport = ASGITransport(app=internal.create_app(manage_pool=False))
     async with AsyncClient(transport=transport, base_url="http://internal") as c:
         yield c
 

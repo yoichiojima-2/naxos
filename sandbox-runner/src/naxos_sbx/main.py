@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from naxos_shared.events import EventType, StopReason
 
+from .config import IDLE_LINGER_SECONDS
 from .control import ControlChannel
 from .harness import CONTINUE_PROMPT, Harness
 from .memory_sync import MemorySync
@@ -13,7 +14,6 @@ from .workspace import Workspace
 
 log = logging.getLogger(__name__)
 
-IDLE_LINGER_SECONDS = float(os.environ.get("IDLE_LINGER_SECONDS", "120"))
 HEARTBEAT_SECONDS = 30.0
 QUEUE_WAIT_SECONDS = 25
 

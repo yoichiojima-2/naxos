@@ -1,4 +1,3 @@
-from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -67,7 +66,6 @@ class EventIn(BaseModel):
     call_hash: str | None = None
     result: Decision | None = None
     deny_message: str | None = None
-    custom_tool_use_id: str | None = None
 
     def validate_for_send(self) -> None:
         if self.type not in USER_EVENT_TYPES:
@@ -78,19 +76,6 @@ class EventIn(BaseModel):
             self.call_hash and self.result
         ):
             raise ValueError("user.tool_confirmation requires call_hash and result")
-
-
-class Event(BaseModel):
-    """A persisted event as returned by the API."""
-
-    id: int
-    session_id: str
-    seq: int
-    type: EventType
-    payload: dict[str, Any]
-    principal: str | None = None
-    processed_at: datetime | None = None
-    created_at: datetime
 
 
 class PermissionRule(BaseModel):

@@ -2,12 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import db
+from . import config, db
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
-
-MAX_MEMORY_BYTES = 64 * 1024
 
 
 class StoreIn(BaseModel):
@@ -42,7 +40,7 @@ class MemoryIn(BaseModel):
 
 @router.post("/memory_stores/{store_id}/memories", status_code=201)
 async def put_memory(store_id: str, body: MemoryIn, principal: str = Depends(principal_of)) -> dict:
-    if len(body.content.encode()) > MAX_MEMORY_BYTES:
+    if len(body.content.encode()) > config.MAX_MEMORY_BYTES:
         raise HTTPException(413, "memory content exceeds 64KB")
     if ".." in body.path.split("/"):
         raise HTTPException(400, "path may not contain ..")
@@ -92,6 +90,6 @@ async def delete_memory(store_id: str, memory_id: str, _: str = Depends(principa
         result = await conn.execute(
             "DELETE FROM memories WHERE id = $1 AND store_id = $2", memory_id, store_id
         )
-    if not result.endswith(" 1"):
+    if db.rowcount(result) != 1:
         raise HTTPException(404, "memory not found")
     return {"id": memory_id, "deleted": True}

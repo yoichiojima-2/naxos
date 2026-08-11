@@ -1,3 +1,4 @@
+import functools
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -7,16 +8,13 @@ from google.cloud import bigquery
 from . import config
 
 log = logging.getLogger(__name__)
-_client: bigquery.Client | None = None
 
 JPY_PER_USD = 155.0
 
 
+@functools.cache
 def _bq() -> bigquery.Client:
-    global _client
-    if _client is None:
-        _client = bigquery.Client(project=config.PROJECT_ID)
-    return _client
+    return bigquery.Client(project=config.PROJECT_ID)
 
 
 def _insert(table: str, row: dict[str, Any]) -> None:

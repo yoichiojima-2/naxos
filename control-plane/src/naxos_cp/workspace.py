@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,14 +11,10 @@ from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
 
-_client: storage.Client | None = None
 
-
+@functools.cache
 def _storage() -> storage.Client:
-    global _client
-    if _client is None:
-        _client = storage.Client()
-    return _client
+    return storage.Client()
 
 
 async def _session_bucket(session_id: str) -> str:

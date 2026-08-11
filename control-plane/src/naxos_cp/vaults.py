@@ -1,3 +1,4 @@
+import functools
 import logging
 from typing import Any
 
@@ -11,16 +12,12 @@ from .auth import principal_of
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
 
-_secrets = None
 
-
+@functools.cache
 def _secrets_client():
-    global _secrets
-    if _secrets is None:
-        from google.cloud import secretmanager
+    from google.cloud import secretmanager
 
-        _secrets = secretmanager.SecretManagerServiceAsyncClient()
-    return _secrets
+    return secretmanager.SecretManagerServiceAsyncClient()
 
 
 async def _store_secret(credential_id: str, value: str) -> str:

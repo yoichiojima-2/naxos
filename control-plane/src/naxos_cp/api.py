@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -24,19 +23,10 @@ from .auth import principal_of
 router = APIRouter(prefix="/v1")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    pool = await db.connect()
-    async with pool.acquire() as conn:
-        await db.migrate(conn)
-    yield
-    await db.disconnect()
-
-
-def create_app() -> FastAPI:
+def create_app(manage_pool: bool = True) -> FastAPI:
     from . import deployments, memory, vaults, workspace
 
-    app = FastAPI(title="naxos", lifespan=lifespan)
+    app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
     app.include_router(deployments.router)
     app.include_router(vaults.router)
@@ -46,23 +36,6 @@ def create_app() -> FastAPI:
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
     return app
-
-
-def create_app_without_lifespan() -> FastAPI:
-    """For tests, which manage the pool themselves."""
-    from . import deployments, memory, vaults, workspace
-
-    app = FastAPI(title="naxos")
-    app.include_router(router)
-    app.include_router(deployments.router)
-    app.include_router(vaults.router)
-    app.include_router(memory.router)
-    app.include_router(workspace.router)
-    return app
-
-
-def _row(record: Any) -> dict[str, Any]:
-    return {k: v for k, v in dict(record).items()}
 
 
 # --- agents ----------------------------------------------------------------
@@ -151,7 +124,7 @@ async def _agent_with_version(conn, agent_id: str, version: int) -> dict:
     )
     if row is None:
         raise HTTPException(404, "agent version not found")
-    out = _row(row)
+    out = dict(row)
     out["version"] = version
     return out
 
@@ -162,7 +135,7 @@ async def list_agents(_: str = Depends(principal_of)) -> dict:
         rows = await conn.fetch(
             "SELECT * FROM agents WHERE archived_at IS NULL ORDER BY created_at DESC"
         )
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 @router.get("/agents/{agent_id}")
@@ -188,7 +161,7 @@ async def patch_agent(agent_id: str, body: AgentPatch, _: str = Depends(principa
             agent_id,
             body.disabled,
         )
-        if not result.endswith(" 1"):
+        if db.rowcount(result) != 1:
             raise HTTPException(404, "agent not found")
     return {"id": agent_id, "disabled": body.disabled}
 
@@ -233,14 +206,14 @@ async def create_environment(body: EnvironmentIn, _: str = Depends(principal_of)
             body.cpu,
             body.memory,
         )
-    return _row(row)
+    return dict(row)
 
 
 @router.get("/environments")
 async def list_environments(_: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch("SELECT * FROM environments ORDER BY created_at")
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 # --- sessions --------------------------------------------------------------
@@ -300,7 +273,7 @@ async def create_session(body: SessionIn, principal: str = Depends(principal_of)
             )
         if body.initial_events:
             await wake.wake(conn, session_id)
-        out = _row(await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id))
+        out = dict(await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id))
     return out
 
 
@@ -319,7 +292,7 @@ async def list_sessions(
             str(status) if status else None,
             limit,
         )
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 @router.get("/sessions/{session_id}")
@@ -328,7 +301,7 @@ async def get_session(session_id: str, _: str = Depends(principal_of)) -> dict:
         row = await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id)
     if row is None:
         raise HTTPException(404, "session not found")
-    return _row(row)
+    return dict(row)
 
 
 class SessionPatch(BaseModel):
@@ -352,7 +325,7 @@ async def patch_session(
             raise HTTPException(404, "session not found")
         if body.budget_usd is not None and row["stop_reason"] == "budget_reached":
             await wake.wake(conn, session_id)
-    return _row(row)
+    return dict(row)
 
 
 @router.post("/sessions/{session_id}/terminate")
@@ -429,7 +402,7 @@ async def get_events(
         )
     async with db.transaction() as conn:
         rows = await store.list_events(conn, session_id, after, limit)
-    return {"data": [_row(r) for r in rows]}
+    return {"data": [dict(r) for r in rows]}
 
 
 async def _sse(session_id: str, after: int):

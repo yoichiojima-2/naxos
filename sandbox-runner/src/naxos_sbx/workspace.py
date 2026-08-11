@@ -1,14 +1,17 @@
+import functools
 import logging
-import os
-import shutil
 from pathlib import Path
 
 from google.cloud import storage
 
+from .config import CLAUDE_CONFIG_DIR, WORKDIR
+
 log = logging.getLogger(__name__)
 
-WORKDIR = Path(os.environ.get("NAXOS_WORKDIR", "/workspace"))
-CLAUDE_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR", "/workspace/.claude"))
+
+@functools.cache
+def _storage_client() -> storage.Client:
+    return storage.Client()
 
 
 class Workspace:
@@ -23,16 +26,13 @@ class Workspace:
         self.bucket_name = bucket
         self.root = WORKDIR / session_id
         self.ws = self.root / "ws"
-        self._client: storage.Client | None = None
 
     @property
     def prefix(self) -> str:
         return f"sessions/{self.session_id}"
 
     def _bucket(self) -> storage.Bucket:
-        if self._client is None:
-            self._client = storage.Client()
-        return self._client.bucket(self.bucket_name)
+        return _storage_client().bucket(self.bucket_name)
 
     def restore(self) -> None:
         self.ws.mkdir(parents=True, exist_ok=True)
@@ -66,6 +66,3 @@ class Workspace:
                 continue
             name = f"{self.prefix}/{area}/{path.relative_to(source)}"
             bucket.blob(name).upload_from_filename(path)
-
-    def clean(self) -> None:
-        shutil.rmtree(self.root, ignore_errors=True)

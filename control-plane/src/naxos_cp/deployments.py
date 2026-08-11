@@ -1,3 +1,4 @@
+import functools
 import logging
 from typing import Any
 
@@ -13,16 +14,12 @@ from .auth import principal_of
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1")
 
-_scheduler = None
 
-
+@functools.cache
 def _scheduler_client():
-    global _scheduler
-    if _scheduler is None:
-        from google.cloud import scheduler_v1
+    from google.cloud import scheduler_v1
 
-        _scheduler = scheduler_v1.CloudSchedulerAsyncClient()
-    return _scheduler
+    return scheduler_v1.CloudSchedulerAsyncClient()
 
 
 def _job_name(deployment_id: str) -> str:

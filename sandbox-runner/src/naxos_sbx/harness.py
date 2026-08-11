@@ -12,7 +12,6 @@ from claude_agent_sdk.types import (
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
-    ToolUseBlock,
     UserMessage,
 )
 from naxos_shared.events import EventType, StopReason
@@ -26,7 +25,6 @@ CONTINUE_PROMPT = (
     "Continue the work you were doing before this session was resumed. "
     "If you were waiting on approval for a tool call, that decision is now available."
 )
-PERMISSION_POLL_SECONDS = 2.0
 
 
 class BudgetReached(Exception):
@@ -198,8 +196,6 @@ class Harness:
                         self._queue(EventType.AGENT_MESSAGE, {"text": block.text})
                     elif isinstance(block, ThinkingBlock):
                         self._queue(EventType.AGENT_THINKING, {})
-                    elif isinstance(block, ToolUseBlock):
-                        pass
             elif isinstance(message, UserMessage):
                 for block in message.content:
                     if isinstance(block, ToolResultBlock):

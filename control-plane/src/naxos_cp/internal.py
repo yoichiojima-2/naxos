@@ -16,8 +16,7 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import audit, config, db, store, wake
-from .api import lifespan
+from . import audit, config, db, deployments, store, wake
 from .auth import caller_service_account
 
 log = logging.getLogger(__name__)
@@ -26,15 +25,8 @@ router = APIRouter(prefix="/internal")
 QUEUE_POLL_SECONDS = 0.5
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="naxos-internal", lifespan=lifespan)
-    app.include_router(router)
-    return app
-
-
-def create_app_without_lifespan() -> FastAPI:
-    """For tests, which manage the pool themselves."""
-    app = FastAPI(title="naxos-internal")
+def create_app(manage_pool: bool = True) -> FastAPI:
+    app = FastAPI(title="naxos-internal", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
     return app
 
@@ -54,10 +46,6 @@ async def _authorize(conn, session_id: str, caller: str) -> Any:
     if config.ENFORCE_CALLER_AUTH and row["service_account_email"] != caller:
         raise HTTPException(403, "caller is not the session's environment service account")
     return row
-
-
-class ClaimIn(BaseModel):
-    pass
 
 
 @router.post("/sessions/{session_id}/claim")
@@ -336,7 +324,10 @@ async def session_memory_writeback(
                         path,
                     )
                     continue
-                if len(str(content).encode()) > 64 * 1024:
+                if len(str(content).encode()) > config.MAX_MEMORY_BYTES:
+                    log.warning(
+                        "memory writeback skipped, %s/%s exceeds size limit", store_id, path
+                    )
                     continue
                 await conn.execute(
                     "INSERT INTO memories (id, store_id, path, content, updated_by) "
@@ -379,8 +370,6 @@ async def egress_route(token: str, caller: str = Depends(caller_service_account)
 
 @router.post("/deployments/{deployment_id}/fire")
 async def fire_deployment(deployment_id: str, _: str = Depends(caller_service_account)) -> dict:
-    from . import deployments
-
     async with db.transaction() as conn:
         return await deployments.fire(conn, deployment_id, trigger="schedule")
 

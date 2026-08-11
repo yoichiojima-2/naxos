@@ -44,6 +44,19 @@ async def transaction() -> AsyncIterator[asyncpg.Connection]:
         yield conn
 
 
+@asynccontextmanager
+async def lifespan(app) -> AsyncIterator[None]:
+    p = await connect()
+    async with p.acquire() as conn:
+        await migrate(conn)
+    yield
+    await disconnect()
+
+
+def rowcount(status: str) -> int:
+    return int(status.rsplit(" ", 1)[-1])
+
+
 async def migrate(conn: asyncpg.Connection) -> None:
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations "

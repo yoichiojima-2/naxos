@@ -1,13 +1,11 @@
 import logging
-import os
 from typing import Any
 
 import httpx
 
-log = logging.getLogger(__name__)
+from .config import DEV_SA, INTERNAL_URL
 
-INTERNAL_URL = os.environ.get("INTERNAL_URL", "http://localhost:8001")
-DEV_SA = os.environ.get("NAXOS_DEV_SA", "")
+log = logging.getLogger(__name__)
 
 
 class ControlChannel:
