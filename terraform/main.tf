@@ -255,6 +255,43 @@ resource "google_project_iam_member" "environment_vertex" {
   member   = "serviceAccount:${google_service_account.environment[each.key].email}"
 }
 
+# BigQuery analysis is opt-in per environment: a `bigquery_datasets` list in
+# environments.json grants that environment's SA jobUser plus read access to
+# exactly the listed datasets (which must already exist — Terraform does not
+# manage them). The audit dataset holds every tenant's rows and is never
+# grantable.
+locals {
+  environment_bq_datasets = {
+    for env, cfg in local.environments : env => try(cfg.bigquery_datasets, [])
+  }
+  environment_bq_grants = merge([
+    for env, datasets in local.environment_bq_datasets : {
+      for dataset in datasets : "${env}-${dataset}" => { environment = env, dataset = dataset }
+    }
+  ]...)
+}
+
+resource "google_project_iam_member" "environment_bq_jobuser" {
+  for_each = { for env, datasets in local.environment_bq_datasets : env => datasets if length(datasets) > 0 }
+  project  = var.project_id
+  role     = "roles/bigquery.jobUser"
+  member   = "serviceAccount:${google_service_account.environment[each.key].email}"
+}
+
+resource "google_bigquery_dataset_iam_member" "environment_bq_data" {
+  for_each   = local.environment_bq_grants
+  dataset_id = each.value.dataset
+  role       = "roles/bigquery.dataViewer"
+  member     = "serviceAccount:${google_service_account.environment[each.value.environment].email}"
+
+  lifecycle {
+    precondition {
+      condition     = each.value.dataset != google_bigquery_dataset.audit.dataset_id
+      error_message = "The naxos audit dataset can never be granted to an environment service account."
+    }
+  }
+}
+
 # --- per-environment session buckets ----------------------------------------
 
 resource "google_storage_bucket" "sessions" {

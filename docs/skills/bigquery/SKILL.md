@@ -9,7 +9,7 @@ Run queries against BigQuery from inside the sandbox. The sandbox image has **no
 
 ## Access model
 
-The sandbox runs as its environment's service account. By default that account has **no BigQuery access** — an operator must grant it `roles/bigquery.jobUser` (to run queries) plus dataset-level read access (e.g. `roles/bigquery.dataViewer` on specific datasets) before anything here works.
+The sandbox runs as its environment's service account. By default that account has **no BigQuery access** — an operator must opt the environment in by listing datasets under `bigquery_datasets` in `terraform/environments.json` and applying, which grants `roles/bigquery.jobUser` plus `roles/bigquery.dataViewer` on exactly those datasets.
 
 A `403` with `accessDenied` means the grant is missing or too narrow. Do not retry or look for workarounds: report which dataset you need and stop.
 
