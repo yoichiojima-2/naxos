@@ -19,7 +19,7 @@ from naxos_shared.ids import new_id
 from naxos_shared.paths import unsafe_relpath
 from pydantic import BaseModel, Field
 
-from . import artifacts, audit, config, db, deployments, store, wake
+from . import artifacts, audit, config, db, deployments, favorites, store, wake
 from .auth import caller_service_account
 
 log = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ async def _resolve_egress(conn, session_id: str, vault_ids: list[str], mcp_serve
                 (match["target"] or {}).get("header", "authorization"),
                 (match["target"] or {}).get("prefix", "Bearer "),
             )
-            server["url"] = f"{config.EGRESS_URL}/r/{token}"
+            server["url"] = f"{config.EGRESS_URL}/r/{token}/"
         rewritten[name] = server
     return rewritten
 
@@ -304,6 +304,8 @@ async def checkpoint(
         await store.set_status(
             conn, session_id, status, None if body.terminated else body.stop_reason
         )
+        if body.terminated:
+            await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
         created_by = row["created_by"] or ""
         await conn.execute(
             "INSERT INTO session_runs (id, session_id, agent_id, environment_id, trigger_type, "
@@ -526,6 +528,7 @@ async def delete_session_artifact(
         )
         if record is None:
             raise HTTPException(404, "artifact not found")
+        await favorites.clear_for_entities(conn, record["id"])
         await _emit_artifact_event(conn, session_id, "deleted", record)
     return {"id": record["id"], "deleted": True}
 

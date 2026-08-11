@@ -1,0 +1,38 @@
+{
+  "slack": {
+    "upstream_image": "ghcr.io/korotovsky/slack-mcp-server:latest",
+    "args": ["--transport", "http"],
+    "secret_env": ["SLACK_MCP_XOXP_TOKEN"],
+    "env": {
+      "SLACK_MCP_HOST": "0.0.0.0",
+      "SLACK_MCP_PORT": "8080"
+    }
+  },
+  "atlassian": {
+    "upstream_image": "ghcr.io/sooperset/mcp-atlassian:latest",
+    "args": ["--transport", "streamable-http", "--port", "8080"],
+    "secret_env": ["JIRA_API_TOKEN", "CONFLUENCE_API_TOKEN"],
+    "env": {
+      "JIRA_URL": "",
+      "JIRA_USERNAME": "",
+      "CONFLUENCE_URL": "",
+      "CONFLUENCE_USERNAME": "",
+      "IGNORE_HEADER_AUTH": "true"
+    }
+  },
+  "notion": {
+    "upstream_image": "mcp/notion:latest",
+    "args": ["--transport", "http", "--host", "0.0.0.0", "--port", "8080", "--unsafe-disable-auth"],
+    "secret_env": ["NOTION_TOKEN"],
+    "env": {}
+  },
+  "gworkspace": {
+    "upstream_image": "ghcr.io/taylorwilsdon/google_workspace_mcp:latest",
+    "args": [],
+    "secret_env": ["GOOGLE_SERVICE_ACCOUNT_KEY_JSON"],
+    "env": {
+      "WORKSPACE_MCP_HOST": "0.0.0.0",
+      "DWD_ALLOWED_DOMAINS": ""
+    }
+  }
+}

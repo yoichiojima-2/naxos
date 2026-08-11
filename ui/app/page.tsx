@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, Agent, Environment } from "@/lib/api";
+import { api, favKey, Agent, Environment, Favorite, FavoriteType } from "@/lib/api";
 import Agents from "@/components/agents";
 import AgentDetail from "@/components/agent-detail";
 import Sessions from "@/components/sessions";
@@ -83,19 +83,35 @@ export default function Page() {
   const [route, setRoute] = useState<Route>({ page: "sessions" });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [agentResult, envResult] = await Promise.all([
+    const [agentResult, envResult, favResult] = await Promise.all([
       api<{ data: Agent[] }>("/v1/agents"),
       api<{ data: Environment[] }>("/v1/environments"),
+      api<{ data: Favorite[] }>("/v1/favorites"),
     ]);
     setAgents(agentResult.data);
     setEnvironments(envResult.data);
+    setFavorites(new Set(favResult.data.map((f) => favKey(f.entity_type, f.entity_id))));
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  const toggleFavorite = useCallback(async (type: FavoriteType, id: string) => {
+    const key = favKey(type, id);
+    const on = favorites.has(key);
+    if (on) await api(`/v1/favorites/${type}/${id}`, { method: "DELETE" });
+    else await api("/v1/favorites", { json: { entity_type: type, entity_id: id } });
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (on) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, [favorites]);
 
   useEffect(() => {
     const fromHash = () => setRoute(parseHash(window.location.hash));
@@ -188,9 +204,22 @@ export default function Page() {
                 <p>{PAGE_INFO[route.page]}</p>
               </div>
             )}
-            {route.page === "sessions" && <Sessions agents={agents} sessionId={route.id} />}
+            {route.page === "sessions" && (
+              <Sessions
+                agents={agents}
+                sessionId={route.id}
+                favorites={favorites}
+                onToggleFavorite={toggleFavorite}
+              />
+            )}
             {route.page === "agents" && !route.id && (
-              <Agents agents={agents} environments={environments} onChange={refresh} />
+              <Agents
+                agents={agents}
+                environments={environments}
+                onChange={refresh}
+                favorites={favorites}
+                onToggleFavorite={toggleFavorite}
+              />
             )}
             {agentDetail && (
               <AgentDetail
@@ -200,7 +229,9 @@ export default function Page() {
               />
             )}
             {route.page === "deployments" && <Deployments agents={agents} />}
-            {route.page === "artifacts" && !route.id && <Artifacts agents={agents} />}
+            {route.page === "artifacts" && !route.id && (
+              <Artifacts agents={agents} favorites={favorites} onToggleFavorite={toggleFavorite} />
+            )}
             {artifactDetail && (
               route.id!.startsWith("shared/")
                 ? <ArtifactViewer token={route.id!.slice("shared/".length)} agents={agents} />
@@ -209,7 +240,9 @@ export default function Page() {
             {route.page === "monitoring" && <Monitoring />}
             {route.page === "vaults" && <Vaults />}
             {route.page === "memory" && <MemoryStores />}
-            {route.page === "skills" && <Skills />}
+            {route.page === "skills" && (
+              <Skills favorites={favorites} onToggleFavorite={toggleFavorite} />
+            )}
             {route.page === "docs" && <Docs />}
           </main>
           {toast && (

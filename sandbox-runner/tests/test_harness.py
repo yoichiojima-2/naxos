@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from naxos_shared.events import SessionConfig
 
-from naxos_sbx.harness import Harness
+from naxos_sbx.harness import Harness, _result_text
 
 
 def _config(**overrides) -> SessionConfig:
@@ -95,6 +95,8 @@ class _Channel:
         ({"decision": "allow", "by": "policy"}, "auto_allowed", "allow"),
         ({"decision": "allow", "by": "user"}, "user_allowed", "allow"),
         ({"decision": "deny", "by": "user", "reason": "no"}, "user_denied", "deny"),
+        # Outside the agent version's tools list: denied by the control plane, not a human.
+        ({"decision": "deny", "by": "policy", "reason": "not yours"}, "not_allowed", "deny"),
         ({"decision": "deny", "reason": "agent disabled", "killed": True}, "killed", "deny"),
     ],
 )
@@ -116,33 +118,15 @@ async def test_pre_tool_use_pending_pauses_the_call():
     assert channel.emitted[-1]["payload"]["decision"] == "awaiting_confirmation"
 
 
-async def test_a_deny_from_the_tools_list_is_audited_as_not_allowed():
-    # The control plane denies with by="policy" when the tool is outside the
-    # agent's list; a human denial keeps the user_denied label.
-    class _Channel:
-        session_id = "session_x"
+def test_result_text_unwraps_content_blocks():
+    content = [{"type": "text", "text": "first"}, {"type": "text", "text": "second"}]
+    assert _result_text(content) == "first\n\nsecond"
 
-        def __init__(self, verdict):
-            self.verdict = verdict
-            self.events: list = []
 
-        async def ask_permission(self, digest, tool_name, tool_input, tool_use_id):
-            return self.verdict
+def test_result_text_passes_plain_strings_through():
+    assert _result_text("already text") == "already text"
+    assert _result_text(None) == ""
 
-        async def emit(self, events, run_id):
-            self.events.extend(events)
 
-    for verdict, expected in (
-        (
-            {"decision": "deny", "by": "policy", "reason": "not one of this agent's tools"},
-            "not_allowed",
-        ),
-        ({"decision": "deny", "by": "user", "reason": "no"}, "user_denied"),
-    ):
-        channel = _Channel(verdict)
-        harness = _harness(_config(tools=["Read"]), channel=channel)
-        result = await harness._pre_tool_use(
-            {"tool_name": "Bash", "tool_input": {}}, "toolu_x", None
-        )
-        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert harness.pending[0]["payload"]["decision"] == expected
+def test_result_text_truncates_to_the_event_size_cap():
+    assert len(_result_text([{"type": "text", "text": "x" * 5000}])) == 4000

@@ -176,6 +176,18 @@ export type DeploymentRun = {
 
 export type Environment = { id: string; name: string };
 export type Vault = { id: string; name: string };
+export type Connector = {
+  name: string;
+  title: string;
+  shape: "remote" | "hosted";
+  type: "http" | "sse";
+  url: string;
+  available: boolean;
+  requires_vault: boolean;
+  credential: string;
+  upstream: string;
+  tool_glob: string;
+};
 export type Credential = {
   id: string;
   name: string;
@@ -229,3 +241,8 @@ export type Memory = {
 export type Skill = { id: string; name: string; description: string | null; ready: boolean };
 export type SkillFile = { id: string; path: string; size?: number; content?: string };
 export type WorkspaceFile = { path: string; size: number };
+
+export type FavoriteType = "agent" | "session" | "artifact" | "skill";
+export type Favorite = { entity_type: FavoriteType; entity_id: string };
+
+export const favKey = (type: FavoriteType, id: string) => `${type}:${id}`;

@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import { Block, ToolBlock, groupEvents, prettifyResult, toolSummary } from "@/lib/timeline";
 import { fullTime, relativeTime, shortId } from "@/lib/format";
 import { BackIcon } from "@/components/icons";
+import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import Markdown from "@/components/markdown";
 import FilterInput from "@/components/filter-input";
@@ -15,7 +17,12 @@ const statusOf = (s: Session) =>
 
 const openSession = (id: string) => { window.location.hash = `#sessions/${id}`; };
 
-export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessionId?: string }) {
+export default function Sessions({
+  agents,
+  sessionId,
+  favorites,
+  onToggleFavorite,
+}: { agents: Agent[]; sessionId?: string } & FavoriteProps) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [agentId, setAgentId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -66,8 +73,11 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
       .toLowerCase()
       .includes(q);
   });
-  const filtered = base.filter((s) => !statusFilter || statusOf(s) === statusFilter);
-  const hasFilters = !!(q || agentFilter || statusFilter);
+  const favFilter = useFavoriteFilter("session", base, favorites);
+  const filtered = favFilter.apply(
+    base.filter((s) => !statusFilter || statusOf(s) === statusFilter),
+  );
+  const hasFilters = !!(q || agentFilter || statusFilter || favFilter.favOnly);
 
   const statusCounts = new Map<string, number>();
   for (const s of base) {
@@ -79,6 +89,7 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
     setQuery("");
     setAgentFilter("");
     setStatusFilter("");
+    favFilter.clear();
   }
 
   const allSelected = !!filtered.length && filtered.every((s) => selected.has(s.id));
@@ -191,6 +202,7 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
+          {favFilter.chip}
           {STATUS_FILTERS.filter(
             (status) => statusCounts.get(status) || status === statusFilter,
           ).map((status) => (
@@ -223,19 +235,20 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
                   aria-label="select all sessions"
                 />
               </th>
+              <th />
               <th>title</th><th>agent</th><th>status</th><th>principal</th>
               <th className="ta-right">cost</th><th>created</th>
             </tr>
           </thead>
           <tbody>
             {sessions === null && (
-              <tr><td className="empty" colSpan={7}>loading…</td></tr>
+              <tr><td className="empty" colSpan={8}>loading…</td></tr>
             )}
             {sessions?.length === 0 && (
-              <tr><td className="empty" colSpan={7}>no sessions yet — pick an agent above and start one.</td></tr>
+              <tr><td className="empty" colSpan={8}>no sessions yet — pick an agent above and start one.</td></tr>
             )}
             {!!sessions?.length && filtered.length === 0 && (
-              <tr><td className="empty" colSpan={7}>no sessions match the current filters.</td></tr>
+              <tr><td className="empty" colSpan={8}>no sessions match the current filters.</td></tr>
             )}
             {filtered.map((s) => {
               const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
@@ -247,6 +260,14 @@ export default function Sessions({ agents, sessionId }: { agents: Agent[]; sessi
                       checked={selected.has(s.id)}
                       onChange={() => toggle(s.id)}
                       aria-label={`select ${s.title ?? s.id}`}
+                    />
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()} style={{ width: 1 }}>
+                    <FavoriteStar
+                      type="session"
+                      id={s.id}
+                      favorites={favorites}
+                      onToggleFavorite={onToggleFavorite}
                     />
                   </td>
                   <td>{s.title ?? <span className="muted mono" title={s.id}>{shortId(s.id)}</span>}</td>
@@ -280,6 +301,7 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
   const [status, setStatus] = useState(known?.status ?? "idle");
   const [connected, setConnected] = useState(true);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
+  const [raw, setRaw] = useState(false);
   const source = useRef<EventSource | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -367,6 +389,8 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
       .map((e) => String(e.payload.call_hash)),
   );
 
+  const { blocks, costUsd } = useMemo(() => groupEvents(events), [events]);
+
   const live = status === "running" || status === "rescheduling";
 
   if (missing) {
@@ -395,11 +419,22 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
           </a>
           <strong>{session?.title ?? <span className="mono" title={sessionId}>{shortId(sessionId)}</span>}</strong>
           <span className={`badge ${status}`}>{status}</span>
+          {costUsd !== null && (
+            <span className="muted mono" title="session cost so far">${costUsd.toFixed(4)}</span>
+          )}
           {!connected && status !== "terminated" && (
             <span className="stream-note"><span className="spinner" />reconnecting…</span>
           )}
         </div>
         <div className="row">
+          <button
+            className="ghost"
+            onClick={() => setRaw(!raw)}
+            title="show every event exactly as it was recorded"
+            aria-pressed={raw}
+          >
+            {raw ? "Timeline" : "Raw"}
+          </button>
           <button className="ghost" onClick={loadFiles}>Files</button>
           <button
             className="ghost"
@@ -433,14 +468,16 @@ function Timeline({ sessionId, known }: { sessionId: string; known?: Session }) 
         {events.length === 0 && status !== "rescheduling" && (
           <span className="muted">no messages yet — say something below to begin.</span>
         )}
-        {events.map((event) => (
-          <Event
-            key={event.seq}
-            event={event}
-            decided={decided}
-            onConfirm={confirm}
-          />
-        ))}
+        {raw
+          ? events.map((event) => <RawEvent key={event.seq} event={event} />)
+          : blocks.map((block) => (
+              <TimelineBlock
+                key={block.key}
+                block={block}
+                decided={decided}
+                onConfirm={confirm}
+              />
+            ))}
         {status === "rescheduling" && (
           <div className="event system">
             <span className="muted"><span className="spinner" />session is waking up…</span>
@@ -490,29 +527,144 @@ function EventTime({ at }: { at: string }) {
   );
 }
 
-function Event({
-  event,
+function TimelineBlock({
+  block,
   decided,
   onConfirm,
 }: {
-  event: SessionEvent;
+  block: Block;
   decided: Set<string>;
   onConfirm: (hash: string, result: "allow" | "deny") => void;
 }) {
-  if (event.type === "agent.tool_use" && event.payload.decision === "awaiting_confirmation") {
-    return <ApprovalEvent event={event} decided={decided} onConfirm={onConfirm} />;
+  switch (block.kind) {
+    case "user":
+      return <UserTurn event={block.event} />;
+    case "agent":
+      return <AgentTurn events={block.events} />;
+    case "thinking":
+      return <ThinkingNote count={block.count} />;
+    case "tool":
+      return <ToolCall block={block} decided={decided} onConfirm={onConfirm} />;
+    case "artifact":
+      return <ArtifactEvent event={block.event} />;
+    case "error":
+      return <ErrorNote event={block.event} />;
+    case "interrupt":
+      return <Marker label="interrupted by user" at={block.event.created_at} />;
+    default:
+      return <RawEvent event={block.event} />;
   }
-  if (
-    event.type === "agent.thinking" ||
-    event.type === "agent.tool_use" ||
-    event.type === "agent.tool_result"
-  ) {
-    return <FoldedEvent event={event} />;
+}
+
+function UserTurn({ event }: { event: SessionEvent }) {
+  const body =
+    (event.payload.content as { text?: string }[] | undefined)?.map((b) => b.text).join("\n") ?? "";
+  return (
+    <div className="turn user">
+      <div className="bubble">{body}</div>
+      <span className="turn-meta">
+        {event.principal && `${event.principal} · `}
+        <EventTime at={event.created_at} />
+      </span>
+    </div>
+  );
+}
+
+function AgentTurn({ events }: { events: SessionEvent[] }) {
+  const source = events.map((e) => String(e.payload.text ?? "")).join("\n\n");
+  return (
+    <div className="turn agent">
+      <Markdown source={source} />
+      <span className="turn-meta"><EventTime at={events[0].created_at} /></span>
+    </div>
+  );
+}
+
+function ThinkingNote({ count }: { count: number }) {
+  return (
+    <div className="thinking-note">
+      thinking{count > 1 ? ` ×${count}` : ""}…
+    </div>
+  );
+}
+
+function ToolCall({
+  block,
+  decided,
+  onConfirm,
+}: {
+  block: ToolBlock;
+  decided: Set<string>;
+  onConfirm: (hash: string, result: "allow" | "deny") => void;
+}) {
+  const call = block.use.payload;
+  const result = block.result?.payload;
+  const isError = !!result?.is_error;
+
+  if (call.decision === "awaiting_confirmation" && !decided.has(String(call.call_hash))) {
+    return <ApprovalEvent event={block.use} onConfirm={onConfirm} />;
   }
-  if (event.type === "agent.artifact") {
-    return <ArtifactEvent event={event} />;
-  }
-  return <MessageEvent event={event} />;
+
+  const flag =
+    call.decision === "user_denied"
+      ? "denied"
+      : call.decision === "not_allowed"
+        ? "not allowed"
+        : call.decision === "killed"
+          ? "killed"
+          : isError
+            ? "error"
+            : "";
+  const state = flag ? "err" : block.result ? "ok" : "wait";
+  const summary = toolSummary(call.input);
+
+  return (
+    <details className="tool-call">
+      <summary>
+        <span className={`dot ${state}`} />
+        <span className="mono">{String(call.tool_name ?? "tool")}</span>
+        {summary && <span className="tool-arg mono">{summary}</span>}
+        {flag && <span className="badge terminated">{flag}</span>}
+        <EventTime at={block.use.created_at} />
+      </summary>
+      <pre>{JSON.stringify(call.input ?? {}, null, 2)}</pre>
+      {block.result && (
+        <pre className={isError ? "err" : ""}>{prettifyResult(String(result?.content ?? ""))}</pre>
+      )}
+    </details>
+  );
+}
+
+function ErrorNote({ event }: { event: SessionEvent }) {
+  return (
+    <div className="turn error">
+      <span className="turn-meta">
+        <span className="badge terminated">error</span> <EventTime at={event.created_at} />
+      </span>
+      <pre>{String(event.payload.error ?? "")}</pre>
+    </div>
+  );
+}
+
+function Marker({ label, at }: { label: string; at: string }) {
+  return (
+    <div className="timeline-marker">
+      <span>{label} <EventTime at={at} /></span>
+    </div>
+  );
+}
+
+function RawEvent({ event }: { event: SessionEvent }) {
+  return (
+    <details className="tool-call">
+      <summary>
+        <span className="mono">{event.type}</span>
+        {event.principal && <span className="tool-arg">{event.principal}</span>}
+        <EventTime at={event.created_at} />
+      </summary>
+      <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+    </details>
+  );
 }
 
 function ArtifactEvent({ event }: { event: SessionEvent }) {
@@ -525,8 +677,8 @@ function ArtifactEvent({ event }: { event: SessionEvent }) {
   };
   const token = share_url?.match(/\/artifacts\/shared\/([^/]+)$/)?.[1];
   return (
-    <div className="event agent fold">
-      <span className="fold-line">
+    <div className="artifact-row">
+      <span>
         artifact {action}
         {action === "deleted" ? (
           <span className="mono">{name}</span>
@@ -549,15 +701,12 @@ function ArtifactEvent({ event }: { event: SessionEvent }) {
 
 function ApprovalEvent({
   event,
-  decided,
   onConfirm,
 }: {
   event: SessionEvent;
-  decided: Set<string>;
   onConfirm: (hash: string, result: "allow" | "deny") => void;
 }) {
   const hash = String(event.payload.call_hash);
-  const pending = !decided.has(hash);
   return (
     <div className="event ask">
       <div className="row between">
@@ -566,90 +715,12 @@ function ApprovalEvent({
           <strong>{String(event.payload.tool_name ?? "")}</strong>{" "}
           <EventTime at={event.created_at} />
         </span>
-        {pending && (
-          <span className="row">
-            <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
-            <button className="danger" onClick={() => onConfirm(hash, "deny")}>Deny</button>
-          </span>
-        )}
+        <span className="row">
+          <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
+          <button className="danger" onClick={() => onConfirm(hash, "deny")}>Deny</button>
+        </span>
       </div>
       <pre>{JSON.stringify(event.payload.input, null, 2)}</pre>
-    </div>
-  );
-}
-
-function FoldedEvent({ event }: { event: SessionEvent }) {
-  const payload = event.payload;
-  let label = "thinking";
-  let name = "";
-  let detail = "";
-  let flag = "";
-  if (event.type === "agent.tool_use") {
-    label = "tool";
-    name = String(payload.tool_name ?? "");
-    detail = JSON.stringify(payload.input ?? {}, null, 2);
-    if (payload.decision === "user_denied") flag = "denied";
-    if (payload.decision === "not_allowed") flag = "not allowed";
-    if (payload.decision === "killed") flag = "killed";
-  } else if (event.type === "agent.tool_result") {
-    label = "result";
-    detail = String(payload.content ?? "");
-    if (payload.is_error) flag = "error";
-  } else {
-    detail = String(payload.text ?? "");
-  }
-  const summary = (
-    <>
-      {label}
-      {name && <span className="mono">{name}</span>}
-      {flag && <span className="badge terminated">{flag}</span>}
-      <EventTime at={event.created_at} />
-    </>
-  );
-  return (
-    <div className="event agent fold">
-      {detail ? (
-        <details>
-          <summary>{summary}</summary>
-          <pre>{detail}</pre>
-        </details>
-      ) : (
-        <span className="fold-line">{summary}</span>
-      )}
-    </div>
-  );
-}
-
-function MessageEvent({ event }: { event: SessionEvent }) {
-  const kind = event.type.split(".")[0];
-  const payload = event.payload;
-  let body = "";
-  let markdown = "";
-  if (event.type === "user.message") {
-    body = (payload.content as { text?: string }[] | undefined)
-      ?.map((b) => b.text)
-      .join("\n") ?? "";
-  } else if (event.type === "agent.message") {
-    markdown = String(payload.text ?? "");
-  } else if (event.type === "session.error") {
-    body = String(payload.error ?? "");
-  }
-
-  return (
-    <div
-      className={[
-        "event",
-        kind === "user" ? "user" : kind === "agent" ? "agent" : "system",
-        event.type === "agent.message" ? "prose" : "",
-      ].join(" ").trim()}
-    >
-      <span className="muted">
-        {event.type}
-        {event.principal ? ` · ${event.principal}` : ""}{" "}
-        <EventTime at={event.created_at} />
-      </span>
-      {markdown && <Markdown source={markdown} />}
-      {body && <pre>{body}</pre>}
     </div>
   );
 }

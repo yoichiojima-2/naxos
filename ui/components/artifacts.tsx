@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
+import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
 
@@ -11,10 +12,15 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-export default function Artifacts({ agents }: { agents: Agent[] }) {
+export default function Artifacts({
+  agents,
+  favorites,
+  onToggleFavorite,
+}: { agents: Agent[] } & FavoriteProps) {
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const favFilter = useFavoriteFilter("artifact", artifacts ?? [], favorites);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Artifact[] }>("/v1/artifacts");
@@ -53,12 +59,14 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
   }
 
   const q = query.trim().toLowerCase();
-  const filtered = (artifacts ?? []).filter(
-    (a) =>
-      !q ||
-      `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
-        .toLowerCase()
-        .includes(q),
+  const filtered = favFilter.apply(
+    (artifacts ?? []).filter(
+      (a) =>
+        !q ||
+        `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
+          .toLowerCase()
+          .includes(q),
+    ),
   );
 
   return (
@@ -71,6 +79,7 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
         {!!artifacts?.length && (
           <FilterInput placeholder="Filter artifacts…" value={query} onChange={setQuery} />
         )}
+        {favFilter.chip}
       </CountHeader>
       <div className="panel">
         {artifacts === null && <span className="muted">loading…</span>}
@@ -87,6 +96,7 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
             <table>
               <thead>
                 <tr>
+                  <th />
                   <th>Name</th>
                   <th>Agent</th>
                   <th>Size</th>
@@ -102,6 +112,14 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
                     className="click"
                     onClick={() => { window.location.hash = `#artifacts/${artifact.id}`; }}
                   >
+                    <td onClick={(e) => e.stopPropagation()} style={{ width: 1 }}>
+                      <FavoriteStar
+                        type="artifact"
+                        id={artifact.id}
+                        favorites={favorites}
+                        onToggleFavorite={onToggleFavorite}
+                      />
+                    </td>
                     <td>
                       <a
                         className="mono"

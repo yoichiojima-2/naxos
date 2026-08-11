@@ -4,6 +4,8 @@ import time
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 log = logging.getLogger(__name__)
 
@@ -15,7 +17,9 @@ HOP_HEADERS = {"host", "connection", "transfer-encoding", "content-length", "aut
 app = FastAPI(title="naxos-egress")
 _routes: dict[str, tuple[float, dict]] = {}
 _secrets: dict[str, tuple[float, str]] = {}
-_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=False)
+# read=None: MCP streamable-HTTP/SSE responses stay open indefinitely; the
+# stream is bounded by the Cloud Run request timeout, not a client read timeout.
+_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, read=None), follow_redirects=False)
 
 
 def _identity_headers() -> dict[str, str]:
@@ -61,30 +65,42 @@ async def healthz() -> dict:
 
 
 @app.api_route(
+    "/r/{token}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+)
+@app.api_route(
     "/r/{token}/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
 )
-async def forward(token: str, path: str, request: Request) -> Response:
+async def forward(token: str, request: Request, path: str = "") -> Response:
     route = await _route(token)
     secret = _secret(route["secret_ref"])
 
-    target = route["target_url"].rstrip("/")
-    url = f"{target}/{path}" if path else target
+    # With no extra path the configured URL is used verbatim: some MCP
+    # endpoints (GitHub's /mcp/) redirect if their trailing slash is dropped.
+    target = route["target_url"]
+    url = f"{target.rstrip('/')}/{path}" if path else target
     if request.url.query:
         url = f"{url}?{request.url.query}"
 
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
     headers[route["header"]] = f"{route['value_prefix']}{secret}"
 
-    upstream = await _client.request(
-        request.method, url, headers=headers, content=await request.body()
+    # The request body is buffered (MCP client messages are small) but the
+    # response is streamed: passing a stream here would force chunked encoding
+    # even on bodyless GETs, which some upstreams reject.
+    upstream = await _client.send(
+        _client.build_request(request.method, url, headers=headers, content=await request.body()),
+        stream=True,
     )
-    excluded = {"content-encoding", "transfer-encoding", "connection", "content-length"}
-    return Response(
-        content=upstream.content,
+    # aiter_raw() passes bytes through untouched, so content-encoding and
+    # content-length stay valid; only connection-level headers are dropped.
+    excluded = {"transfer-encoding", "connection"}
+    return StreamingResponse(
+        upstream.aiter_raw(),
         status_code=upstream.status_code,
         headers={k: v for k, v in upstream.headers.items() if k.lower() not in excluded},
-        media_type=upstream.headers.get("content-type"),
+        background=BackgroundTask(upstream.aclose),
     )
 
 

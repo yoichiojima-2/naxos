@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -16,9 +16,9 @@ from naxos_shared.events import (
     SessionStatus,
 )
 from naxos_shared.ids import new_id
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import config, db, gcs, notify, sessions, store, wake
+from . import config, db, favorites, gcs, notify, sessions, store, wake
 from .auth import principal_of
 
 log = logging.getLogger(__name__)
@@ -27,17 +27,28 @@ router = APIRouter(prefix="/v1")
 
 
 def create_app(manage_pool: bool = True) -> FastAPI:
-    from . import artifacts, deployments, memory, monitoring, skills, vaults, workspace
+    from . import (
+        artifacts,
+        connectors,
+        deployments,
+        memory,
+        monitoring,
+        skills,
+        vaults,
+        workspace,
+    )
 
     app = FastAPI(title="naxos", lifespan=db.lifespan if manage_pool else None)
     app.include_router(router)
     app.include_router(monitoring.router)
+    app.include_router(connectors.router)
     app.include_router(deployments.router)
     app.include_router(vaults.router)
     app.include_router(memory.router)
     app.include_router(skills.router)
     app.include_router(workspace.router)
     app.include_router(artifacts.router)
+    app.include_router(favorites.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
@@ -47,6 +58,16 @@ def create_app(manage_pool: bool = True) -> FastAPI:
 # --- agents ----------------------------------------------------------------
 
 
+class McpServerIn(BaseModel):
+    # extra="forbid" rejects stdio configs ("command"/"args"): those would
+    # execute inside the sandbox with no egress rewriting or credential model.
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["http", "sse"] = "http"
+    url: str = Field(pattern=r"^https?://")
+    headers: dict[str, str] | None = None
+
+
 class AgentIn(BaseModel):
     name: str
     environment_id: str
@@ -54,13 +75,21 @@ class AgentIn(BaseModel):
     instructions: str | None = None
     tools: list[str] = Field(default_factory=list)
     permission_policy: PermissionPolicy = Field(default_factory=PermissionPolicy)
-    mcp_servers: dict[str, Any] = Field(default_factory=dict)
+    mcp_servers: dict[str, McpServerIn] = Field(default_factory=dict)
     vault_ids: list[str] = Field(default_factory=list)
     memory_store_ids: list[str] = Field(default_factory=list)
     skill_ids: list[str] = Field(default_factory=list)
     default_budget_usd: float | None = None
     max_turns: int | None = None
     effort: EffortLevel | None = None
+
+    @field_validator("mcp_servers")
+    @classmethod
+    def _no_reserved_server_names(cls, v: dict[str, McpServerIn]) -> dict[str, McpServerIn]:
+        for name in ("artifacts", "schedules"):
+            if name in v:
+                raise ValueError(f"'{name}' is reserved for the built-in sandbox tools")
+        return v
 
 
 @router.post("/agents", status_code=201)
@@ -112,7 +141,7 @@ async def _insert_version(conn, agent_id: str, version: int, body: AgentIn, prin
         body.model,
         list(body.tools),
         body.permission_policy.model_dump(mode="json"),
-        body.mcp_servers,
+        {name: s.model_dump(exclude_none=True) for name, s in body.mcp_servers.items()},
         body.vault_ids,
         body.memory_store_ids,
         body.skill_ids,
@@ -330,6 +359,11 @@ async def delete_session(session_id: str, principal: str = Depends(principal_of)
         )
         if row is None:
             raise HTTPException(404, "session not found")
+        # Artifacts cascade with the session, so their ids are read before the delete.
+        artifact_ids = [
+            r["id"]
+            for r in await conn.fetch("SELECT id FROM artifacts WHERE session_id = $1", session_id)
+        ]
         # Conditional DELETE so the liveness check and the delete are one atomic
         # statement — a claim landing in between makes the condition fail, not race.
         result = await conn.execute(
@@ -339,6 +373,9 @@ async def delete_session(session_id: str, principal: str = Depends(principal_of)
         )
         if db.rowcount(result) != 1:
             raise HTTPException(409, "session has a live sandbox — terminate it and retry")
+        # Favorites have no FK (entity_type spans tables); cleared after the delete so a
+        # favorite landing concurrently is still caught.
+        await favorites.clear_for_entities(conn, session_id, *artifact_ids)
     log.info("session %s deleted by %s", session_id, principal)
     try:
         await gcs.delete_prefix(row["session_bucket"], f"sessions/{session_id}/")
@@ -354,6 +391,7 @@ async def terminate_session(session_id: str, _: str = Depends(principal_of)) -> 
         if not exists:
             raise HTTPException(404, "session not found")
         await store.set_status(conn, session_id, SessionStatus.TERMINATED)
+        await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
     return {"id": session_id, "status": "terminated"}
 
 
