@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, apiConfirm, favKey, Agent, agentName, Artifact } from "@/lib/api";
-import FavoriteStar, { FavoriteProps } from "@/components/favorite-star";
+import { api, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
+import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
 
@@ -20,7 +20,7 @@ export default function Artifacts({
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [favOnly, setFavOnly] = useState(false);
+  const favFilter = useFavoriteFilter("artifact", artifacts, favorites);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Artifact[] }>("/v1/artifacts");
@@ -59,18 +59,15 @@ export default function Artifacts({
   }
 
   const q = query.trim().toLowerCase();
-  const isFav = (a: Artifact) => favorites.has(favKey("artifact", a.id));
-  const favCount = artifacts.filter(isFav).length;
-  const filtered = artifacts
-    .filter(
+  const filtered = favFilter.apply(
+    artifacts.filter(
       (a) =>
         !q ||
         `${a.name} ${a.description ?? ""} ${a.session_id} ${agentName(agents, a.agent_id)}`
           .toLowerCase()
           .includes(q),
-    )
-    .filter((a) => !favOnly || isFav(a))
-    .sort((a, b) => Number(isFav(b)) - Number(isFav(a)));
+    ),
+  );
 
   return (
     <>
@@ -78,11 +75,7 @@ export default function Artifacts({
         {artifacts.length > 0 && (
           <FilterInput placeholder="Filter artifacts…" value={query} onChange={setQuery} />
         )}
-        {(favCount > 0 || favOnly) && (
-          <button className={`chip ${favOnly ? "on" : ""}`} onClick={() => setFavOnly(!favOnly)}>
-            favorites {favCount}
-          </button>
-        )}
+        {favFilter.chip}
       </CountHeader>
       <div className="panel">
         {artifacts.length === 0 && (

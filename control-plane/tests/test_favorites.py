@@ -103,7 +103,7 @@ async def test_session_delete_clears_session_and_artifact_favorites(
     await favorite(client, "artifact", artifact["id"])
     await favorite(client, "agent", agent["id"])
 
-    # A live wake blocks deletion — and rolls the favorites cleanup back with it.
+    # A live wake blocks deletion, so the favorites survive with the session.
     assert (await client.delete(f"/v1/sessions/{session['id']}")).status_code == 409
     assert len(await listed(client)) == 3
 

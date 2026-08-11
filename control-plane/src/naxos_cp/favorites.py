@@ -38,28 +38,25 @@ async def list_favorites(principal: str = Depends(principal_of)) -> dict:
 @router.post("/favorites", status_code=201)
 async def create_favorite(body: FavoriteIn, principal: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
+        # FOR SHARE holds the entity row until commit, so a concurrent delete of it
+        # cannot slip past this check and strand the favorite with nothing to clean it up.
         exists = await conn.fetchval(
-            f"SELECT 1 FROM {ENTITY_TABLES[body.entity_type]} WHERE id = $1", body.entity_id
+            f"SELECT 1 FROM {ENTITY_TABLES[body.entity_type]} WHERE id = $1 FOR SHARE",
+            body.entity_id,
         )
         if not exists:
             raise HTTPException(404, f"{body.entity_type} not found")
+        # DO UPDATE (not DO NOTHING) so a duplicate still returns the existing row.
         row = await conn.fetchrow(
             "INSERT INTO favorites (id, principal, entity_type, entity_id) "
             "VALUES ($1, $2, $3, $4) "
-            "ON CONFLICT (principal, entity_type, entity_id) DO NOTHING RETURNING *",
+            "ON CONFLICT (principal, entity_type, entity_id) "
+            "  DO UPDATE SET created_at = favorites.created_at RETURNING *",
             new_id("favorite"),
             principal,
             body.entity_type,
             body.entity_id,
         )
-        if row is None:
-            row = await conn.fetchrow(
-                "SELECT * FROM favorites "
-                "WHERE principal = $1 AND entity_type = $2 AND entity_id = $3",
-                principal,
-                body.entity_type,
-                body.entity_id,
-            )
     return dict(row)
 
 

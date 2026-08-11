@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, apiConfirm, favKey, listFor, Skill, SkillFile } from "@/lib/api";
+import { api, apiConfirm, listFor, Skill, SkillFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
-import FavoriteStar, { FavoriteProps } from "@/components/favorite-star";
+import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 
 const SKILL_MD_TEMPLATE = (name: string) =>
@@ -17,6 +17,7 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   const [editing, setEditing] = useState<
     { skillId: string; path: string; content: string; isNew: boolean } | null
   >(null);
+  const favFilter = useFavoriteFilter("skill", skills, favorites);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: Skill[] }>("/v1/skills");
@@ -121,6 +122,7 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
   return (
     <>
       <CountHeader count={skills.length} noun="skill">
+        {favFilter.chip}
         <input
           placeholder="skill-name (lowercase, dashes)"
           value={skillName}
@@ -141,13 +143,7 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
           Create
         </button>
       </CountHeader>
-      {[...skills]
-        .sort(
-          (a, b) =>
-            Number(favorites.has(favKey("skill", b.id))) -
-            Number(favorites.has(favKey("skill", a.id))),
-        )
-        .map((skill) => (
+      {favFilter.apply(skills).map((skill) => (
         <div className="panel" key={skill.id}>
           <div className="row between">
             <div className="row">

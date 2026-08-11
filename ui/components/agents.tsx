@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { api, favKey, Agent, AgentIn, Environment } from "@/lib/api";
+import { api, Agent, AgentIn, Environment } from "@/lib/api";
 import AgentForm from "@/components/agent-form";
-import FavoriteStar, { FavoriteProps } from "@/components/favorite-star";
+import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/favorite-star";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
 
@@ -20,7 +20,7 @@ export default function Agents({
 } & FavoriteProps) {
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
-  const [favOnly, setFavOnly] = useState(false);
+  const favFilter = useFavoriteFilter("agent", agents, favorites);
 
   async function create(body: AgentIn) {
     const created = await api<Agent>("/v1/agents", { json: body });
@@ -37,14 +37,11 @@ export default function Agents({
   const envName = (id: string) => environments.find((e) => e.id === id)?.name ?? id;
 
   const q = query.trim().toLowerCase();
-  const isFav = (a: Agent) => favorites.has(favKey("agent", a.id));
-  const favCount = agents.filter(isFav).length;
-  const filtered = agents
-    .filter(
+  const filtered = favFilter.apply(
+    agents.filter(
       (a) => !q || `${a.name} ${a.id} ${envName(a.environment_id)}`.toLowerCase().includes(q),
-    )
-    .filter((a) => !favOnly || isFav(a))
-    .sort((a, b) => Number(isFav(b)) - Number(isFav(a)));
+    ),
+  );
 
   return (
     <>
@@ -52,11 +49,7 @@ export default function Agents({
         {agents.length > 0 && (
           <FilterInput placeholder="Filter agents…" value={query} onChange={setQuery} />
         )}
-        {(favCount > 0 || favOnly) && (
-          <button className={`chip ${favOnly ? "on" : ""}`} onClick={() => setFavOnly(!favOnly)}>
-            favorites {favCount}
-          </button>
-        )}
+        {favFilter.chip}
         <button className={showForm ? "ghost" : "primary"} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Cancel" : "New agent"}
         </button>

@@ -101,13 +101,16 @@ export default function Page() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const toggleFavorite = useCallback(async (type: FavoriteType, id: string) => {
-    if (favorites.has(favKey(type, id))) {
-      await api(`/v1/favorites/${type}/${id}`, { method: "DELETE" });
-    } else {
-      await api("/v1/favorites", { json: { entity_type: type, entity_id: id } });
-    }
-    const result = await api<{ data: Favorite[] }>("/v1/favorites");
-    setFavorites(new Set(result.data.map((f) => favKey(f.entity_type, f.entity_id))));
+    const key = favKey(type, id);
+    const on = favorites.has(key);
+    if (on) await api(`/v1/favorites/${type}/${id}`, { method: "DELETE" });
+    else await api("/v1/favorites", { json: { entity_type: type, entity_id: id } });
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (on) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }, [favorites]);
 
   useEffect(() => {
