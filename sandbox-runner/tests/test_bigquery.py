@@ -1,12 +1,12 @@
 import json
-from types import SimpleNamespace
 
 import httpx
 import pytest
-from naxos_shared.events import SessionConfig
 
 from naxos_sbx import bigquery
 from naxos_sbx.bigquery import BigQueryError, BigQueryTools, read_only_violation
+
+from .conftest import make_harness
 
 
 class _Tools(BigQueryTools):
@@ -293,30 +293,14 @@ def test_no_server_without_an_opt_in():
     assert bigquery.build_server(project="", datasets=["analytics"]) is None
 
 
-def _config(**overrides) -> SessionConfig:
-    base = {
-        "session_id": "session_x",
-        "agent_id": "agent_x",
-        "agent_version": 1,
-        "environment_id": "env_x",
-        "model": "claude-sonnet-5",
-        "session_bucket": "bucket-x",
-    }
-    return SessionConfig.model_validate({**base, **overrides})
-
-
 def test_harness_omits_bigquery_when_the_environment_is_not_opted_in(monkeypatch):
-    from naxos_sbx.harness import Harness
-
     monkeypatch.setattr(bigquery, "BIGQUERY_DATASETS", [])
-    options = Harness(SimpleNamespace(session_id="session_x"), _config(), "/tmp").options()
+    options = make_harness().options()
     assert "bigquery" not in options.mcp_servers
 
 
 def test_harness_exposes_bigquery_when_datasets_are_granted(monkeypatch):
-    from naxos_sbx.harness import Harness
-
     monkeypatch.setattr(bigquery, "BIGQUERY_DATASETS", ["analytics"])
     monkeypatch.setattr(bigquery, "GCLOUD_PROJECT_ID", "naxos-503510")
-    options = Harness(SimpleNamespace(session_id="session_x"), _config(), "/tmp").options()
+    options = make_harness().options()
     assert "bigquery" in options.mcp_servers

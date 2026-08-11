@@ -1,27 +1,8 @@
-from types import SimpleNamespace
-
 import pytest
-from naxos_shared.events import SessionConfig
 
-from naxos_sbx.harness import Harness, _result_text
+from naxos_sbx.harness import _result_text
 
-
-def _config(**overrides) -> SessionConfig:
-    base = {
-        "session_id": "session_x",
-        "agent_id": "agent_x",
-        "agent_version": 1,
-        "environment_id": "env_x",
-        "model": "claude-sonnet-5",
-        "session_bucket": "bucket-x",
-    }
-    return SessionConfig.model_validate({**base, **overrides})
-
-
-def _harness(config: SessionConfig, channel=None, plugin_dir=None) -> Harness:
-    return Harness(
-        channel or SimpleNamespace(session_id="session_x"), config, "/tmp", plugin_dir=plugin_dir
-    )
+from .conftest import make_config, make_harness
 
 
 def test_main_module_imports():
@@ -29,7 +10,9 @@ def test_main_module_imports():
 
 
 def test_options_passes_tools_as_allowlist():
-    options = _harness(_config(tools=["Bash", "Read"], max_turns=7, effort="high")).options()
+    options = make_harness(
+        make_config(tools=["Bash", "Read"], max_turns=7, effort="high")
+    ).options()
     assert options.allowed_tools == ["Bash", "Read"]
     assert options.model == "claude-sonnet-5"
     assert options.max_turns == 7
@@ -37,17 +20,17 @@ def test_options_passes_tools_as_allowlist():
 
 
 def test_options_effort_defaults_to_none():
-    assert _harness(_config()).options().effort is None
+    assert make_harness(make_config()).options().effort is None
 
 
 def test_options_empty_tools_means_unrestricted():
-    assert _harness(_config(tools=[])).options().allowed_tools == []
-    assert _harness(_config()).options().allowed_tools == []
+    assert make_harness(make_config(tools=[])).options().allowed_tools == []
+    assert make_harness(make_config()).options().allowed_tools == []
 
 
 def test_options_mount_skills_as_local_plugin():
-    options = _harness(
-        _config(tools=["Bash"], skill_names=["deploy-helper"]), plugin_dir="/plugin"
+    options = make_harness(
+        make_config(tools=["Bash"], skill_names=["deploy-helper"]), plugin_dir="/plugin"
     ).options()
     assert options.plugins == [{"type": "local", "path": "/plugin"}]
     assert options.skills == ["naxos:deploy-helper"]
@@ -57,19 +40,19 @@ def test_options_mount_skills_as_local_plugin():
 def test_options_always_isolate_filesystem_settings():
     # setting_sources=[] is the governance guarantee: agent-writable workspace
     # settings (hooks, permissions) are never loaded, skills or not.
-    assert _harness(_config(tools=["Bash"])).options().setting_sources == []
-    with_skills = _harness(_config(skill_names=["x"]), plugin_dir="/plugin").options()
+    assert make_harness(make_config(tools=["Bash"])).options().setting_sources == []
+    with_skills = make_harness(make_config(skill_names=["x"]), plugin_dir="/plugin").options()
     assert with_skills.setting_sources == []
 
 
 def test_options_without_skills_load_no_plugin():
-    options = _harness(_config(tools=["Bash"]), plugin_dir="/plugin").options()
+    options = make_harness(make_config(tools=["Bash"]), plugin_dir="/plugin").options()
     assert options.plugins == []
     assert options.skills is None
 
 
 def test_cost_accumulates_on_top_of_prior_bursts():
-    harness = _harness(_config(cost_usd=5.0))
+    harness = make_harness(make_config(cost_usd=5.0))
     harness._accumulate_cost(0.3)
     assert harness.cost_usd == 5.3
     harness._accumulate_cost(None)
@@ -102,7 +85,7 @@ class _Channel:
 )
 async def test_pre_tool_use_labels_every_decision(verdict, label, hook_decision):
     channel = _Channel(verdict)
-    harness = _harness(_config(), channel)
+    harness = make_harness(make_config(), channel)
     result = await harness._pre_tool_use({"tool_name": "Bash", "tool_input": {}}, "tu_1", None)
     assert result["hookSpecificOutput"]["permissionDecision"] == hook_decision
     assert harness.pending[-1]["payload"]["decision"] == label
@@ -111,7 +94,7 @@ async def test_pre_tool_use_labels_every_decision(verdict, label, hook_decision)
 
 async def test_pre_tool_use_pending_pauses_the_call():
     channel = _Channel({"decision": "pending"})
-    harness = _harness(_config(), channel)
+    harness = make_harness(make_config(), channel)
     result = await harness._pre_tool_use({"tool_name": "Bash", "tool_input": {}}, "tu_1", None)
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert harness.paused_call is not None

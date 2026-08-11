@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { agentName, api, apiConfirm, Agent, Deployment, DeploymentRun } from "@/lib/api";
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
+import { fullTime } from "@/lib/format";
+import TableStates from "@/components/table-states";
 
 export default function Deployments({ agents }: { agents: Agent[] }) {
   const [deployments, setDeployments] = useState<Deployment[] | null>(null);
@@ -116,15 +118,13 @@ export default function Deployments({ agents }: { agents: Agent[] }) {
             <tr><th>name</th><th>cron</th><th>state</th><th /></tr>
           </thead>
           <tbody>
-            {deployments === null && (
-              <tr><td className="empty" colSpan={4}>loading…</td></tr>
-            )}
-            {deployments?.length === 0 && (
-              <tr><td className="empty" colSpan={4}>no deployments yet — schedule an agent to run unattended.</td></tr>
-            )}
-            {!!deployments?.length && filtered.length === 0 && (
-              <tr><td className="empty" colSpan={4}>no deployments match the current filter.</td></tr>
-            )}
+            <TableStates
+              items={deployments}
+              filtered={filtered}
+              colSpan={4}
+              empty="no deployments yet — schedule an agent to run unattended."
+              noMatch="no deployments match the current filter."
+            />
             {filtered.map((d) => (
               <DeploymentRow
                 key={d.id}
@@ -193,7 +193,7 @@ function DeploymentRow({
               </div>
               <div><label>schedule</label><span className="mono">{deployment.cron}</span> <span className="muted">{deployment.timezone}</span></div>
               <div><label>budget per run</label>{deployment.budget_usd ? `$${deployment.budget_usd}` : <span className="muted">none</span>}</div>
-              <div><label>created</label>{new Date(deployment.created_at).toLocaleString()} <span className="muted">by {deployment.created_by}</span></div>
+              <div><label>created</label>{fullTime(deployment.created_at)} <span className="muted">by {deployment.created_by}</span></div>
             </div>
             <label>prompt for each run</label>
             <pre className="prewrap" style={{ margin: "0 0 10px" }}>{prompt || <span className="muted">(none)</span>}</pre>
@@ -202,7 +202,7 @@ function DeploymentRow({
             {runs?.length === 0 && <span className="muted">no runs yet</span>}
             {runs?.map((run) => (
               <div key={run.id} className="row muted" style={{ gap: 16 }}>
-                <span>{new Date(run.fired_at).toLocaleString()}</span>
+                <span>{fullTime(run.fired_at)}</span>
                 <span className={`badge ${run.status === "failed" ? "terminated" : "running"}`}>
                   {run.status}{run.error_type ? `: ${run.error_type}` : ""}
                 </span>

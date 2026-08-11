@@ -7,6 +7,11 @@ from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
 
+DECIDED_TOOL_USE = (
+    "type = 'agent.tool_use' AND created_at >= $1 "
+    "  AND COALESCE(payload->>'decision', '') != 'awaiting_confirmation'"
+)
+
 
 @router.get("/monitoring/summary")
 async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principal_of)) -> dict:
@@ -20,9 +25,7 @@ async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principa
             since,
         )
         tool_calls = await conn.fetchval(
-            "SELECT count(*) FROM session_events "
-            "WHERE type = 'agent.tool_use' AND created_at >= $1 "
-            "  AND COALESCE(payload->>'decision', '') != 'awaiting_confirmation'",
+            f"SELECT count(*) FROM session_events WHERE {DECIDED_TOOL_USE}",
             since,
         )
         all_time = await conn.fetchrow(
@@ -54,10 +57,8 @@ async def summary(days: int = Query(30, ge=1, le=365), _: str = Depends(principa
             "SELECT payload->>'tool_name' AS tool_name, count(*) AS calls, "
             "  count(*) FILTER (WHERE payload->>'decision' IN ('user_denied', 'not_allowed')) "
             "  AS denied "
-            "FROM session_events "
-            "WHERE type = 'agent.tool_use' AND created_at >= $1 "
+            f"FROM session_events WHERE {DECIDED_TOOL_USE} "
             "  AND payload->>'tool_name' IS NOT NULL "
-            "  AND COALESCE(payload->>'decision', '') != 'awaiting_confirmation' "
             "GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 12",
             since,
         )

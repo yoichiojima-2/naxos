@@ -21,6 +21,7 @@ from naxos_shared.events import SessionConfig
 from .config import MAX_ARTIFACT_BYTES
 from .control import ControlChannel
 from .mcp_result import error, guarded, text
+from .workspace import _storage_client
 
 log = logging.getLogger(__name__)
 
@@ -34,8 +35,6 @@ def _valid_name(name: str) -> bool:
 
 
 async def _upload_blob(bucket: str, path: str, source: Path, content_type: str) -> None:
-    from .workspace import _storage_client
-
     def _upload() -> None:
         _storage_client().bucket(bucket).blob(path).upload_from_filename(
             source, content_type=content_type
@@ -45,8 +44,6 @@ async def _upload_blob(bucket: str, path: str, source: Path, content_type: str) 
 
 
 async def _delete_blob(bucket: str, path: str) -> None:
-    from .workspace import _storage_client
-
     def _delete() -> None:
         blob = _storage_client().bucket(bucket).blob(path)
         if blob.exists():

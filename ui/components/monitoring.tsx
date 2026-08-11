@@ -5,6 +5,9 @@ import { api, MonitoringSummary } from "@/lib/api";
 
 const RANGES = [7, 30, 90] as const;
 
+const NO_RUNS = "no runs in this window yet";
+const NO_TOOL_CALLS = "no tool calls in this window yet";
+
 const fmtUsd = (v: number) =>
   v >= 100
     ? `$${Math.round(v).toLocaleString()}`
@@ -115,7 +118,7 @@ export default function Monitoring() {
               fmtUsd(d.cost_usd),
               fmtInt(d.runs),
             ])}
-            empty="no runs in this window yet"
+            empty={NO_RUNS}
           />
         ) : (
           <DailySpend data={data.cost_by_day} days={days} />
@@ -123,74 +126,53 @@ export default function Monitoring() {
       </div>
 
       <div className="grid2">
-        <div className="panel chart-card">
-          <div className="chart-title">Spend by agent</div>
-          {asTable ? (
-            <DataTable
-              head={["agent", "spend", "runs", "sessions"]}
-              rows={data.cost_by_agent.map((a) => [
-                a.name,
-                fmtUsd(a.cost_usd),
-                fmtInt(a.runs),
-                fmtInt(a.sessions),
-              ])}
-              empty="no runs in this window yet"
-            />
-          ) : (
-            <HBars
-              rows={data.cost_by_agent.map((a) => ({
-                key: a.agent_id,
-                name: a.name,
-                value: a.cost_usd,
-                label: fmtUsd(a.cost_usd),
-              }))}
-              empty="no runs in this window yet"
-            />
-          )}
-        </div>
-        <div className="panel chart-card">
-          <div className="chart-title">Tool calls by tool</div>
-          {asTable ? (
-            <DataTable
-              head={["tool", "calls", "denied"]}
-              rows={data.tool_usage.map((t) => [t.tool_name, fmtInt(t.calls), fmtInt(t.denied)])}
-              empty="no tool calls in this window yet"
-            />
-          ) : (
-            <HBars
-              rows={data.tool_usage.map((t) => ({
-                key: t.tool_name,
-                name: t.tool_name,
-                value: t.calls,
-                label: fmtInt(t.calls) + (t.denied ? ` (${fmtInt(t.denied)} denied)` : ""),
-              }))}
-              empty="no tool calls in this window yet"
-            />
-          )}
-        </div>
+        <Breakdown
+          title="Spend by agent"
+          asTable={asTable}
+          head={["agent", "spend", "runs", "sessions"]}
+          rows={data.cost_by_agent.map((a) => [
+            a.name,
+            fmtUsd(a.cost_usd),
+            fmtInt(a.runs),
+            fmtInt(a.sessions),
+          ])}
+          bars={data.cost_by_agent.map((a) => ({
+            key: a.agent_id,
+            name: a.name,
+            value: a.cost_usd,
+            label: fmtUsd(a.cost_usd),
+          }))}
+          empty={NO_RUNS}
+        />
+        <Breakdown
+          title="Tool calls by tool"
+          asTable={asTable}
+          head={["tool", "calls", "denied"]}
+          rows={data.tool_usage.map((t) => [t.tool_name, fmtInt(t.calls), fmtInt(t.denied)])}
+          bars={data.tool_usage.map((t) => ({
+            key: t.tool_name,
+            name: t.tool_name,
+            value: t.calls,
+            label: fmtInt(t.calls) + (t.denied ? ` (${fmtInt(t.denied)} denied)` : ""),
+          }))}
+          empty={NO_TOOL_CALLS}
+        />
       </div>
 
       <div className="grid2">
-        <div className="panel chart-card">
-          <div className="chart-title">Spend by model</div>
-          {asTable ? (
-            <DataTable
-              head={["model", "spend", "runs"]}
-              rows={data.cost_by_model.map((m) => [m.model, fmtUsd(m.cost_usd), fmtInt(m.runs)])}
-              empty="no runs in this window yet"
-            />
-          ) : (
-            <HBars
-              rows={data.cost_by_model.map((m) => ({
-                key: m.model,
-                name: m.model,
-                value: m.cost_usd,
-                label: fmtUsd(m.cost_usd),
-              }))}
-              empty="no runs in this window yet"
-            />
-          )}
-        </div>
+        <Breakdown
+          title="Spend by model"
+          asTable={asTable}
+          head={["model", "spend", "runs"]}
+          rows={data.cost_by_model.map((m) => [m.model, fmtUsd(m.cost_usd), fmtInt(m.runs)])}
+          bars={data.cost_by_model.map((m) => ({
+            key: m.model,
+            name: m.model,
+            value: m.cost_usd,
+            label: fmtUsd(m.cost_usd),
+          }))}
+          empty={NO_RUNS}
+        />
         <div className="panel chart-card">
           <div className="chart-title">Sessions by status (all time)</div>
           <div className="row mb12">
@@ -227,6 +209,33 @@ export default function Monitoring() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Breakdown({
+  title,
+  asTable,
+  head,
+  rows,
+  bars,
+  empty,
+}: {
+  title: string;
+  asTable: boolean;
+  head: string[];
+  rows: (string | number)[][];
+  bars: { key: string; name: string; value: number; label: string }[];
+  empty: string;
+}) {
+  return (
+    <div className="panel chart-card">
+      <div className="chart-title">{title}</div>
+      {asTable ? (
+        <DataTable head={head} rows={rows} empty={empty} />
+      ) : (
+        <HBars rows={bars} empty={empty} />
+      )}
     </div>
   );
 }

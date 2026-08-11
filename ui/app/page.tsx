@@ -32,44 +32,59 @@ const PAGES = [
 type Page = (typeof PAGES)[number];
 type Route = { page: Page; id?: string };
 
-const NAV: { page: Page; label: string; icon: () => React.ReactNode }[] = [
-  { page: "sessions", label: "Sessions", icon: SessionsIcon },
-  { page: "agents", label: "Agents", icon: AgentsIcon },
-  { page: "deployments", label: "Deployments", icon: DeploymentsIcon },
-  { page: "artifacts", label: "Artifacts", icon: ArtifactsIcon },
-  { page: "monitoring", label: "Monitoring", icon: MonitoringIcon },
-  { page: "vaults", label: "Vaults", icon: VaultsIcon },
-  { page: "memory", label: "Memory", icon: MemoryIcon },
-  { page: "skills", label: "Skills", icon: SkillsIcon },
-  { page: "docs", label: "Docs", icon: DocsIcon },
-];
+const NAV: Record<Page, { label: string; icon: () => React.ReactNode; info: string }> = {
+  sessions: {
+    label: "Sessions",
+    icon: SessionsIcon,
+    info: "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
+  },
+  agents: {
+    label: "Agents",
+    icon: AgentsIcon,
+    info: "Define who your agents are: instructions, model, tools, and permission policy. Every edit creates a new version, and the kill switch to disable an agent instantly lives here.",
+  },
+  deployments: {
+    label: "Deployments",
+    icon: DeploymentsIcon,
+    info: "Unattended scheduled runs. A cron schedule wakes an agent with a fixed prompt — no human in the loop, results land as sessions.",
+  },
+  artifacts: {
+    label: "Artifacts",
+    icon: ArtifactsIcon,
+    info: "Outputs agents chose to publish: reports, datasets, generated files. Open them in the built-in viewer, download, share a stable org-internal link, or delete them — sharing never leaves the IAP boundary.",
+  },
+  monitoring: {
+    label: "Monitoring",
+    icon: MonitoringIcon,
+    info: "Cost and usage across the platform: spend over time and per agent and model, tool-call activity, and deployment outcomes — aggregated from every wake-to-idle run.",
+  },
+  vaults: {
+    label: "Vaults",
+    icon: VaultsIcon,
+    info: "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
+  },
+  memory: {
+    label: "Memory",
+    icon: MemoryIcon,
+    info: "What agents remember across sessions. Create, rename, and delete memory stores, see which agents use each one, and browse a store's files — open one to edit its content, rename it, or create and delete files directly.",
+  },
+  skills: {
+    label: "Skills",
+    icon: SkillsIcon,
+    info: "Reusable know-how shared across the organization. A skill is a folder of instructions (SKILL.md plus supporting files) that any agent can be given; agents load it read-only — skills are edited only here.",
+  },
+  docs: {
+    label: "Docs",
+    icon: DocsIcon,
+    info: "How naxos works and how to run your first agent session — from environment to agent to session.",
+  },
+};
 
 const NAV_SECTIONS: { label: string; pages: Page[] }[] = [
   { label: "Work", pages: ["sessions", "deployments", "artifacts", "monitoring"] },
   { label: "Configure", pages: ["agents", "skills", "vaults", "memory"] },
   { label: "Resources", pages: ["docs"] },
 ];
-
-const PAGE_INFO: Record<Page, string> = {
-  sessions:
-    "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
-  agents:
-    "Define who your agents are: instructions, model, tools, and permission policy. Every edit creates a new version, and the kill switch to disable an agent instantly lives here.",
-  deployments:
-    "Unattended scheduled runs. A cron schedule wakes an agent with a fixed prompt — no human in the loop, results land as sessions.",
-  artifacts:
-    "Outputs agents chose to publish: reports, datasets, generated files. Open them in the built-in viewer, download, share a stable org-internal link, or delete them — sharing never leaves the IAP boundary.",
-  monitoring:
-    "Cost and usage across the platform: spend over time and per agent and model, tool-call activity, and deployment outcomes — aggregated from every wake-to-idle run.",
-  vaults:
-    "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
-  memory:
-    "What agents remember across sessions. Create, rename, and delete memory stores, see which agents use each one, and browse a store's files — open one to edit its content, rename it, or create and delete files directly.",
-  skills:
-    "Reusable know-how shared across the organization. A skill is a folder of instructions (SKILL.md plus supporting files) that any agent can be given; agents load it read-only — skills are edited only here.",
-  docs:
-    "How naxos works and how to run your first agent session — from environment to agent to session.",
-};
 
 function parseHash(hash: string): Route {
   const [page, ...rest] = hash.replace(/^#/, "").split("/");
@@ -155,10 +170,10 @@ export default function Page() {
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [route.page]);
 
-  const current = NAV.find((n) => n.page === route.page) ?? NAV[0];
-  const agentDetail = route.page === "agents" && route.id;
-  const artifactDetail = route.page === "artifacts" && route.id;
-  const sessionDetail = route.page === "sessions" && route.id;
+  const current = NAV[route.page];
+  const agentDetail = route.page === "agents" ? route.id : undefined;
+  const artifactDetail = route.page === "artifacts" ? route.id : undefined;
+  const sessionDetail = route.page === "sessions" ? route.id : undefined;
 
   useEffect(() => {
     document.title = `naxos · ${current.label}`;
@@ -186,7 +201,7 @@ export default function Page() {
             <nav className="nav-group" key={label}>
               <span className="nav-label">{label}</span>
               {pages.map((page) => {
-                const { label: pageLabel, icon: Icon } = NAV.find((n) => n.page === page)!;
+                const { label: pageLabel, icon: Icon } = NAV[page];
                 return (
                   <a
                     key={page}
@@ -209,13 +224,13 @@ export default function Page() {
                   naxos<span className="sep">/</span>{current.label}
                 </div>
                 <h2>{current.label}</h2>
-                <p>{PAGE_INFO[route.page]}</p>
+                <p>{current.info}</p>
               </div>
             )}
             {route.page === "sessions" && (
               <Sessions
                 agents={agents}
-                sessionId={route.id}
+                sessionId={sessionDetail}
                 favorites={favorites}
                 onToggleFavorite={toggleFavorite}
               />
@@ -231,7 +246,7 @@ export default function Page() {
             )}
             {agentDetail && (
               <AgentDetail
-                agentId={route.id!}
+                agentId={agentDetail}
                 environments={environments}
                 onChange={refresh}
               />
@@ -241,9 +256,9 @@ export default function Page() {
               <Artifacts agents={agents} favorites={favorites} onToggleFavorite={toggleFavorite} />
             )}
             {artifactDetail && (
-              route.id!.startsWith("shared/")
-                ? <ArtifactViewer token={route.id!.slice("shared/".length)} agents={agents} />
-                : <ArtifactViewer artifactId={route.id!} agents={agents} />
+              artifactDetail.startsWith("shared/")
+                ? <ArtifactViewer token={artifactDetail.slice("shared/".length)} agents={agents} />
+                : <ArtifactViewer artifactId={artifactDetail} agents={agents} />
             )}
             {route.page === "monitoring" && <Monitoring />}
             {route.page === "vaults" && <Vaults />}

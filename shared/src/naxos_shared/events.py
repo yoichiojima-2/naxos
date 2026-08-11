@@ -78,9 +78,7 @@ class EventIn(BaseModel):
             raise ValueError(f"{self.type} is not a client-sendable event type")
         if self.type is EventType.USER_MESSAGE and not self.content:
             raise ValueError("user.message requires content")
-        if self.type is EventType.USER_TOOL_CONFIRMATION and not (
-            self.call_hash and self.result
-        ):
+        if self.type is EventType.USER_TOOL_CONFIRMATION and not (self.call_hash and self.result):
             raise ValueError("user.tool_confirmation requires call_hash and result")
 
 
@@ -90,9 +88,7 @@ def tool_matches(tool_name: str, patterns: list[str]) -> bool:
     MCP tools arrive as `mcp__{server}__{tool}`, so `mcp__artifacts__*` is the
     usual way to name a whole built-in server.
     """
-    return any(
-        pattern == tool_name or fnmatchcase(tool_name, pattern) for pattern in patterns
-    )
+    return any(pattern == tool_name or fnmatchcase(tool_name, pattern) for pattern in patterns)
 
 
 class PermissionRule(BaseModel):

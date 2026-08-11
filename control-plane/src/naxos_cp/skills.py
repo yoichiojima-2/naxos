@@ -158,27 +158,7 @@ async def seed_samples(conn: asyncpg.Connection, root: Path = SEED_DIR) -> list[
                     description,
                     SEED_PRINCIPAL,
                 )
-                for file in sorted(f for f in entry.rglob("*") if f.is_file()):
-                    rel = file.relative_to(entry).as_posix()
-                    if any(part.startswith(".") for part in file.relative_to(entry).parts):
-                        continue
-                    try:
-                        content = file.read_text()
-                    except UnicodeDecodeError:
-                        log.warning("%s/%s is not text, not seeded", entry.name, rel)
-                        continue
-                    if len(content.encode()) > config.MAX_SKILL_FILE_BYTES:
-                        log.warning("%s/%s exceeds the file cap, not seeded", entry.name, rel)
-                        continue
-                    await conn.execute(
-                        "INSERT INTO skill_files (id, skill_id, path, content, updated_by) "
-                        "VALUES ($1, $2, $3, $4, $5)",
-                        new_id("skill_file"),
-                        skill_id,
-                        rel,
-                        content,
-                        SEED_PRINCIPAL,
-                    )
+                await _seed_skill_files(conn, skill_id, entry)
         except asyncpg.UniqueViolationError:
             continue
         except UnicodeDecodeError:
@@ -188,6 +168,31 @@ async def seed_samples(conn: asyncpg.Connection, root: Path = SEED_DIR) -> list[
     if seeded:
         log.info("seeded sample skills: %s", ", ".join(seeded))
     return seeded
+
+
+async def _seed_skill_files(conn: asyncpg.Connection, skill_id: str, entry: Path) -> None:
+    for file in sorted(f for f in entry.rglob("*") if f.is_file()):
+        rel_path = file.relative_to(entry)
+        rel = rel_path.as_posix()
+        if any(part.startswith(".") for part in rel_path.parts):
+            continue
+        try:
+            content = file.read_text()
+        except UnicodeDecodeError:
+            log.warning("%s/%s is not text, not seeded", entry.name, rel)
+            continue
+        if len(content.encode()) > config.MAX_SKILL_FILE_BYTES:
+            log.warning("%s/%s exceeds the file cap, not seeded", entry.name, rel)
+            continue
+        await conn.execute(
+            "INSERT INTO skill_files (id, skill_id, path, content, updated_by) "
+            "VALUES ($1, $2, $3, $4, $5)",
+            new_id("skill_file"),
+            skill_id,
+            rel,
+            content,
+            SEED_PRINCIPAL,
+        )
 
 
 def _frontmatter_description(text: str) -> str | None:

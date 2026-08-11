@@ -12,7 +12,6 @@ audited and subject to policy and the kill switch.
 
 import asyncio
 import json
-import logging
 import re
 from typing import Any
 
@@ -21,8 +20,6 @@ from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from .config import BIGQUERY_DATASETS, GCLOUD_PROJECT_ID, MAX_QUERY_BYTES_BILLED, MAX_QUERY_ROWS
 from .mcp_result import error, guarded, text
-
-log = logging.getLogger(__name__)
 
 API_ROOT = "https://bigquery.googleapis.com/bigquery/v2"
 SCOPE = "https://www.googleapis.com/auth/bigquery"
@@ -78,7 +75,6 @@ def human_bytes(value: int) -> str:
         if size < 1024 or unit == "TiB":
             return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
         size /= 1024
-    return f"{size:.1f} TiB"
 
 
 def _query_parameters(parameters: dict[str, Any]) -> list[dict[str, Any]]:
@@ -382,7 +378,7 @@ def build_server(project: str | None = None, datasets: list[str] | None = None) 
     if not project or not datasets:
         return None
     tools_ = BigQueryTools(project, datasets)
-    available = ", ".join(datasets)
+    available = tools_._available()
 
     list_datasets = tool(
         "bigquery_list_datasets",

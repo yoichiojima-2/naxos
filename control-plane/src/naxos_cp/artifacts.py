@@ -17,6 +17,10 @@ from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
 
+WITH_BUCKET = (
+    "SELECT a.*, e.session_bucket FROM artifacts a JOIN environments e ON e.id = a.environment_id "
+)
+
 
 def blob_path(session_id: str, name: str) -> str:
     return f"sessions/{session_id}/artifacts/{name}"
@@ -36,7 +40,6 @@ def validate_name(name: str) -> None:
 
 def serialize(row: asyncpg.Record | dict) -> dict:
     out = dict(row)
-    out.pop("session_bucket", None)
     if out.get("share_token"):
         out["share_url"] = share_url(out["share_token"])
     return out
@@ -65,11 +68,7 @@ async def set_shared(
 
 
 async def _fetch_with_bucket(conn: asyncpg.Connection, artifact_id: str) -> asyncpg.Record:
-    row = await conn.fetchrow(
-        "SELECT a.*, e.session_bucket FROM artifacts a "
-        "JOIN environments e ON e.id = a.environment_id WHERE a.id = $1",
-        artifact_id,
-    )
+    row = await conn.fetchrow(f"{WITH_BUCKET}WHERE a.id = $1", artifact_id)
     if row is None:
         raise HTTPException(404, "artifact not found")
     return row
@@ -105,11 +104,7 @@ async def get_shared(token: str, _: str = Depends(principal_of)) -> dict:
 @router.get("/artifacts/shared/{token}/content")
 async def get_shared_content(token: str, _: str = Depends(principal_of)) -> Response:
     async with db.transaction() as conn:
-        row = await conn.fetchrow(
-            "SELECT a.*, e.session_bucket FROM artifacts a "
-            "JOIN environments e ON e.id = a.environment_id WHERE a.share_token = $1",
-            token,
-        )
+        row = await conn.fetchrow(f"{WITH_BUCKET}WHERE a.share_token = $1", token)
     if row is None:
         raise HTTPException(404, "shared artifact not found")
     content = await gcs.download(row["session_bucket"], blob_path(row["session_id"], row["name"]))

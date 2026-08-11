@@ -40,10 +40,7 @@ async def log_run(
     started_at: datetime,
     status: str,
     stop_reason: str | None = None,
-    deployment_run_id: str | None = None,
     num_turns: int = 0,
-    input_tokens: int = 0,
-    output_tokens: int = 0,
     cost_usd: float = 0.0,
     model: str | None = None,
 ) -> None:
@@ -55,7 +52,7 @@ async def log_run(
                 "session_id": session_id,
                 "agent_id": agent_id,
                 "environment_id": environment_id,
-                "deployment_run_id": deployment_run_id,
+                "deployment_run_id": None,
                 "trigger_type": trigger_type,
                 "principal": principal,
                 "started_at": started_at.isoformat(),
@@ -63,8 +60,8 @@ async def log_run(
                 "status": status,
                 "stop_reason": stop_reason,
                 "num_turns": num_turns,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
+                "input_tokens": 0,
+                "output_tokens": 0,
                 "cost_usd": cost_usd,
                 "approx_cost_jpy": round(cost_usd * JPY_PER_USD, 2),
                 "model": model,
@@ -81,10 +78,7 @@ def tool_call_row(
     tool_name: str,
     args_redacted: str,
     decision: str,
-    result_status: str | None = None,
     tool_use_id: str | None = None,
-    latency_ms: int | None = None,
-    error: str | None = None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -96,9 +90,9 @@ def tool_call_row(
         "tool_name": tool_name,
         "args_redacted": args_redacted,
         "decision": decision,
-        "result_status": result_status,
-        "latency_ms": latency_ms,
-        "error": error,
+        "result_status": None,
+        "latency_ms": None,
+        "error": None,
     }
 
 

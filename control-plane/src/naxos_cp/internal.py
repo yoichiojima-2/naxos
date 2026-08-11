@@ -4,7 +4,7 @@ import secrets
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from naxos_shared.events import (
     EventIn,
     EventType,
@@ -59,9 +59,7 @@ async def _agent_version(conn, row: Any) -> Any:
 
 
 @router.post("/sessions/{session_id}/claim")
-async def claim(
-    session_id: str, request: Request, caller: str = Depends(caller_service_account)
-) -> dict:
+async def claim(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
         if row["status"] == str(SessionStatus.TERMINATED):
@@ -123,7 +121,7 @@ async def session_config(session_id: str, caller: str = Depends(caller_service_a
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
         version = await _agent_version(conn, row)
-        await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
+        await store.clear_egress_routes(conn, session_id)
         mcp_servers = await _resolve_egress(
             conn, session_id, list(row["vault_ids"] or []), version["mcp_servers"] or {}
         )
@@ -305,8 +303,13 @@ async def checkpoint(
             conn, session_id, status, None if body.terminated else body.stop_reason
         )
         if body.terminated:
-            await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
+            await store.clear_egress_routes(conn, session_id)
         created_by = row["created_by"] or ""
+        trigger_type = "deployment" if created_by.startswith("deployment:") else "interactive"
+        cost_delta = (body.cost_usd or previous_cost) - previous_cost
+        started_at = body.started_at or row["updated_at"]
+        status_str = str(status)
+        stop_reason_str = str(body.stop_reason)
         await conn.execute(
             "INSERT INTO session_runs (id, session_id, agent_id, environment_id, trigger_type, "
             "  principal, model, status, stop_reason, num_turns, cost_usd, started_at) "
@@ -316,14 +319,14 @@ async def checkpoint(
             session_id,
             row["agent_id"],
             row["environment_id"],
-            "deployment" if created_by.startswith("deployment:") else "interactive",
+            trigger_type,
             created_by,
             version["model"],
-            str(status),
-            str(body.stop_reason),
+            status_str,
+            stop_reason_str,
             body.num_turns,
-            (body.cost_usd or previous_cost) - previous_cost,
-            body.started_at or row["updated_at"],
+            cost_delta,
+            started_at,
         )
         await store.release_lease(conn, session_id, body.lease_id)
         pending = await conn.fetchval(
@@ -339,12 +342,12 @@ async def checkpoint(
         agent_id=row["agent_id"],
         environment_id=row["environment_id"],
         principal=created_by,
-        trigger_type="deployment" if created_by.startswith("deployment:") else "interactive",
-        started_at=body.started_at or row["updated_at"],
-        status=str(status),
-        stop_reason=str(body.stop_reason),
+        trigger_type=trigger_type,
+        started_at=started_at,
+        status=status_str,
+        stop_reason=stop_reason_str,
         num_turns=body.num_turns,
-        cost_usd=(body.cost_usd or previous_cost) - previous_cost,
+        cost_usd=cost_delta,
         model=version["model"],
     )
     return {"ok": True}
@@ -386,18 +389,19 @@ async def session_skills(session_id: str, caller: str = Depends(caller_service_a
 async def session_memory(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
-        stores: dict[str, dict[str, str]] = {}
-        for store_id in row["memory_store_ids"] or []:
-            name = await conn.fetchval("SELECT name FROM memory_stores WHERE id = $1", store_id)
-            if name is None:
-                continue
-            memories = await conn.fetch(
-                "SELECT path, content FROM memories WHERE store_id = $1", store_id
-            )
-            stores[store_id] = {
-                "name": name,
-                "files": {m["path"]: m["content"] for m in memories},
-            }
+        named = await conn.fetch(
+            "SELECT id, name FROM memory_stores WHERE id = ANY($1)",
+            list(row["memory_store_ids"] or []),
+        )
+        stores: dict[str, dict[str, Any]] = {
+            s["id"]: {"name": s["name"], "files": {}} for s in named
+        }
+        memories = await conn.fetch(
+            "SELECT store_id, path, content FROM memories WHERE store_id = ANY($1)",
+            list(stores),
+        )
+        for m in memories:
+            stores[m["store_id"]]["files"][m["path"]] = m["content"]
     return {"stores": stores}
 
 
@@ -568,12 +572,11 @@ class ScheduleIn(BaseModel):
     budget_usd: float | None = Field(None, ge=0)
 
 
-def _validate_cron(cron: str) -> str:
+def _validate_cron(cron: str) -> None:
     # Cloud Scheduler validates for real at job creation; this catches the
     # obvious mistakes in DEV_MODE, where no scheduler job is created.
     if len(cron.split()) != 5:
         raise HTTPException(422, "cron must have 5 fields (minute hour day month weekday)")
-    return cron
 
 
 def _serialize_deployment(row: Any) -> dict[str, Any]:

@@ -6,8 +6,7 @@ import asyncpg
 from naxos_shared.events import EventType, SessionStatus, StopReason
 from naxos_shared.ids import new_id
 
-from . import config, notify
-from .db import rowcount
+from . import config, db, notify
 
 
 async def append_event(
@@ -139,7 +138,7 @@ async def heartbeat(conn: asyncpg.Connection, session_id: str, lease_id: str) ->
         lease_id,
         config.LEASE_TTL_SECONDS,
     )
-    return rowcount(result) == 1
+    return db.rowcount(result) == 1
 
 
 async def release_lease(conn: asyncpg.Connection, session_id: str, lease_id: str) -> None:
@@ -151,6 +150,10 @@ async def release_lease(conn: asyncpg.Connection, session_id: str, lease_id: str
         session_id,
         lease_id,
     )
+
+
+async def clear_egress_routes(conn: asyncpg.Connection, session_id: str) -> None:
+    await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
 
 
 async def stale_wakeable_sessions(conn: asyncpg.Connection) -> list[asyncpg.Record]:
@@ -239,4 +242,4 @@ async def decide_confirmation(
         principal,
         deny_message,
     )
-    return rowcount(result) == 1
+    return db.rowcount(result) == 1

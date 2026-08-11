@@ -15,7 +15,7 @@ async def wake(conn: asyncpg.Connection, session_id: str) -> bool:
     from its own queue poll.
     """
     row = await conn.fetchrow(
-        "SELECT s.status, s.lease_expires_at, s.retry_count, a.disabled, e.sandbox_job_name "
+        "SELECT s.status, s.retry_count, a.disabled, e.sandbox_job_name "
         "FROM sessions s JOIN agents a ON a.id = s.agent_id "
         "JOIN environments e ON e.id = s.environment_id WHERE s.id = $1",
         session_id,
@@ -24,7 +24,7 @@ async def wake(conn: asyncpg.Connection, session_id: str) -> bool:
         raise LookupError(session_id)
     if row["status"] == str(SessionStatus.TERMINATED) or row["disabled"]:
         return False
-    if row["lease_expires_at"] is not None and await store.has_live_lease(conn, session_id):
+    if await store.has_live_lease(conn, session_id):
         return False
     if row["retry_count"] >= config.MAX_WAKE_RETRIES:
         await store.append_event(

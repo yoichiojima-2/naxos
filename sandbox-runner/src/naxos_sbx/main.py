@@ -158,7 +158,8 @@ async def run_session(session_id: str) -> None:
                 stop_reason = StopReason.END_TURN
                 break
             if not prompts:
-                idle_since = idle_since if idle_since is not None else loop.time()
+                if idle_since is None:
+                    idle_since = loop.time()
                 if loop.time() - idle_since >= IDLE_LINGER_SECONDS:
                     break
                 continue

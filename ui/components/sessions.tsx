@@ -9,6 +9,7 @@ import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/fav
 import CountHeader from "@/components/list-header";
 import Markdown from "@/components/markdown";
 import FilterInput from "@/components/filter-input";
+import TableStates from "@/components/table-states";
 
 const STATUS_FILTERS = ["needs approval", "running", "idle", "rescheduling", "terminated"] as const;
 
@@ -242,17 +243,16 @@ export default function Sessions({
             </tr>
           </thead>
           <tbody>
-            {sessions === null && (
-              <tr><td className="empty" colSpan={8}>loading…</td></tr>
-            )}
-            {sessions?.length === 0 && (
-              <tr><td className="empty" colSpan={8}>no sessions yet — pick an agent above and start one.</td></tr>
-            )}
-            {!!sessions?.length && filtered.length === 0 && (
-              <tr><td className="empty" colSpan={8}>no sessions match the current filters.</td></tr>
-            )}
+            <TableStates
+              items={sessions}
+              filtered={filtered}
+              colSpan={8}
+              empty="no sessions yet — pick an agent above and start one."
+              noMatch="no sessions match the current filters."
+            />
             {filtered.map((s) => {
-              const needsAction = s.status === "idle" && s.stop_reason === "requires_action";
+              const status = statusOf(s);
+              const needsAction = status === "needs approval";
               return (
                 <tr key={s.id} className="click" onClick={() => openSession(s.id)}>
                   <td onClick={(e) => e.stopPropagation()}>
@@ -275,7 +275,7 @@ export default function Sessions({
                   <td className="muted">{agentName(agents, s.agent_id)}</td>
                   <td>
                     <span className={`badge ${needsAction ? "requires_action" : s.status}`}>
-                      {needsAction ? "needs approval" : s.status}
+                      {status}
                       {s.stop_reason && !needsAction ? `:${s.stop_reason}` : ""}
                     </span>
                   </td>
@@ -362,13 +362,15 @@ function Timeline({
     return () => es.close();
   }, [sessionId]);
 
+  function emit(event: Record<string, unknown>) {
+    return api(`/v1/sessions/${sessionId}/events`, { json: { events: [event] } });
+  }
+
   async function send() {
     if (!message.trim() || sending) return;
     setSending(true);
     try {
-      await api(`/v1/sessions/${sessionId}/events`, {
-        json: { events: [{ type: "user.message", content: [{ type: "text", text: message }] }] },
-      });
+      await emit({ type: "user.message", content: [{ type: "text", text: message }] });
       setMessage("");
       if (composerRef.current) composerRef.current.style.height = "auto";
     } finally {
@@ -377,15 +379,11 @@ function Timeline({
   }
 
   async function interrupt() {
-    await api(`/v1/sessions/${sessionId}/events`, {
-      json: { events: [{ type: "user.interrupt" }] },
-    });
+    await emit({ type: "user.interrupt" });
   }
 
   async function confirm(callHash: string, result: "allow" | "deny") {
-    await api(`/v1/sessions/${sessionId}/events`, {
-      json: { events: [{ type: "user.tool_confirmation", call_hash: callHash, result }] },
-    });
+    await emit({ type: "user.tool_confirmation", call_hash: callHash, result });
   }
 
   const decided = new Map(

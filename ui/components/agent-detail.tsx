@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, apiConfirm, AgentDetail as Detail, AgentIn, Environment } from "@/lib/api";
 import AgentForm, { EFFORT_LEVELS, MODELS } from "@/components/agent-form";
 import { BackIcon } from "@/components/icons";
+import { fullTime } from "@/lib/format";
 
 export default function AgentDetail({
   agentId,
@@ -153,7 +154,7 @@ export default function AgentDetail({
                 <>
                   <dt>Created</dt>
                   <dd>
-                    {new Date(detail.created_at).toLocaleString()}
+                    {fullTime(detail.created_at)}
                     {detail.created_by && <span className="muted"> by {detail.created_by}</span>}
                   </dd>
                 </>
