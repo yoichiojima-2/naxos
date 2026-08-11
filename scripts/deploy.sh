@@ -22,17 +22,39 @@ gcloud builds submit --project "$PROJECT" --config cloudbuild.yaml \
   --gcs-source-staging-dir "$STAGING/source" \
   --substitutions "_REPO=$REPO,_TAG=$TAG" .
 
-gcloud run services update naxos-api --project "$PROJECT" --region "$REGION" \
-  --image "$REPO/control-plane:$TAG" --args api
-gcloud run services update naxos-internal --project "$PROJECT" --region "$REGION" \
-  --image "$REPO/control-plane:$TAG" --args internal
-gcloud run services update naxos-egress --project "$PROJECT" --region "$REGION" \
-  --image "$REPO/egress-proxy:$TAG"
+# Listed before forking: a command substitution in a for-loop word list would
+# not trip errexit, silently skipping every sandbox job rollout.
+sbx_jobs=$(gcloud run jobs list --project "$PROJECT" --region "$REGION" \
+  --format "value(metadata.name)" --filter "metadata.name~naxos-sbx-")
 
-for job in $(gcloud run jobs list --project "$PROJECT" --region "$REGION" \
-    --format "value(metadata.name)" --filter "metadata.name~naxos-sbx-"); do
+# Warm the credential cache once: concurrent gcloud processes refreshing the
+# shared sqlite token cache can hit "database is locked".
+gcloud auth print-access-token --project "$PROJECT" >/dev/null
+
+# Rollouts are independent; run them concurrently, wait on every pid (bare
+# `wait` would swallow statuses, and errexit on the first failed wait would
+# abandon the still-running ones unreported), and fail if any failed.
+pids=()
+gcloud run services update naxos-api --project "$PROJECT" --region "$REGION" \
+  --image "$REPO/control-plane:$TAG" --args api &
+pids+=($!)
+gcloud run services update naxos-internal --project "$PROJECT" --region "$REGION" \
+  --image "$REPO/control-plane:$TAG" --args internal &
+pids+=($!)
+gcloud run services update naxos-egress --project "$PROJECT" --region "$REGION" \
+  --image "$REPO/egress-proxy:$TAG" &
+pids+=($!)
+
+for job in $sbx_jobs; do
   gcloud run jobs update "$job" --project "$PROJECT" --region "$REGION" \
-    --image "$REPO/sandbox-runner:$TAG"
+    --image "$REPO/sandbox-runner:$TAG" &
+  pids+=($!)
 done
+
+status=0
+for pid in "${pids[@]}"; do
+  wait "$pid" || status=1
+done
+[ "$status" -eq 0 ] || { echo "one or more rollouts failed" >&2; exit 1; }
 
 echo "deployed $TAG"
