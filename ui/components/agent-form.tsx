@@ -14,6 +14,7 @@ import {
   Skill,
   Vault,
 } from "@/lib/api";
+import { useTagFilter } from "@/components/tag-filter";
 
 export const MODELS = [
   { id: "claude-opus-5", label: "Claude Opus 5" },
@@ -86,6 +87,7 @@ export default function AgentForm({
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [stores, setStores] = useState<MemoryStore[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const skillTagFilter = useTagFilter(skills);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -378,18 +380,28 @@ export default function AgentForm({
       {skills.length > 0 && (
         <>
           <label>Skills</label>
+          {skillTagFilter.chips.length > 0 && (
+            <div className="chips">{skillTagFilter.chips}</div>
+          )}
           <div className="chips">
-            {skills.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className={`chip ${skillIds.includes(s.id) ? "on" : ""}`}
-                title={s.description ?? undefined}
-                onClick={() => toggleId(skillIds, setSkillIds, s.id)}
-              >
-                {s.name}{s.ready ? "" : " (needs SKILL.md)"}
-              </button>
-            ))}
+            {skills
+              .filter(
+                (s) =>
+                  skillIds.includes(s.id) ||
+                  !skillTagFilter.active ||
+                  s.tags.includes(skillTagFilter.active),
+              )
+              .map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`chip ${skillIds.includes(s.id) ? "on" : ""}`}
+                  title={s.description ?? undefined}
+                  onClick={() => toggleId(skillIds, setSkillIds, s.id)}
+                >
+                  {s.name}{s.ready ? "" : " (needs SKILL.md)"}
+                </button>
+              ))}
           </div>
         </>
       )}

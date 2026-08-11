@@ -1,0 +1,1 @@
+ALTER TABLE skills ADD COLUMN tags text[] NOT NULL DEFAULT '{}';

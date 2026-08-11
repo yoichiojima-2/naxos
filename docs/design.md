@@ -200,7 +200,8 @@ artifacts (id, session_id, agent_id, environment_id,
         -- content in GCS at sessions/{session_id}/artifacts/{name}
 
 skills (id, name UNIQUE,      -- ^[a-z0-9][a-z0-9-]{0,63}$, the mount directory name
-        description, archived_at, created_by, created_at, updated_at)
+        description, tags text[],   -- free-form labels, list-view filtering only
+        archived_at, created_by, created_at, updated_at)
 skill_files (id, skill_id, path, UNIQUE (skill_id, path),
         content,              -- ≤64KB per file
         updated_by, created_at, updated_at)
@@ -329,6 +330,11 @@ session, like vaults and memory).
   switch apply, and the call lands in `audit.tool_calls`.
 - **Not versioned** (like memory, documented): editing a skill changes it for
   every agent that references it, including pinned agent versions.
+- **Tags** (`skills.tags`, free-form labels, `PATCH /v1/skills/{id}`): an
+  organisational aid for a library that grows past what one list can show —
+  `GET /v1/skills?tag=` filters, the UI offers the same filter in the skills
+  view and in the agent form's skill picker. Tags carry no semantics for
+  mounting or governance; the sandbox never sees them.
 
 ### Storage split
 
@@ -397,7 +403,8 @@ DELETE /v1/artifacts/{id}                  row + blob
 POST   /v1/artifacts/{id}/share · DELETE …/share    mint / revoke the share token
 GET    /v1/artifacts/shared/{token}[/content]       stable share URL (still behind IAP)
 
-POST   /v1/skills · GET /v1/skills[/{id}] · POST /v1/skills/{id}/archive
+POST   /v1/skills · GET /v1/skills[/{id}] (?tag=) · PATCH /v1/skills/{id} (description, tags)
+POST   /v1/skills/{id}/archive
 POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 
