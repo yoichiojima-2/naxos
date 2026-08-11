@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, apiBlob, apiConfirm, Agent, agentName, Artifact } from "@/lib/api";
 import Markdown from "@/components/markdown";
 
@@ -86,11 +86,8 @@ export default function ArtifactViewer({
   const [copied, setCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const fullscreenTrigger = useRef<HTMLButtonElement>(null);
-
-  const closeFullscreen = useCallback(() => {
-    setFullscreen(false);
-    fullscreenTrigger.current?.focus();
-  }, []);
+  const container = useRef<HTMLDivElement>(null);
+  const wasFullscreen = useRef(false);
 
   const kind = artifact ? kindOf(artifact.content_type, artifact.name) : null;
 
@@ -129,7 +126,19 @@ export default function ArtifactViewer({
 
   useEffect(() => {
     if (!fullscreen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeFullscreen(); };
+    // The overlay covers the app but leaves it in the tab order, so trap Tab
+    // inside it — otherwise focus walks onto hidden controls, Delete included.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setFullscreen(false); return; }
+      if (e.key !== "Tab" || !container.current) return;
+      const stops = container.current.querySelectorAll<HTMLElement>("a[href], button");
+      if (!stops.length) return;
+      const edge = stops[e.shiftKey ? 0 : stops.length - 1];
+      if (document.activeElement === edge || !container.current.contains(document.activeElement)) {
+        e.preventDefault();
+        stops[e.shiftKey ? stops.length - 1 : 0].focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -137,7 +146,12 @@ export default function ArtifactViewer({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = previous;
     };
-  }, [fullscreen, closeFullscreen]);
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if (!fullscreen && wasFullscreen.current) fullscreenTrigger.current?.focus();
+    wasFullscreen.current = fullscreen;
+  }, [fullscreen]);
 
   const body = useMemo(() => {
     if (!artifact || !kind) return null;
@@ -317,28 +331,30 @@ export default function ArtifactViewer({
           {artifact.description && <><dt>Description</dt><dd>{artifact.description}</dd></>}
         </dl>
       </div>
-      <div className="panel viewer-body">
-        {fullscreen
-          ? <span className="muted">showing full screen…</span>
-          : body ?? <span className="muted">loading content…</span>}
-      </div>
-      {fullscreen && (
-        <div className="viewer-full" role="dialog" aria-modal="true" aria-label={artifact.name}>
+      {/* One container in both modes: remounting would reload the preview iframe. */}
+      <div
+        ref={container}
+        className={fullscreen ? "viewer-full" : "panel"}
+        role={fullscreen ? "dialog" : undefined}
+        aria-modal={fullscreen || undefined}
+        aria-label={fullscreen ? artifact.name : undefined}
+      >
+        {fullscreen && (
           <div className="viewer-full-bar">
             <span className="mono viewer-full-name">{artifact.name}</span>
             <span className="row">
               {sourceToggle}
               <a className="mono" href={contentPath}>Download</a>
-              <button className="ghost" autoFocus onClick={closeFullscreen}>
+              <button className="ghost" autoFocus onClick={() => setFullscreen(false)}>
                 Exit full screen
               </button>
             </span>
           </div>
-          <div className="viewer-body viewer-full-body">
-            {body ?? <span className="muted">loading content…</span>}
-          </div>
+        )}
+        <div className={`viewer-body ${fullscreen ? "viewer-full-body" : ""}`}>
+          {body ?? <span className="muted">loading content…</span>}
         </div>
-      )}
+      </div>
     </>
   );
 }
