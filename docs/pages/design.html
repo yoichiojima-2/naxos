@@ -848,7 +848,9 @@ table.api td.d code { font-size: 0.9em; }
 
 <h2 id="s10"><span class="num">10</span>Repo layout</h2>
 
-<pre><code>control-plane/     Python 3.13 + uv + FastAPI; entrypoints: api | internal; alembic migrations
+<pre><code>control-plane/     Python 3.13 + uv + FastAPI; entrypoints: api | internal; plain-SQL
+                   migrations (sorted migrations/*.sql, applied at boot, schema_migrations
+                   table); DB access is raw SQL over asyncpg — no ORM
 sandbox-runner/    Python + claude-agent-sdk: main, harness, permissions, budget,
                    workspace, control_channel, memory_sync
 egress-proxy/      credential-substituting proxy (FastAPI/httpx)
