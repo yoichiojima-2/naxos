@@ -88,6 +88,44 @@ class DeploymentIn(BaseModel):
     budget_usd: float | None = None
 
 
+async def insert(
+    conn,
+    *,
+    agent_id: str,
+    agent_version: int | None,
+    name: str,
+    cron: str,
+    timezone: str,
+    initial_events: list[EventIn],
+    budget_usd: float | None,
+    created_by: str,
+) -> dict[str, Any]:
+    deployment_id = new_id("deployment")
+    row = await conn.fetchrow(
+        "INSERT INTO deployments (id, agent_id, agent_version, name, cron, timezone, "
+        "  initial_events, budget_usd, scheduler_job_name, created_by) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *",
+        deployment_id,
+        agent_id,
+        agent_version,
+        name,
+        cron,
+        timezone,
+        [e.model_dump(mode="json") for e in initial_events],
+        budget_usd,
+        "",
+        created_by,
+    )
+    job_name = await _create_scheduler_job(deployment_id, cron, timezone)
+    if job_name:
+        row = await conn.fetchrow(
+            "UPDATE deployments SET scheduler_job_name = $2 WHERE id = $1 RETURNING *",
+            deployment_id,
+            job_name,
+        )
+    return dict(row)
+
+
 @router.post("/deployments", status_code=201)
 async def create_deployment(body: DeploymentIn, principal: str = Depends(principal_of)) -> dict:
     for event in body.initial_events:
@@ -98,30 +136,18 @@ async def create_deployment(body: DeploymentIn, principal: str = Depends(princip
         )
         if agent is None:
             raise HTTPException(404, "agent not found or archived")
-        deployment_id = new_id("deployment")
-        row = await conn.fetchrow(
-            "INSERT INTO deployments (id, agent_id, agent_version, name, cron, timezone, "
-            "  initial_events, budget_usd, scheduler_job_name, created_by) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *",
-            deployment_id,
-            body.agent_id,
-            body.agent_version,
-            body.name,
-            body.cron,
-            body.timezone,
-            [e.model_dump(mode="json") for e in body.initial_events],
-            body.budget_usd,
-            "",
-            principal,
+        row = await insert(
+            conn,
+            agent_id=body.agent_id,
+            agent_version=body.agent_version,
+            name=body.name,
+            cron=body.cron,
+            timezone=body.timezone,
+            initial_events=body.initial_events,
+            budget_usd=body.budget_usd,
+            created_by=principal,
         )
-        job_name = await _create_scheduler_job(deployment_id, body.cron, body.timezone)
-        if job_name:
-            row = await conn.fetchrow(
-                "UPDATE deployments SET scheduler_job_name = $2 WHERE id = $1 RETURNING *",
-                deployment_id,
-                job_name,
-            )
-    return dict(row)
+    return row
 
 
 @router.get("/deployments")

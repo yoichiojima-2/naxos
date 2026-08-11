@@ -18,11 +18,18 @@ from claude_agent_sdk.types import (
 from naxos_shared.events import EventType, SessionConfig, StopReason
 from naxos_shared.ids import call_hash
 
-from . import artifacts
+from . import artifacts, schedules
 from .control import ControlChannel
 from .skills_sync import PLUGIN_NAME
 
 log = logging.getLogger(__name__)
+
+# CLI built-ins that schedule work inside this container's memory. A sandbox
+# execution exists only while the session is actively processing, so anything
+# they schedule dies unfired at the next idle checkpoint — and the platform can
+# neither see, audit, nor pause it. The schedules MCP server is the durable,
+# governed replacement.
+SESSION_LOCAL_SCHEDULER_TOOLS = ["CronCreate", "CronDelete", "CronList", "ScheduleWakeup"]
 
 CONTINUE_PROMPT = (
     "Continue the work you were doing before this session was resumed. "
@@ -64,11 +71,13 @@ class Harness:
         self.interrupted = False
         self.killed = False
         self.num_turns = 0
-        if "artifacts" in (config.mcp_servers or {}):
-            log.warning(
-                "agent-configured MCP server 'artifacts' is shadowed by the built-in artifact tools"
-            )
+        for reserved in ("artifacts", "schedules"):
+            if reserved in (config.mcp_servers or {}):
+                log.warning(
+                    "agent-configured MCP server '%s' is shadowed by the built-in tools", reserved
+                )
         self.artifact_server = artifacts.build_server(channel, config, Path(cwd))
+        self.schedule_server = schedules.build_server(channel)
 
     async def interrupt(self) -> None:
         """Stop the in-flight turn. Called by the queue watcher mid-run."""
@@ -164,8 +173,13 @@ class Harness:
             cwd=self.cwd,
             system_prompt=self.config.instructions,
             model=self.config.model,
-            mcp_servers={**self.config.mcp_servers, "artifacts": self.artifact_server},
+            mcp_servers={
+                **self.config.mcp_servers,
+                "artifacts": self.artifact_server,
+                "schedules": self.schedule_server,
+            },
             allowed_tools=self.config.tools,
+            disallowed_tools=SESSION_LOCAL_SCHEDULER_TOOLS,
             max_turns=self.config.max_turns,
             resume=self.sdk_session_id,
             setting_sources=[],

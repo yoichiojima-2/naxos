@@ -199,6 +199,30 @@ private state). The mechanism:
   registration. Humans manage artifacts (download, describe, share, revoke, delete)
   from the UI's Artifacts page or the `/v1/artifacts` API.
 
+### Agent-created deployments (scheduling from inside a session)
+
+When a user asks an agent to "do this every morning", the durable answer is a
+deployment, not a timer in the sandbox. The mechanism mirrors artifacts:
+
+- The sandbox exposes an **in-process MCP server** (`schedules`) with three tools:
+  `schedule_create` (name, cron, standalone prompt, optional timezone/budget),
+  `schedule_list`, `schedule_delete`. Ordinary tool calls — they pass the
+  `PreToolUse` permission gate, land in `audit.tool_calls`, and obey the kill
+  switch. `naxos-internal` creates the deployment for the session's agent,
+  unpinned (`agent_version` NULL = latest at fire time), attributed
+  `created_by = agent:{session_id}` so operators can tell agent-scheduled work
+  from their own; it appears on the Deployments page like any other deployment.
+- **Scope**: agents list every unarchived deployment of their agent (so they can
+  answer "what's scheduled for you"), but can archive only agent-created ones —
+  operator-created deployments are read-only from the sandbox. Runaway
+  protection: `MAX_AGENT_DEPLOYMENTS` (default 20) unarchived agent-created
+  deployments per agent.
+- **The CLI's session-local scheduling tools are disallowed** (`CronCreate`,
+  `CronDelete`, `CronList`, `ScheduleWakeup` via `disallowed_tools`): they
+  schedule inside the container's memory, and a sandbox execution exists only
+  while the session is actively processing — anything they schedule dies unfired
+  at the next idle checkpoint, invisible to audit, pause, and the kill switch.
+
 ### Skills (org-shared agent capabilities)
 
 A skill is the Agent Skills format — a folder with a `SKILL.md` entry file plus
@@ -298,7 +322,7 @@ POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 ```
 
-Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share)`, plus `deployments/{id}/fire` and `reconcile`.
+Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)`, plus `deployments/{id}/fire` and `reconcile`.
 
 Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
 

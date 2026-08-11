@@ -140,6 +140,132 @@ async def test_deployment_records_failure_when_agent_disabled(client, launched):
     assert launched == []
 
 
+async def _make_session(client, agent):
+    session = (
+        await client.post(
+            "/v1/sessions",
+            json={"agent": {"id": agent["id"]}, "initial_events": [MESSAGE]},
+        )
+    ).json()
+    return session["id"]
+
+
+async def test_agent_created_schedule_is_a_governed_deployment(client, internal_client, launched):
+    _, agent = await make_agent(client)
+    session_id = await _make_session(client, agent)
+
+    created = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "daily-digest", "cron": "3 8 * * *", "prompt": "Compile the digest."},
+    )
+    assert created.status_code == 201
+    deployment = created.json()
+    assert deployment["created_by"] == f"agent:{session_id}"
+
+    operator_view = (await client.get("/v1/deployments")).json()["data"]
+    assert [d["id"] for d in operator_view] == [deployment["id"]]
+    assert operator_view[0]["agent_version"] is None
+
+    run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
+    assert run["status"] == "running"
+    fired = (await client.get(f"/v1/sessions/{run['session_id']}/events")).json()["data"]
+    assert fired[0]["payload"]["content"][0]["text"] == "Compile the digest."
+
+    agent_view = (await internal_client.get(f"/internal/sessions/{session_id}/deployments")).json()[
+        "data"
+    ]
+    assert [d["id"] for d in agent_view] == [deployment["id"]]
+    assert agent_view[0]["prompt"] == "Compile the digest."
+
+    archived = await internal_client.delete(
+        f"/internal/sessions/{session_id}/deployments/{deployment['id']}"
+    )
+    assert archived.json()["archived"] is True
+    assert (await client.get("/v1/deployments")).json()["data"] == []
+
+
+async def test_agent_cannot_archive_operator_deployments(client, internal_client, launched):
+    env, agent = await make_agent(client)
+    session_id = await _make_session(client, agent)
+    operator_deployment = (
+        await client.post(
+            "/v1/deployments",
+            json={
+                "name": "nightly",
+                "agent_id": agent["id"],
+                "cron": "0 3 * * *",
+                "initial_events": [MESSAGE],
+            },
+        )
+    ).json()
+
+    agent_view = (await internal_client.get(f"/internal/sessions/{session_id}/deployments")).json()[
+        "data"
+    ]
+    assert [d["id"] for d in agent_view] == [operator_deployment["id"]]
+
+    refused = await internal_client.delete(
+        f"/internal/sessions/{session_id}/deployments/{operator_deployment['id']}"
+    )
+    assert refused.status_code == 403
+
+    other_agent = (
+        await client.post(
+            "/v1/agents",
+            json={
+                "environment_id": env["id"],
+                "name": "other",
+                "model": "claude-sonnet-5",
+                "instructions": "You do something else.",
+            },
+        )
+    ).json()
+    other_session = await _make_session(client, other_agent)
+    not_yours = await internal_client.delete(
+        f"/internal/sessions/{other_session}/deployments/{operator_deployment['id']}"
+    )
+    assert not_yours.status_code == 404
+
+
+async def test_agent_schedule_validation_and_cap(client, internal_client, launched, monkeypatch):
+    from naxos_cp import config as cp_config
+
+    _, agent = await make_agent(client)
+    session_id = await _make_session(client, agent)
+
+    bad_cron = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "x", "cron": "every day at 8", "prompt": "p"},
+    )
+    assert bad_cron.status_code == 422
+
+    over_budget = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "x", "cron": "0 8 * * *", "prompt": "p", "budget_usd": 1e9},
+    )
+    assert over_budget.status_code == 422
+
+    await client.patch(f"/v1/agents/{agent['id']}", json={"disabled": True})
+    killed = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "x", "cron": "0 8 * * *", "prompt": "p"},
+    )
+    assert killed.status_code == 409
+    await client.patch(f"/v1/agents/{agent['id']}", json={"disabled": False})
+
+    monkeypatch.setattr(cp_config, "MAX_AGENT_DEPLOYMENTS", 1)
+    first = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "a", "cron": "0 8 * * *", "prompt": "p"},
+    )
+    assert first.status_code == 201
+    capped = await internal_client.post(
+        f"/internal/sessions/{session_id}/deployments",
+        json={"name": "b", "cron": "0 9 * * *", "prompt": "p"},
+    )
+    assert capped.status_code == 409
+
+
 async def test_deployment_requires_initial_events(client):
     _, agent = await make_agent(client)
     response = await client.post(

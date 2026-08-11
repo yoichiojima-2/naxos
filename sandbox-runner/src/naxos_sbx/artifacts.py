@@ -15,12 +15,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-import httpx
 from claude_agent_sdk import create_sdk_mcp_server, tool
 from naxos_shared.events import SessionConfig
 
 from .config import MAX_ARTIFACT_BYTES
 from .control import ControlChannel
+from .mcp_result import error, guarded, text
 
 log = logging.getLogger(__name__)
 
@@ -31,14 +31,6 @@ NAME_RE = re.compile(r"^[a-zA-Z0-9._/ -]{1,200}$")
 
 def _valid_name(name: str) -> bool:
     return bool(NAME_RE.match(name)) and ".." not in name.split("/") and not name.startswith("/")
-
-
-def _text(message: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": message}]}
-
-
-def _error(message: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": message}], "is_error": True}
 
 
 async def _upload_blob(bucket: str, path: str, source: Path, content_type: str) -> None:
@@ -84,13 +76,13 @@ class ArtifactTools:
         try:
             source = self._resolve(args["path"])
         except ValueError as exc:
-            return _error(str(exc))
+            return error(str(exc))
         name = (args.get("name") or "").strip() or source.name
         if not _valid_name(name):
-            return _error("artifact names may only contain letters, digits, '. _ / -' and spaces")
+            return error("artifact names may only contain letters, digits, '. _ / -' and spaces")
         size = source.stat().st_size
         if size > MAX_ARTIFACT_BYTES:
-            return _error(f"artifact is {size} bytes; the limit is {MAX_ARTIFACT_BYTES}")
+            return error(f"artifact is {size} bytes; the limit is {MAX_ARTIFACT_BYTES}")
         content_type = (
             mimetypes.guess_type(name)[0]
             or mimetypes.guess_type(source.name)[0]
@@ -103,7 +95,7 @@ class ArtifactTools:
             size_bytes=size,
             description=args.get("description") or None,
         )
-        return _text(
+        return text(
             f"Published artifact '{name}' (id {record['id']}, version {record['version']}, "
             f"{size} bytes). It is visible in the platform UI; use artifact_share for a "
             "stable link."
@@ -121,7 +113,7 @@ class ArtifactTools:
             }
             for r in rows
         ]
-        return _text(json.dumps(summary, indent=2))
+        return text(json.dumps(summary, indent=2))
 
     async def delete(self, args: dict[str, Any]) -> dict[str, Any]:
         name = args["name"]
@@ -130,34 +122,18 @@ class ArtifactTools:
             await _delete_blob(self.config.session_bucket, self._blob_path(name))
         except Exception:
             log.exception("artifact blob delete failed for %s", name)
-        return _text(f"Deleted artifact '{name}'.")
+        return text(f"Deleted artifact '{name}'.")
 
     async def share(self, args: dict[str, Any]) -> dict[str, Any]:
         record = await self.channel.share_artifact(args["name"], shared=True)
-        return _text(
+        return text(
             f"Artifact '{record['name']}' is shared at {record['share_url']} "
             "(reachable by anyone in the organization; access still goes through IAP)."
         )
 
     async def unshare(self, args: dict[str, Any]) -> dict[str, Any]:
         record = await self.channel.share_artifact(args["name"], shared=False)
-        return _text(f"Artifact '{record['name']}' is no longer shared; its link is revoked.")
-
-
-def _guarded(handler):
-    async def wrapped(args: dict[str, Any]) -> dict[str, Any]:
-        try:
-            return await handler(args)
-        except httpx.HTTPStatusError as exc:
-            detail = exc.response.text[:500]
-            return _error(
-                f"control plane rejected the request ({exc.response.status_code}): {detail}"
-            )
-        except Exception as exc:
-            log.exception("artifact tool failed")
-            return _error(f"artifact operation failed: {exc}")
-
-    return wrapped
+        return text(f"Artifact '{record['name']}' is no longer shared; its link is revoked.")
 
 
 def build_server(channel: ControlChannel, config: SessionConfig, ws: Path):
@@ -180,13 +156,13 @@ def build_server(channel: ControlChannel, config: SessionConfig, ws: Path):
             },
             "required": ["path"],
         },
-    )(_guarded(tools_.create))
+    )(guarded(tools_.create, "artifact"))
 
     list_ = tool(
         "artifact_list",
         "List the artifacts this session has published, with versions and share links.",
         {"type": "object", "properties": {}},
-    )(_guarded(tools_.list))
+    )(guarded(tools_.list, "artifact"))
 
     delete = tool(
         "artifact_delete",
@@ -196,7 +172,7 @@ def build_server(channel: ControlChannel, config: SessionConfig, ws: Path):
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
         },
-    )(_guarded(tools_.delete))
+    )(guarded(tools_.delete, "artifact"))
 
     share = tool(
         "artifact_share",
@@ -206,7 +182,7 @@ def build_server(channel: ControlChannel, config: SessionConfig, ws: Path):
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
         },
-    )(_guarded(tools_.share))
+    )(guarded(tools_.share, "artifact"))
 
     unshare = tool(
         "artifact_unshare",
@@ -216,7 +192,7 @@ def build_server(channel: ControlChannel, config: SessionConfig, ws: Path):
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
         },
-    )(_guarded(tools_.unshare))
+    )(guarded(tools_.unshare, "artifact"))
 
     return create_sdk_mcp_server(
         name="artifacts", version="1.0.0", tools=[create, list_, delete, share, unshare]
