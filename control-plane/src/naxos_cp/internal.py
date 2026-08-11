@@ -13,6 +13,7 @@ from naxos_shared.events import (
     SessionConfig,
     SessionStatus,
     StopReason,
+    tool_matches,
 )
 from naxos_shared.ids import new_id
 from naxos_shared.paths import unsafe_relpath
@@ -241,6 +242,19 @@ async def permission(
         if row["disabled"]:
             return {"decision": "deny", "reason": "agent disabled", "killed": True}
         version = await _agent_version(conn, row)
+        # The tools list is enforced here, not by the SDK: `allowed_tools` only
+        # pre-approves calls, and the CLI's own built-ins cannot be withheld from
+        # the model at all. An empty list means unrestricted.
+        allowed = list(version["tools"] or [])
+        if allowed and not tool_matches(body.tool_name, allowed):
+            return {
+                "decision": "deny",
+                "by": "policy",
+                "reason": (
+                    f"{body.tool_name} is not one of this agent's tools "
+                    f"({', '.join(allowed)}). Do not retry or work around it."
+                ),
+            }
         policy = PermissionPolicy.model_validate(version["permission_policy"] or {})
         if policy.mode_for(body.tool_name) is PermissionMode.ALWAYS_ALLOW:
             return {"decision": "allow", "by": "policy"}

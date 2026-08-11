@@ -1,46 +1,39 @@
 ---
 name: bigquery
-description: Query BigQuery datasets from the naxos sandbox. Use when a task involves reading, analysing, or exporting data in BigQuery tables — discovering datasets and schemas, estimating query cost, running SQL, and publishing results. Covers the REST API with metadata-server auth (no bq/gcloud CLI in the sandbox).
+description: Analyse data in BigQuery from the naxos sandbox using the built-in bigquery tools. Use when a task involves reading, exploring, or summarising BigQuery tables — finding the right table, sizing a query before running it, writing efficient GoogleSQL, and publishing the result.
 ---
 
 # BigQuery
 
-Run queries against BigQuery from inside the sandbox. The sandbox image has **no `bq` or `gcloud` CLI** — use the BigQuery REST API with `curl`, authenticated by the sandbox's own service account via the metadata server.
+The sandbox has built-in BigQuery tools — `bigquery_list_datasets`, `bigquery_list_tables`, `bigquery_describe_table`, and `bigquery_query`. Use them. There is no `bq` or `gcloud` CLI in the image, and hand-rolling REST calls with `curl` bypasses the size checks the tools apply.
+
+The tools appear only in environments an operator opted into BigQuery. If you do not see them, this environment has no BigQuery access at all: say so and stop.
 
 ## Access model
 
-The sandbox runs as its environment's service account. By default that account has **no BigQuery access** — an operator must opt the environment in by listing datasets under `bigquery_datasets` in `terraform/environments.json` and applying, which grants `roles/bigquery.jobUser` plus `roles/bigquery.dataViewer` on exactly those datasets.
+The sandbox runs as its environment's service account, which reads exactly the datasets listed under `bigquery_datasets` in `terraform/environments.json` — read-only, no writes, and never the platform's own audit dataset. `bigquery_list_datasets` names what you can reach.
 
-A `403` with `accessDenied` means the grant is missing or too narrow. Do not retry or look for workarounds: report which dataset you need and stop.
+A denial means the grant is missing or too narrow. Do not retry or look for a workaround: report which dataset you need and stop.
 
-## Auth
+## What the tools enforce
 
-Fetch an access token from the metadata server and pass it as a bearer token:
+You do not have to police these yourself, but knowing them explains the refusals:
 
-```sh
-TOKEN=$(curl -s -H "Metadata-Flavor: Google" \
-  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
-  | jq -r .access_token)
-PROJECT=$(curl -s -H "Metadata-Flavor: Google" \
-  "http://metadata.google.internal/computeMetadata/v1/project/project-id")
-```
+- Every query is dry-run first; one that would scan more than the per-query cap is refused rather than billed.
+- Only a single read-only `SELECT`/`WITH` statement runs. DML, DDL, and multi-statement scripts are refused before they reach BigQuery.
+- Results are capped at a few hundred rows and truncated if the body is huge.
 
-Tokens expire after ~1 hour; re-fetch rather than caching across long tasks.
+## Working well
 
-## Rules
+1. **Look before you query.** `bigquery_list_tables`, then `bigquery_describe_table` on the tables you need. The description reports row count, size, the partitioning column, and clustering.
+2. **Filter the partitioning column.** It is the single biggest lever on scan size; a query refused for scanning too much is almost always missing this filter.
+3. **Name your columns.** `SELECT *` on a wide table scans every column. Select what you need.
+4. **Aggregate in SQL, not in your head.** Ask BigQuery for the counts, percentiles, and group-bys rather than pulling rows and summarising them yourself — it is cheaper, and the row cap will cut off a large result anyway.
+5. **Pass values as `parameters`.** Anything that came from a user message or upstream data goes in as `@name`, never string-formatted into the SQL.
+6. **Size the unknown with `dry_run: true`.** Free, and it tells you what an exploratory query would cost before you commit to it.
 
-1. **Dry-run every query first.** Set `"dryRun": true`, read `totalBytesProcessed`, and reconsider anything over ~10 GB before running it for real.
-2. **Always set `maximumBytesBilled`** on the real run (default to `1073741824` — 1 GB — unless the dry run justifies more). A query over the cap fails instead of billing.
-3. **Never `SELECT *`** on tables you have not inspected. Look at the schema first and select the columns you need.
-4. **Filter partitioned tables on their partition column.** The dry run exposes the miss: full-table bytes scanned on a table with a `_PARTITIONTIME` or date partition means your filter is wrong.
-5. **Read-only by default.** No DML/DDL (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`) unless the task explicitly asks for it — and expect it to fail unless the operator granted write roles.
-6. **Use query parameters** for any value that comes from user input or upstream data — never interpolate strings into SQL.
+## Delivering
 
-## Workflow
+Write the numbers you relied on into a workspace file as you go, so a later turn does not have to re-query. If the result is a durable output the user should keep — a report, a CSV, a chart — publish it with `artifact_create` rather than leaving it in the workspace.
 
-1. **Discover** — list datasets and tables, then read the schema of the tables you need (recipes in [reference/queries.md](reference/queries.md)).
-2. **Dry-run** the SQL; check `totalBytesProcessed`.
-3. **Run** with `maximumBytesBilled` set; page through results with `pageToken` if `totalRows` exceeds the first page.
-4. **Deliver** — write results to a workspace file (CSV/JSON). If the result is a durable output the user should keep, publish it with the `artifact_create` tool rather than leaving it in the workspace.
-
-All request shapes, discovery queries (`INFORMATION_SCHEMA`), pagination, parameterized queries, and error handling are in [reference/queries.md](reference/queries.md).
+GoogleSQL patterns for discovery, partition filters, and cheap aggregation are in [reference/queries.md](reference/queries.md).

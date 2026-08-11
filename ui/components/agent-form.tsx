@@ -32,6 +32,10 @@ export const EFFORT_LEVELS: { id: EffortLevel; label: string }[] = [
 const BUILTIN_TOOLS = [
   "Bash", "Read", "Write", "Edit", "Glob", "Grep",
   "WebFetch", "WebSearch", "Task", "TodoWrite", "NotebookEdit",
+  // The platform's own sandbox tools. A restricted list covers these too, so
+  // they have to be selectable; the BigQuery ones exist only in environments
+  // an operator opted into BigQuery datasets.
+  "mcp__artifacts__*", "mcp__schedules__*", "mcp__bigquery__*",
 ];
 
 export default function AgentForm({
@@ -233,7 +237,8 @@ export default function AgentForm({
       </div>
       <p className="hint">
         No tools selected = the agent may use all tools. Selecting any tool restricts the
-        agent to that list.
+        agent to that list — anything else is denied at the permission gate and audited as
+        not allowed. Entries may be globs, e.g. <code>mcp__artifacts__*</code>.
       </p>
 
       <label>Permission policy</label>

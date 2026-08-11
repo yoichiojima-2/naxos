@@ -1,132 +1,122 @@
-# BigQuery REST recipes
+# GoogleSQL patterns
 
-All examples assume `TOKEN` and `PROJECT` set as in SKILL.md, and use the
-`jobs.query` endpoint (synchronous, fine for interactive work):
-
-```
-POST https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/queries
-```
+SQL to pass to `bigquery_query`. Table names are `dataset.table` (the project is implied) or `` `project.dataset.table` `` when you need to be explicit.
 
 ## Discovery
 
-List datasets:
+`bigquery_list_tables` and `bigquery_describe_table` cover the common case. `INFORMATION_SCHEMA` answers the rest — it is metadata, so these queries are cheap.
 
-```sh
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/datasets" \
-  | jq -r '.datasets[]?.datasetReference.datasetId'
+Tables with their sizes, largest first:
+
+```sql
+SELECT table_id, row_count, ROUND(size_bytes / POW(1024, 3), 2) AS gib
+FROM analytics.__TABLES__
+ORDER BY size_bytes DESC
 ```
 
-List tables in a dataset:
-
-```sh
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/datasets/DATASET/tables" \
-  | jq -r '.tables[]?.tableReference.tableId'
-```
-
-Table schema, row count, size, and partitioning in one call:
-
-```sh
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/datasets/DATASET/tables/TABLE" \
-  | jq '{schema: [.schema.fields[] | {name, type}], numRows, numBytes, timePartitioning, rangePartitioning, clustering}'
-```
-
-Or via SQL over `INFORMATION_SCHEMA` (counts against query bytes, but works across tables at once):
+Find a column across a dataset:
 
 ```sql
 SELECT table_name, column_name, data_type
-FROM DATASET.INFORMATION_SCHEMA.COLUMNS
-WHERE table_name = 'TABLE'
-ORDER BY ordinal_position
+FROM analytics.INFORMATION_SCHEMA.COLUMNS
+WHERE LOWER(column_name) LIKE @pattern
+ORDER BY table_name
 ```
 
-## Dry run
+with `parameters: {"pattern": "%user_id%"}`.
 
-```sh
-curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/queries" \
-  -d '{
-    "query": "SELECT status, COUNT(*) AS n FROM DATASET.TABLE WHERE dt >= @since GROUP BY status",
-    "useLegacySql": false,
-    "dryRun": true,
-    "queryParameters": [
-      {"name": "since", "parameterType": {"type": "DATE"}, "parameterValue": {"value": "2026-01-01"}}
-    ]
-  }' | jq '{totalBytesProcessed, cacheHit}'
+Which column a table is partitioned on:
+
+```sql
+SELECT table_name, column_name
+FROM analytics.INFORMATION_SCHEMA.COLUMNS
+WHERE is_partitioning_column = 'YES'
 ```
 
-`totalBytesProcessed` is the billing estimate (on-demand pricing bills per byte scanned). If it equals the table's full `numBytes` on a partitioned table, the partition filter is not being applied.
+## Partition filters
 
-## Run
+The filter has to be on the partitioning column itself, compared to a constant or a parameter — wrapping it in a function defeats pruning.
 
-Same request without `dryRun`, with a byte cap and a row limit per page:
+```sql
+-- prunes
+SELECT COUNT(*) FROM analytics.events
+WHERE event_date BETWEEN @start AND @end
 
-```sh
-curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/queries" \
-  -d '{
-    "query": "SELECT status, COUNT(*) AS n FROM DATASET.TABLE WHERE dt >= @since GROUP BY status",
-    "useLegacySql": false,
-    "maximumBytesBilled": "1073741824",
-    "maxResults": 1000,
-    "timeoutMs": 60000,
-    "queryParameters": [
-      {"name": "since", "parameterType": {"type": "DATE"}, "parameterValue": {"value": "2026-01-01"}}
-    ]
-  }' > result.json
+-- does not prune: the column is inside a function
+SELECT COUNT(*) FROM analytics.events
+WHERE FORMAT_DATE('%Y-%m', event_date) = '2026-08'
 ```
 
-Capture the job reference — `location` is required on every follow-up call outside the US/EU multi-regions (omitting it in `asia-northeast1` 404s):
+For ingestion-time partitioning the pseudo-column is `_PARTITIONDATE` (or `_PARTITIONTIME`):
 
-```sh
-JOB=$(jq -r .jobReference.jobId result.json)
-LOC=$(jq -r .jobReference.location result.json)
+```sql
+SELECT COUNT(*) FROM analytics.events
+WHERE _PARTITIONDATE >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
 ```
 
-If the query outlives `timeoutMs`, the response has `jobComplete: false` and **no schema or rows** — poll `getQueryResults` until it completes before reading anything:
+Confirm the filter works with `dry_run: true` — if the estimate is the whole table, it is not pruning.
 
-```sh
-until jq -e .jobComplete result.json > /dev/null; do
-  sleep 2
-  curl -s -H "Authorization: Bearer $TOKEN" \
-    "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/queries/$JOB?location=$LOC&maxResults=1000" \
-    > result.json
-done
+## Sampling and shape
+
+Look at a table's shape without scanning it:
+
+```sql
+SELECT * FROM analytics.events
+WHERE event_date = @day
+LIMIT 20
 ```
 
-Response shape: column names in `.schema.fields[].name`, rows in `.rows[].f[].v` (every value is a string; `null` stays `null`). Flatten to CSV:
+`LIMIT` does **not** reduce bytes scanned; the partition filter does. On an unpartitioned table use `TABLESAMPLE SYSTEM (1 PERCENT)` instead.
 
-```sh
-jq -r '(.schema.fields | map(.name)) as $h
-       | $h, (.rows[]? | [.f[].v]) | @csv' result.json > result.csv
+## Aggregation
+
+Prefer one aggregate query over pulling rows and counting them yourself:
+
+```sql
+SELECT
+  event_name,
+  COUNT(*) AS events,
+  COUNT(DISTINCT user_id) AS users,
+  APPROX_QUANTILES(duration_ms, 100)[OFFSET(50)] AS p50_ms
+FROM analytics.events
+WHERE event_date BETWEEN @start AND @end
+GROUP BY event_name
+ORDER BY events DESC
 ```
 
-## Pagination
+`APPROX_COUNT_DISTINCT` and `APPROX_QUANTILES` are much cheaper than their exact forms on large tables and are usually accurate enough for an analysis.
 
-If the response has a `pageToken`, there are more rows. Page through `getQueryResults` with the `JOB` and `LOC` captured above:
+## Paging a large result
 
-```sh
-PAGE=$(jq -r '.pageToken // empty' result.json)
-while [ -n "$PAGE" ]; do
-  curl -s -H "Authorization: Bearer $TOKEN" \
-    "https://bigquery.googleapis.com/bigquery/v2/projects/$PROJECT/queries/$JOB?location=$LOC&pageToken=$PAGE&maxResults=1000" \
-    > page.json
-  jq -r '.rows[]? | [.f[].v] | @csv' page.json >> result.csv
-  PAGE=$(jq -r '.pageToken // empty' page.json)
-done
+The row cap is on what comes back to you, not on what the query computes. Page in SQL when you genuinely need every row:
+
+```sql
+SELECT id, name FROM analytics.customers
+ORDER BY id
+LIMIT 200 OFFSET @offset
 ```
 
-## Errors
+Better, when it fits the task: aggregate or filter until the answer is small enough to read in one go.
 
-Match on the error **reason** (`.error.errors[0].reason`), not the HTTP status — BigQuery returns rate and quota limits as HTTP 403 too, same as missing access.
+## Nested and repeated fields
 
-| Reason | Meaning | Action |
-|---|---|---|
-| `accessDenied` | Environment SA lacks a BigQuery role on the project or dataset | Report the dataset you need to the operator; do not retry |
-| `bytesBilledLimitExceeded` | Query would scan more than `maximumBytesBilled` | Tighten filters/columns; raise the cap only if the dry run justifies it |
-| `invalidQuery` | SQL error — message includes position | Fix the SQL; verify names against the schema |
-| `notFound` | Dataset/table/project name wrong, or `location` missing on a `getQueryResults` call | Re-run discovery; qualify as `project.dataset.table` for other projects; check `location=$LOC` |
-| `rateLimitExceeded` / `quotaExceeded` | Concurrent-query or per-user limit | Back off and retry once; if persistent, report it |
-| `jobComplete: false` (not an error) | Query still running after `timeoutMs` | Poll `getQueryResults` with `jobId` and `location` (see Run) |
+`bigquery_describe_table` shows nested fields as `parent.child`. Unnest to filter or count them:
+
+```sql
+SELECT event_name, param.key, COUNT(*) AS n
+FROM analytics.events, UNNEST(event_params) AS param
+WHERE event_date = @day
+GROUP BY event_name, param.key
+```
+
+Repeated values come back as JSON arrays, and records as nested objects.
+
+## Errors worth recognising
+
+| What you see | What it means |
+|---|---|
+| denied / not authorised | the dataset is not in this environment's grant — report it and stop |
+| would scan more than the cap | add or fix the partition filter, select fewer columns, aggregate |
+| `Not found: Table …` | wrong dataset or table id; re-check with `bigquery_list_tables` |
+| `Unrecognized name` | wrong column; re-check with `bigquery_describe_table` |
+| refused: only read-only SELECT | this environment has read access only, by design |

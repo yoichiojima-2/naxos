@@ -84,6 +84,17 @@ class EventIn(BaseModel):
             raise ValueError("user.tool_confirmation requires call_hash and result")
 
 
+def tool_matches(tool_name: str, patterns: list[str]) -> bool:
+    """Whether a tool name matches any entry, literally or as a glob.
+
+    MCP tools arrive as `mcp__{server}__{tool}`, so `mcp__artifacts__*` is the
+    usual way to name a whole built-in server.
+    """
+    return any(
+        pattern == tool_name or fnmatchcase(tool_name, pattern) for pattern in patterns
+    )
+
+
 class PermissionRule(BaseModel):
     tool: str
     mode: PermissionMode
@@ -95,7 +106,7 @@ class PermissionPolicy(BaseModel):
 
     def mode_for(self, tool_name: str) -> PermissionMode:
         for rule in self.rules:
-            if rule.tool == tool_name or fnmatchcase(tool_name, rule.tool):
+            if tool_matches(tool_name, [rule.tool]):
                 return rule.mode
         return self.default
 

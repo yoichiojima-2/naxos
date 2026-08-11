@@ -114,3 +114,35 @@ async def test_pre_tool_use_pending_pauses_the_call():
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert harness.paused_call is not None
     assert channel.emitted[-1]["payload"]["decision"] == "awaiting_confirmation"
+
+
+async def test_a_deny_from_the_tools_list_is_audited_as_not_allowed():
+    # The control plane denies with by="policy" when the tool is outside the
+    # agent's list; a human denial keeps the user_denied label.
+    class _Channel:
+        session_id = "session_x"
+
+        def __init__(self, verdict):
+            self.verdict = verdict
+            self.events: list = []
+
+        async def ask_permission(self, digest, tool_name, tool_input, tool_use_id):
+            return self.verdict
+
+        async def emit(self, events, run_id):
+            self.events.extend(events)
+
+    for verdict, expected in (
+        (
+            {"decision": "deny", "by": "policy", "reason": "not one of this agent's tools"},
+            "not_allowed",
+        ),
+        ({"decision": "deny", "by": "user", "reason": "no"}, "user_denied"),
+    ):
+        channel = _Channel(verdict)
+        harness = _harness(_config(tools=["Read"]), channel=channel)
+        result = await harness._pre_tool_use(
+            {"tool_name": "Bash", "tool_input": {}}, "toolu_x", None
+        )
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert harness.pending[0]["payload"]["decision"] == expected

@@ -592,6 +592,12 @@ resource "google_cloud_run_v2_job" "sandbox" {
           name  = "ENVIRONMENT_NAME"
           value = each.key
         }
+        # The same list that drives the IAM grants above. Empty means the
+        # sandbox registers no BigQuery tools at all.
+        env {
+          name  = "BIGQUERY_DATASETS"
+          value = join(",", local.environment_bq_datasets[each.key])
+        }
         env {
           name = "ANTHROPIC_API_KEY"
           value_source {

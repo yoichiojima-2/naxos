@@ -589,6 +589,7 @@ function FoldedEvent({ event }: { event: SessionEvent }) {
     name = String(payload.tool_name ?? "");
     detail = JSON.stringify(payload.input ?? {}, null, 2);
     if (payload.decision === "user_denied") flag = "denied";
+    if (payload.decision === "not_allowed") flag = "not allowed";
     if (payload.decision === "killed") flag = "killed";
   } else if (event.type === "agent.tool_result") {
     label = "result";
