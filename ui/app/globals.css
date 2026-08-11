@@ -156,7 +156,8 @@ body {
   position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
   background: var(--danger-strong); color: #fff; padding: 10px 20px;
   border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500; cursor: pointer;
-  box-shadow: 0 8px 16px -4px var(--shadow-strong); z-index: 20;
+  /* above the full-screen artifact overlay: an unseen error is a lost error */
+  box-shadow: 0 8px 16px -4px var(--shadow-strong); z-index: 40;
   max-width: min(90vw, 640px);
 }
 

@@ -126,23 +126,27 @@ export default function ArtifactViewer({
 
   useEffect(() => {
     if (!fullscreen) return;
-    // The overlay covers the app but leaves it in the tab order, so trap Tab
-    // inside it — otherwise focus walks onto hidden controls, Delete included.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setFullscreen(false); return; }
-      if (e.key !== "Tab" || !container.current) return;
-      const stops = container.current.querySelectorAll<HTMLElement>("a[href], button");
-      if (!stops.length) return;
-      const edge = stops[e.shiftKey ? 0 : stops.length - 1];
-      if (document.activeElement === edge || !container.current.contains(document.activeElement)) {
-        e.preventDefault();
-        stops[e.shiftKey ? stops.length - 1 : 0].focus();
+    // The covered page stays in the tab order and the accessibility tree —
+    // Delete included — so inert every ancestor sibling of the overlay. This is
+    // what <dialog>.showModal() does, which we cannot use: swapping the element
+    // would remount the preview. Alerts are exempt: the error toast draws above
+    // the overlay and must stay clickable and announced.
+    const inerted: HTMLElement[] = [];
+    for (let node: HTMLElement | null = container.current; node?.parentElement; node = node.parentElement) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling.getAttribute("role") === "alert") continue;
+        if (sibling !== node && sibling instanceof HTMLElement && !sibling.inert) {
+          sibling.inert = true;
+          inerted.push(sibling);
+        }
       }
-    };
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
     window.addEventListener("keydown", onKey);
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
+      inerted.forEach((el) => { el.inert = false; });
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = previous;
     };
