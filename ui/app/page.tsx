@@ -41,7 +41,7 @@ const PAGE_INFO: Record<Page, string> = {
   vaults:
     "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
   memory:
-    "What agents remember across sessions. Browse each memory store's files, open one to read or edit it.",
+    "What agents remember across sessions. Browse each memory store's files — open one to edit its content, rename it, or create and delete files directly.",
   docs:
     "How naxos works and how to run your first agent session — from environment to agent to session.",
 };

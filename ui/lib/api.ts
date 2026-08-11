@@ -165,5 +165,12 @@ export type Credential = {
   created_at: string;
 };
 export type MemoryStore = { id: string; name: string };
-export type Memory = { id: string; path: string; size?: number; content?: string };
+export type Memory = {
+  id: string;
+  path: string;
+  size?: number;
+  content?: string;
+  updated_by?: string | null;
+  updated_at?: string;
+};
 export type WorkspaceFile = { path: string; size: number };
