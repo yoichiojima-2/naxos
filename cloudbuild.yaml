@@ -1,32 +1,62 @@
+# The three builds are independent — waitFor: ["-"] runs them concurrently.
+# BUILDKIT_INLINE_CACHE=1 embeds cache metadata in the pushed :latest images so
+# the next build's --cache-from can reuse layers across Cloud Build's ephemeral
+# workers. Inline cache only covers the final stage, so control-plane's ui
+# stage is built and pushed separately as :ui-cache to keep the npm ci / next
+# build layers cacheable.
 steps:
-  - name: gcr.io/cloud-builders/docker
+  - id: control-plane
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    env: ["DOCKER_BUILDKIT=1"]
+    entrypoint: bash
     args:
-      - build
-      - -t
-      - ${_REPO}/control-plane:${_TAG}
-      - -f
-      - control-plane/Dockerfile
-      - .
-  - name: gcr.io/cloud-builders/docker
+      - -ceu
+      - |
+        docker build -f control-plane/Dockerfile --target ui \
+          -t ${_REPO}/control-plane:ui-cache \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from ${_REPO}/control-plane:ui-cache .
+        docker build -f control-plane/Dockerfile \
+          -t ${_REPO}/control-plane:${_TAG} \
+          -t ${_REPO}/control-plane:latest \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from ${_REPO}/control-plane:ui-cache \
+          --cache-from ${_REPO}/control-plane:latest .
+  - id: sandbox-runner
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    env: ["DOCKER_BUILDKIT=1"]
+    entrypoint: bash
     args:
-      - build
-      - -t
-      - ${_REPO}/sandbox-runner:${_TAG}
-      - -f
-      - sandbox-runner/Dockerfile
-      - .
-  - name: gcr.io/cloud-builders/docker
+      - -ceu
+      - |
+        docker build -f sandbox-runner/Dockerfile \
+          -t ${_REPO}/sandbox-runner:${_TAG} \
+          -t ${_REPO}/sandbox-runner:latest \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from ${_REPO}/sandbox-runner:latest .
+  - id: egress-proxy
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["-"]
+    env: ["DOCKER_BUILDKIT=1"]
+    entrypoint: bash
     args:
-      - build
-      - -t
-      - ${_REPO}/egress-proxy:${_TAG}
-      - -f
-      - egress-proxy/Dockerfile
-      - .
+      - -ceu
+      - |
+        docker build -f egress-proxy/Dockerfile \
+          -t ${_REPO}/egress-proxy:${_TAG} \
+          -t ${_REPO}/egress-proxy:latest \
+          --build-arg BUILDKIT_INLINE_CACHE=1 \
+          --cache-from ${_REPO}/egress-proxy:latest .
 images:
   - ${_REPO}/control-plane:${_TAG}
+  - ${_REPO}/control-plane:latest
+  - ${_REPO}/control-plane:ui-cache
   - ${_REPO}/sandbox-runner:${_TAG}
+  - ${_REPO}/sandbox-runner:latest
   - ${_REPO}/egress-proxy:${_TAG}
+  - ${_REPO}/egress-proxy:latest
 substitutions:
   _REPO: asia-northeast1-docker.pkg.dev/naxos-503510/naxos
   _TAG: latest

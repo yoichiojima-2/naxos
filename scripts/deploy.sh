@@ -22,17 +22,28 @@ gcloud builds submit --project "$PROJECT" --config cloudbuild.yaml \
   --gcs-source-staging-dir "$STAGING/source" \
   --substitutions "_REPO=$REPO,_TAG=$TAG" .
 
+# Rollouts are independent; run them concurrently and wait on each pid so a
+# failed update still fails the deploy (bare `wait` would swallow the status).
+pids=()
 gcloud run services update naxos-api --project "$PROJECT" --region "$REGION" \
-  --image "$REPO/control-plane:$TAG" --args api
+  --image "$REPO/control-plane:$TAG" --args api &
+pids+=($!)
 gcloud run services update naxos-internal --project "$PROJECT" --region "$REGION" \
-  --image "$REPO/control-plane:$TAG" --args internal
+  --image "$REPO/control-plane:$TAG" --args internal &
+pids+=($!)
 gcloud run services update naxos-egress --project "$PROJECT" --region "$REGION" \
-  --image "$REPO/egress-proxy:$TAG"
+  --image "$REPO/egress-proxy:$TAG" &
+pids+=($!)
 
 for job in $(gcloud run jobs list --project "$PROJECT" --region "$REGION" \
     --format "value(metadata.name)" --filter "metadata.name~naxos-sbx-"); do
   gcloud run jobs update "$job" --project "$PROJECT" --region "$REGION" \
-    --image "$REPO/sandbox-runner:$TAG"
+    --image "$REPO/sandbox-runner:$TAG" &
+  pids+=($!)
+done
+
+for pid in "${pids[@]}"; do
+  wait "$pid"
 done
 
 echo "deployed $TAG"
