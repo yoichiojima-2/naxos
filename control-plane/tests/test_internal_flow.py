@@ -95,6 +95,11 @@ async def test_always_ask_pauses_then_resumes_after_confirmation(client, interna
     )
     assert approve.status_code == 202
 
+    # The wake preserves the pause cause while the session is rescheduling.
+    woken = (await client.get(f"/v1/sessions/{sid}")).json()
+    assert woken["status"] == "rescheduling"
+    assert woken["stop_reason"] == "requires_action"
+
     # A fresh sandbox replays the same call with a different tool_use_id.
     await internal_client.post(f"/internal/sessions/{sid}/claim")
     replay = {"call_hash": DIGEST, "tool_use_id": "toolu_second", **BASH}

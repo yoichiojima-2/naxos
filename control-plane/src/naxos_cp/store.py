@@ -89,7 +89,6 @@ async def set_status(
     event_type = {
         SessionStatus.RUNNING: EventType.SESSION_STATUS_RUNNING,
         SessionStatus.IDLE: EventType.SESSION_STATUS_IDLE,
-        SessionStatus.RESCHEDULING: EventType.SESSION_STATUS_RESCHEDULING,
         SessionStatus.TERMINATED: EventType.SESSION_STATUS_TERMINATED,
     }.get(status)
     if event_type is not None:
