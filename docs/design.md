@@ -331,7 +331,7 @@ Documented deviations from CMA: IAP auth instead of API keys; environments opera
 
 ## 8. Security model
 
-- **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else. No BigQuery, no secrets, no other environment's anything. A fully prompt-injected agent is still boxed by IAM.
+- **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a `bigquery_datasets` list in `environments.json` grants the SA `bigquery.jobUser` plus `dataViewer` on exactly the listed datasets (the audit dataset is never grantable), so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.
 - **Sandbox ↔ control-plane auth**: OIDC ID token of the env SA → Cloud Run IAM on `naxos-internal`, then an app-level check that the token's SA equals `environments.service_account_email` for the session being touched. No bearer tokens to mint or leak.
 - **Tool restriction**: tools not in the agent version's `tools` list are never passed to the SDK. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
 - **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
