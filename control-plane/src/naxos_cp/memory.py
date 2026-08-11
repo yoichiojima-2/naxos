@@ -110,7 +110,7 @@ async def list_memories(store_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch(
             "SELECT id, store_id, path, octet_length(content) AS size, updated_by, updated_at "
-            "FROM memories WHERE store_id = $1 ORDER BY path",
+            'FROM memories WHERE store_id = $1 ORDER BY path COLLATE "C"',
             store_id,
         )
     return {"data": [dict(r) for r in rows]}
