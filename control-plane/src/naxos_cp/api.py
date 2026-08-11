@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,8 @@ from pydantic import BaseModel, Field
 
 from . import config, db, gcs, notify, sessions, store, wake
 from .auth import principal_of
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1")
 
@@ -313,7 +316,7 @@ async def patch_session(
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, _: str = Depends(principal_of)) -> dict:
+async def delete_session(session_id: str, principal: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         row = await conn.fetchrow(
             "SELECT e.session_bucket FROM sessions s "
@@ -322,10 +325,20 @@ async def delete_session(session_id: str, _: str = Depends(principal_of)) -> dic
         )
         if row is None:
             raise HTTPException(404, "session not found")
-        if await store.has_live_lease(conn, session_id):
+        # Conditional DELETE so the liveness check and the delete are one atomic
+        # statement — a claim landing in between makes the condition fail, not race.
+        result = await conn.execute(
+            "DELETE FROM sessions WHERE id = $1 AND status <> 'rescheduling' "
+            "  AND (lease_expires_at IS NULL OR lease_expires_at <= now())",
+            session_id,
+        )
+        if db.rowcount(result) != 1:
             raise HTTPException(409, "session has a live sandbox — terminate it and retry")
-        await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
-    await gcs.delete_prefix(row["session_bucket"], f"sessions/{session_id}/")
+    log.info("session %s deleted by %s", session_id, principal)
+    try:
+        await gcs.delete_prefix(row["session_bucket"], f"sessions/{session_id}/")
+    except Exception:
+        log.exception("blob wipe failed for deleted session %s", session_id)
     return {"id": session_id, "deleted": True}
 
 
@@ -429,6 +442,10 @@ async def _sse(session_id: str, after: int):
                 return
         if rows:
             continue
+        async with db.pool().acquire() as conn:
+            exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", session_id)
+        if not exists:
+            return
         if not await notify.wait(session_id, config.SSE_PING_SECONDS):
             yield ": ping\n\n"
 

@@ -158,16 +158,24 @@ async def test_delete_session_removes_rows_and_workspace(client, launched, monke
 
     monkeypatch.setattr(gcs, "delete_prefix", fake_delete_prefix)
     _, agent = await make_agent(client)
+    session = (await client.post("/v1/sessions", json={"agent": {"id": agent["id"]}})).json()
+
+    assert (await client.delete(f"/v1/sessions/{session['id']}")).status_code == 200
+    assert (await client.get(f"/v1/sessions/{session['id']}")).status_code == 404
+    assert wiped == [("naxos2-sess-default", f"sessions/{session['id']}/")]
+
+
+async def test_delete_refuses_a_session_that_is_waking(client, launched):
+    _, agent = await make_agent(client)
     hello = {"type": "user.message", "content": [{"type": "text", "text": "hello"}]}
     session = (
         await client.post(
             "/v1/sessions", json={"agent": {"id": agent["id"]}, "initial_events": [hello]}
         )
     ).json()
+    assert session["status"] == "rescheduling"
 
-    assert (await client.delete(f"/v1/sessions/{session['id']}")).status_code == 200
-    assert (await client.get(f"/v1/sessions/{session['id']}")).status_code == 404
-    assert wiped == [("naxos2-sess-default", f"sessions/{session['id']}/")]
+    assert (await client.delete(f"/v1/sessions/{session['id']}")).status_code == 409
 
 
 async def test_delete_refuses_a_session_with_a_live_sandbox(client, launched):

@@ -21,8 +21,12 @@ async def download(bucket: str, path: str) -> bytes | None:
 
 async def delete_prefix(bucket: str, prefix: str) -> None:
     def _delete_prefix() -> None:
-        for blob in list(client().bucket(bucket).list_blobs(prefix=prefix)):
-            blob.delete()
+        storage_client = client()
+        blobs = list(storage_client.bucket(bucket).list_blobs(prefix=prefix))
+        for start in range(0, len(blobs), 100):
+            with storage_client.batch(raise_exception=False):
+                for blob in blobs[start : start + 100]:
+                    blob.delete()
 
     await asyncio.to_thread(_delete_prefix)
 

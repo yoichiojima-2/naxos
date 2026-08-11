@@ -87,8 +87,8 @@ export default function Sessions({ agents }: { agents: Agent[] }) {
 
   async function bulkDelete() {
     const ok = window.confirm(
-      `Permanently delete ${selected.size} ${noun}, including events and workspace files? ` +
-        "Sessions with a live sandbox are refused.",
+      `Permanently delete ${selected.size} ${noun}, including events, workspace files, and ` +
+        "artifacts (shared artifact links stop working)? Sessions with a live sandbox are refused.",
     );
     if (!ok) return;
     await bulkApply((id) => api(`/v1/sessions/${id}`, { method: "DELETE" }));
