@@ -77,7 +77,7 @@ async def test_agent_share_round_trip(client, internal_client, launched, blobs):
         )
     ).json()
     token = shared["share_token"]
-    assert shared["share_url"].endswith(f"/v1/artifacts/shared/{token}")
+    assert shared["share_url"].endswith(f"/#artifacts/shared/{token}")
 
     again = (
         await internal_client.post(
