@@ -512,6 +512,8 @@ async def share_session_artifact(
         if artifact_id is None:
             raise HTTPException(404, "artifact not found")
         record = await artifacts.set_shared(conn, artifact_id, body.shared, f"agent:{session_id}")
+        if record is None:
+            raise HTTPException(404, "artifact not found")
         await _emit_artifact_event(
             conn, session_id, "shared" if body.shared else "unshared", record
         )

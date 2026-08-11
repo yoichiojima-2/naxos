@@ -41,10 +41,11 @@ def serialize(row: asyncpg.Record | dict) -> dict:
 
 
 async def set_shared(
-    conn: asyncpg.Connection, artifact_id: str, shared: bool, shared_by: str
+    conn: asyncpg.Connection, artifact_id: str, shared: bool, shared_by: str = ""
 ) -> asyncpg.Record | None:
     """Mint or revoke an artifact's share token. Sharing is idempotent: an
-    existing token is kept so the URL stays stable."""
+    existing token is kept so the URL stays stable. shared_by is recorded
+    only when sharing; revoking clears it."""
     if shared:
         return await conn.fetchrow(
             "UPDATE artifacts SET share_token = COALESCE(share_token, $2), "
@@ -191,9 +192,9 @@ async def share_artifact(artifact_id: str, principal: str = Depends(principal_of
 
 
 @router.delete("/artifacts/{artifact_id}/share")
-async def unshare_artifact(artifact_id: str, principal: str = Depends(principal_of)) -> dict:
+async def unshare_artifact(artifact_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        row = await set_shared(conn, artifact_id, False, principal)
+        row = await set_shared(conn, artifact_id, False)
     if row is None:
         raise HTTPException(404, "artifact not found")
     return serialize(row)
