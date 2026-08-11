@@ -10,6 +10,13 @@
 #
 # Ingress is ALL for the same reason as naxos-internal: the sandbox job has no
 # VPC connector, so "internal" would force NAT. IAM carries the boundary.
+#
+# Cloud Run forwards the caller's Authorization header to the container, so a
+# connector that also wants its own bearer token would see the sandbox's ID
+# token and reject it. Cloud Run IAM is the gate instead — hence
+# `--unsafe-disable-auth` (notion) and `IGNORE_HEADER_AUTH` (atlassian) in
+# connectors.json. Each server's args must bind 0.0.0.0:8080: none of these
+# four read $PORT except gworkspace.
 
 locals {
   connectors = jsondecode(file("${path.module}/connectors.json"))
@@ -47,6 +54,21 @@ resource "google_secret_manager_secret" "connector" {
     auto {}
   }
   depends_on = [google_project_service.enabled]
+}
+
+# A Cloud Run revision mounting `version = "latest"` cannot be created while the
+# secret has no versions, so apply would fail before anyone could set the real
+# value. This placeholder makes the service deployable; the connector fails to
+# authenticate until `gcloud secrets versions add` supplies the real token, and
+# ignore_changes keeps Terraform from reverting to the placeholder afterwards.
+resource "google_secret_manager_secret_version" "connector_placeholder" {
+  for_each    = local.connector_secrets
+  secret      = google_secret_manager_secret.connector[each.key].id
+  secret_data = "unset"
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
 }
 
 resource "google_secret_manager_secret_iam_member" "connector" {
@@ -108,6 +130,13 @@ resource "google_cloud_run_v2_service" "connector" {
       launch_stage,
     ]
   }
+
+  # The revision is validated against the secrets at creation, so both the
+  # placeholder version and the SA's accessor grant must already exist.
+  depends_on = [
+    google_secret_manager_secret_version.connector_placeholder,
+    google_secret_manager_secret_iam_member.connector,
+  ]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "connector_env_invoker" {

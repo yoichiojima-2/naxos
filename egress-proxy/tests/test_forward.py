@@ -5,7 +5,7 @@ import httpx
 import pytest
 import uvicorn
 from starlette.applications import Starlette
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from naxos_egress import main
@@ -34,6 +34,21 @@ async def _serve(app) -> tuple[uvicorn.Server, asyncio.Task, int]:
     return server, task, server.servers[0].sockets[0].getsockname()[1]
 
 
+@pytest.fixture(autouse=True)
+async def fresh_client():
+    """The app's client is module-level — one event loop in production, but one
+    per test here, so give each test its own and drop the cached lookups."""
+    main._routes.clear()
+    main._secrets.clear()
+    previous, main._client = (
+        main._client,
+        httpx.AsyncClient(timeout=httpx.Timeout(TIMEOUT, read=None), follow_redirects=False),
+    )
+    yield
+    await main._client.aclose()
+    main._client = previous
+
+
 @pytest.fixture
 async def upstream():
     """An SSE upstream that holds its second chunk until the test releases it."""
@@ -50,7 +65,17 @@ async def upstream():
 
         return StreamingResponse(body(), media_type="text/event-stream")
 
-    app = Starlette(routes=[Route("/mcp", events, methods=["GET", "POST"])])
+    async def root(request):
+        state["seen"]["root_encoding"] = request.headers.get("transfer-encoding")
+        state["seen"]["root_path"] = request.url.path
+        return JSONResponse({"ok": True})
+
+    app = Starlette(
+        routes=[
+            Route("/mcp", events, methods=["GET", "POST"]),
+            Route("/", root, methods=["GET", "POST"]),
+        ]
+    )
     server, task, port = await _serve(app)
     state["port"] = port
     yield state
@@ -98,3 +123,24 @@ async def test_forward_streams_sse_and_substitutes_the_credential(proxy, upstrea
 
     # The sandbox's own OIDC header is replaced, never forwarded upstream.
     assert upstream["seen"]["auth"] == "Bearer s3cret"
+
+
+async def test_route_root_is_forwarded_not_redirected(proxy, upstream):
+    """The resolved MCP URL is the route root, and the sandbox reaches Cloud Run
+    only through its OIDC-minting forwarder. A redirect here would send the SDK
+    straight to the proxy without a token."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        for url in (f"{proxy}/r/tok", f"{proxy}/r/tok/"):
+            response = await client.post(url, json={"jsonrpc": "2.0"})
+            assert response.status_code == 200, url
+            assert response.json() == {"ok": True}
+    assert upstream["seen"]["root_path"] == "/"
+
+
+async def test_bodyless_get_is_not_chunked(proxy, upstream):
+    """Streaming the inbound body would put Transfer-Encoding: chunked on a GET
+    with no body, which some upstreams reject."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        response = await client.get(f"{proxy}/r/tok/")
+    assert response.status_code == 200
+    assert upstream["seen"]["root_encoding"] is None

@@ -101,6 +101,12 @@ export default function AgentForm({
 
   const customTools = tools.filter((t) => !BUILTIN_TOOLS.includes(t));
 
+  // A remote connector is reached through the egress proxy, which only rewrites
+  // its URL when one of the session's vaults holds a matching credential.
+  const missingVault = connectors.filter(
+    (c) => c.requires_vault && mcpServers && c.name in mcpServers && vaultIds.length === 0,
+  );
+
   function toggleTool(tool: string) {
     setTools((prev) =>
       prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool],
@@ -122,7 +128,7 @@ export default function AgentForm({
     if (connector.name in servers) {
       delete servers[connector.name];
     } else {
-      servers[connector.name] = { type: "http", url: connector.url };
+      servers[connector.name] = { type: connector.type, url: connector.url };
     }
     setMcpJson(JSON.stringify(servers, null, 2));
   }
@@ -416,6 +422,12 @@ export default function AgentForm({
             tools still pass the permission policy and are audited like any other call —
             add a rule for the tool glob to control them.
           </p>
+          {missingVault.length > 0 && (
+            <p className="hint error">
+              {missingVault.map((c) => c.title).join(", ")} needs a vault holding its
+              credential; select one above or its calls will fail unauthenticated.
+            </p>
+          )}
         </>
       )}
 

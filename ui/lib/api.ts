@@ -180,8 +180,10 @@ export type Connector = {
   name: string;
   title: string;
   shape: "remote" | "hosted";
+  type: "http" | "sse";
   url: string;
   available: boolean;
+  requires_vault: boolean;
   credential: string;
   upstream: string;
   tool_glob: string;

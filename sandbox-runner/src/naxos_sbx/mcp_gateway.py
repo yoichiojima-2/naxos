@@ -103,7 +103,8 @@ class McpGateway:
         return token
 
     async def _forward(self, request: Request) -> Response:
-        entry = self._targets.get(request.path_params["name"])
+        name = request.path_params["name"]
+        entry = self._targets.get(name)
         if entry is None:
             return Response("unknown MCP server", status_code=404)
         target, audience = entry
@@ -117,16 +118,33 @@ class McpGateway:
         if token:
             headers["authorization"] = f"Bearer {token}"
 
+        # The request body is buffered (MCP client messages are small) but the
+        # response is streamed: passing a stream here would force chunked
+        # encoding even on bodyless GETs, which some upstreams reject.
         upstream = await self._client.send(
             self._client.build_request(
-                request.method, url, headers=headers, content=request.stream()
+                request.method, url, headers=headers, content=await request.body()
             ),
             stream=True,
         )
         excluded = {"transfer-encoding", "connection"}
+        out = {k: v for k, v in upstream.headers.items() if k.lower() not in excluded}
+        # A redirect the client followed on its own would leave the gateway and
+        # so arrive at Cloud Run with no ID token; keep it pointed back here.
+        if "location" in out:
+            out["location"] = self._local_location(out["location"], name, target)
         return StreamingResponse(
             upstream.aiter_raw(),
             status_code=upstream.status_code,
-            headers={k: v for k, v in upstream.headers.items() if k.lower() not in excluded},
+            headers=out,
             background=BackgroundTask(upstream.aclose),
         )
+
+    def _local_location(self, location: str, name: str, target: str) -> str:
+        base = f"http://127.0.0.1:{self.port}/{name}"
+        if location.startswith(target):
+            return base + location[len(target) :]
+        origin = str(httpx.URL(target).copy_with(raw_path=b"/")).rstrip("/")
+        if location.startswith(origin):
+            log.warning("MCP redirect outside the mapped path: %s", location)
+        return location

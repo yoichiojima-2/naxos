@@ -1,6 +1,6 @@
 import pytest
 
-from naxos_cp import vaults
+from naxos_cp import connectors, vaults
 
 from .test_session_flow import ENV, make_agent
 
@@ -13,6 +13,42 @@ def no_gcp(monkeypatch):
         pass
 
     monkeypatch.setattr(vaults, "_store_secret", fake_store)
+
+
+async def test_hosted_connectors_are_unavailable_until_deployed(client, monkeypatch):
+    monkeypatch.delenv("NAXOS_MCP_SLACK_URL", raising=False)
+    catalog = {c["name"]: c for c in (await client.get("/v1/connectors")).json()["data"]}
+
+    assert catalog["slack"]["available"] is False
+    assert catalog["slack"]["url"] == ""
+    # A remote connector always has a URL, but needs a vault credential to work.
+    assert catalog["github"]["available"] is True
+    assert catalog["github"]["requires_vault"] is True
+
+    monkeypatch.setenv("NAXOS_MCP_SLACK_URL", "https://naxos-mcp-slack-1.a.run.app")
+    slack = {c["name"]: c for c in connectors.entries()}["slack"]
+    assert slack["available"] is True
+    # The service URL alone is not the MCP endpoint: the path is appended.
+    assert slack["url"] == "https://naxos-mcp-slack-1.a.run.app" + slack["path"]
+    assert slack["requires_vault"] is False
+
+
+async def test_every_catalog_entry_is_attachable(client):
+    """The catalog feeds the agent form directly, so each entry must be a config
+    the agent-version validator accepts."""
+    env = (await client.post("/v1/environments", json=ENV)).json()
+    for entry in connectors.CATALOG:
+        url = entry["url"] if entry["shape"] == "remote" else f"https://x.run.app{entry['path']}"
+        response = await client.post(
+            "/v1/agents",
+            json={
+                "environment_id": env["id"],
+                "name": f"uses-{entry['name']}",
+                "model": "claude-sonnet-5",
+                "mcp_servers": {entry["name"]: {"type": entry["type"], "url": url}},
+            },
+        )
+        assert response.status_code == 201, (entry["name"], response.text)
 
 
 async def test_mcp_servers_rejects_stdio_configs(client):

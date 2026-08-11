@@ -30,7 +30,9 @@ CATALOG = [
         "name": "github",
         "title": "GitHub",
         "shape": "remote",
+        "type": "http",
         "url": "https://api.githubcopilot.com/mcp/",
+        "path": "",
         "credential": "Fine-grained personal access token, stored as a vault "
         '\'header\' credential targeting {"mcp_server": "github"}.',
         "upstream": "https://github.com/github/github-mcp-server",
@@ -39,51 +41,64 @@ CATALOG = [
         "name": "slack",
         "title": "Slack",
         "shape": "hosted",
-        "credential": "Bot token on the naxos-mcp-slack service.",
+        "type": "http",
+        "path": "/mcp",
+        "credential": "Slack user or bot token (SLACK_MCP_XOXP_TOKEN) on the "
+        "naxos-mcp-slack service.",
         "upstream": "https://github.com/korotovsky/slack-mcp-server",
     },
     {
         "name": "atlassian",
         "title": "Jira & Confluence",
         "shape": "hosted",
-        "credential": "Atlassian Cloud email + API token on the naxos-mcp-atlassian service.",
+        "type": "http",
+        "path": "/mcp",
+        "credential": "Atlassian Cloud URL, username and API token on the "
+        "naxos-mcp-atlassian service.",
         "upstream": "https://github.com/sooperset/mcp-atlassian",
     },
     {
         "name": "notion",
         "title": "Notion",
         "shape": "hosted",
-        "credential": "Internal integration token on the naxos-mcp-notion service.",
+        "type": "http",
+        "path": "/mcp",
+        "credential": "Internal integration token (NOTION_TOKEN) on the naxos-mcp-notion service.",
         "upstream": "https://github.com/makenotion/notion-mcp-server",
     },
     {
         "name": "gworkspace",
         "title": "Google Workspace",
         "shape": "hosted",
-        "credential": "The service's own service account with domain-wide delegation "
-        "granted in the Workspace admin console — no key material.",
+        "type": "http",
+        "path": "/mcp",
+        "credential": "Service account key JSON with domain-wide delegation granted in "
+        "the Workspace admin console, on the naxos-mcp-gworkspace service.",
         "upstream": "https://github.com/taylorwilsdon/google_workspace_mcp",
     },
 ]
 
 
-def url_for(name: str) -> str:
-    return os.environ.get(f"NAXOS_MCP_{name.upper()}_URL", "")
+def url_for(entry: dict) -> str:
+    """A remote entry knows its own URL; a hosted one gets its service URL from
+    Terraform and appends the endpoint path the upstream server serves at."""
+    if entry["shape"] == "remote":
+        return entry["url"]
+    base = os.environ.get(f"NAXOS_MCP_{entry['name'].upper()}_URL", "")
+    return base.rstrip("/") + entry["path"] if base else ""
 
 
 def entries() -> list[dict]:
-    out = []
-    for entry in CATALOG:
-        url = entry.get("url") or url_for(entry["name"])
-        out.append(
-            {
-                **entry,
-                "url": url,
-                "available": bool(url),
-                "tool_glob": f"mcp__{entry['name']}__*",
-            }
-        )
-    return out
+    return [
+        {
+            **entry,
+            "url": url_for(entry),
+            "available": bool(url_for(entry)),
+            "requires_vault": entry["shape"] == "remote",
+            "tool_glob": f"mcp__{entry['name']}__*",
+        }
+        for entry in CATALOG
+    ]
 
 
 @router.get("/connectors")

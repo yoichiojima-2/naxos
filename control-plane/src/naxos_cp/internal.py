@@ -112,7 +112,7 @@ async def _resolve_egress(conn, session_id: str, vault_ids: list[str], mcp_serve
                 (match["target"] or {}).get("header", "authorization"),
                 (match["target"] or {}).get("prefix", "Bearer "),
             )
-            server["url"] = f"{config.EGRESS_URL}/r/{token}"
+            server["url"] = f"{config.EGRESS_URL}/r/{token}/"
         rewritten[name] = server
     return rewritten
 

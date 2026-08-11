@@ -65,23 +65,32 @@ async def healthz() -> dict:
 
 
 @app.api_route(
+    "/r/{token}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+)
+@app.api_route(
     "/r/{token}/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
 )
-async def forward(token: str, path: str, request: Request) -> Response:
+async def forward(token: str, request: Request, path: str = "") -> Response:
     route = await _route(token)
     secret = _secret(route["secret_ref"])
 
-    target = route["target_url"].rstrip("/")
-    url = f"{target}/{path}" if path else target
+    # With no extra path the configured URL is used verbatim: some MCP
+    # endpoints (GitHub's /mcp/) redirect if their trailing slash is dropped.
+    target = route["target_url"]
+    url = f"{target.rstrip('/')}/{path}" if path else target
     if request.url.query:
         url = f"{url}?{request.url.query}"
 
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
     headers[route["header"]] = f"{route['value_prefix']}{secret}"
 
+    # The request body is buffered (MCP client messages are small) but the
+    # response is streamed: passing a stream here would force chunked encoding
+    # even on bodyless GETs, which some upstreams reject.
     upstream = await _client.send(
-        _client.build_request(request.method, url, headers=headers, content=request.stream()),
+        _client.build_request(request.method, url, headers=headers, content=await request.body()),
         stream=True,
     )
     # aiter_raw() passes bytes through untouched, so content-encoding and
