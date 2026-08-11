@@ -330,6 +330,56 @@ async def test_memory_round_trip_and_size_cap(client):
         assert rejected.status_code == 400, bad_path
 
 
+async def test_memory_store_rename_and_delete(client):
+    store = (await client.post("/v1/memory_stores", json={"name": "runbooks"})).json()
+    other = (await client.post("/v1/memory_stores", json={"name": "notes"})).json()
+
+    renamed = await client.patch(f"/v1/memory_stores/{store['id']}", json={"name": "playbooks"})
+    assert renamed.json()["name"] == "playbooks"
+    dup = await client.patch(f"/v1/memory_stores/{store['id']}", json={"name": "notes"})
+    assert dup.status_code == 409
+    missing = await client.patch("/v1/memory_stores/nope", json={"name": "x"})
+    assert missing.status_code == 404
+
+    await client.post(
+        f"/v1/memory_stores/{store['id']}/memories",
+        json={"path": "notes.md", "content": "seed"},
+    )
+    _, agent = await make_agent(client, memory_store_ids=[store["id"]])
+    listed = (await client.get("/v1/memory_stores")).json()["data"]
+    by_id = {s["id"]: s for s in listed}
+    assert by_id[store["id"]]["file_count"] == 1
+    assert by_id[store["id"]]["used_by"] == [agent["name"]]
+    assert by_id[other["id"]]["used_by"] == []
+
+    attached = await client.delete(f"/v1/memory_stores/{store['id']}")
+    assert attached.status_code == 409
+    assert agent["name"] in attached.json()["detail"]
+
+    deleted = await client.delete(f"/v1/memory_stores/{other['id']}")
+    assert deleted.json() == {"id": other["id"], "deleted": True}
+    assert (await client.delete(f"/v1/memory_stores/{other['id']}")).status_code == 404
+
+
+async def test_memory_store_delete_blocked_by_active_session(client, launched):
+    store = (await client.post("/v1/memory_stores", json={"name": "runbooks"})).json()
+    _, agent = await make_agent(client)
+    session = (
+        await client.post(
+            "/v1/sessions",
+            json={"agent": {"id": agent["id"]}, "memory_store_ids": [store["id"]]},
+        )
+    ).json()
+
+    blocked = await client.delete(f"/v1/memory_stores/{store['id']}")
+    assert blocked.status_code == 409
+    assert "active session" in blocked.json()["detail"]
+
+    await client.post(f"/v1/sessions/{session['id']}/terminate", json={})
+    deleted = await client.delete(f"/v1/memory_stores/{store['id']}")
+    assert deleted.json()["deleted"] is True
+
+
 async def test_session_config_rewrites_mcp_urls_through_egress(
     client, internal_client, launched, monkeypatch
 ):

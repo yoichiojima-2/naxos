@@ -30,8 +30,60 @@ async def create_store(body: StoreIn, _: str = Depends(principal_of)) -> dict:
 @router.get("/memory_stores")
 async def list_stores(_: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        rows = await conn.fetch("SELECT * FROM memory_stores ORDER BY name")
-    return {"data": [dict(r) for r in rows]}
+        rows = await conn.fetch(
+            "SELECT s.*, (SELECT count(*) FROM memories m WHERE m.store_id = s.id) AS file_count "
+            "FROM memory_stores s ORDER BY s.name"
+        )
+        usage = await conn.fetch(
+            "SELECT unnest(v.memory_store_ids) AS store_id, a.name FROM agents a "
+            "JOIN agent_versions v ON v.agent_id = a.id AND v.version = a.latest_version "
+            "WHERE a.archived_at IS NULL ORDER BY a.name"
+        )
+    used_by: dict[str, list[str]] = {}
+    for u in usage:
+        used_by.setdefault(u["store_id"], []).append(u["name"])
+    return {"data": [dict(r) | {"used_by": used_by.get(r["id"], [])} for r in rows]}
+
+
+@router.patch("/memory_stores/{store_id}")
+async def rename_store(store_id: str, body: StoreIn, _: str = Depends(principal_of)) -> dict:
+    async with db.transaction() as conn:
+        taken = await conn.fetchval(
+            "SELECT 1 FROM memory_stores WHERE name = $1 AND id != $2", body.name, store_id
+        )
+        if taken:
+            raise HTTPException(409, "memory store name already exists")
+        row = await conn.fetchrow(
+            "UPDATE memory_stores SET name = $2 WHERE id = $1 RETURNING *", store_id, body.name
+        )
+    if row is None:
+        raise HTTPException(404, "memory store not found")
+    return dict(row)
+
+
+@router.delete("/memory_stores/{store_id}")
+async def delete_store(store_id: str, _: str = Depends(principal_of)) -> dict:
+    async with db.transaction() as conn:
+        agents = await conn.fetch(
+            "SELECT a.name FROM agents a "
+            "JOIN agent_versions v ON v.agent_id = a.id AND v.version = a.latest_version "
+            "WHERE a.archived_at IS NULL AND $1 = ANY(v.memory_store_ids) ORDER BY a.name",
+            store_id,
+        )
+        if agents:
+            names = ", ".join(a["name"] for a in agents)
+            raise HTTPException(409, f"memory store is attached to agents: {names}")
+        active = await conn.fetchval(
+            "SELECT count(*) FROM sessions WHERE status != 'terminated' "
+            "AND $1 = ANY(memory_store_ids)",
+            store_id,
+        )
+        if active:
+            raise HTTPException(409, f"memory store is in use by {active} active session(s)")
+        result = await conn.execute("DELETE FROM memory_stores WHERE id = $1", store_id)
+    if db.rowcount(result) != 1:
+        raise HTTPException(404, "memory store not found")
+    return {"id": store_id, "deleted": True}
 
 
 class MemoryIn(BaseModel):

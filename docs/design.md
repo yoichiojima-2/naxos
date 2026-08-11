@@ -308,7 +308,8 @@ POST   /v1/vaults/{id}/credentials         write-only; value → Secret Manager 
 GET    /v1/vaults/{id}/credentials         metadata only
 DELETE /v1/vaults/{id}/credentials/{cid}
 
-POST   /v1/memory_stores · GET /v1/memory_stores[/{id}]
+POST   /v1/memory_stores · GET /v1/memory_stores · PATCH/DELETE /v1/memory_stores/{id}
+       DELETE refuses (409) while the store is attached to an agent or an active session
 POST   /v1/memory_stores/{id}/memories · GET (list) · GET/PUT/DELETE …/memories/{mid}
 
 GET    /v1/artifacts[?session_id&agent_id] · GET /v1/artifacts/{id}[/content]

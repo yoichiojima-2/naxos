@@ -26,6 +26,7 @@ export default function MemoryStores() {
   const [stores, setStores] = useState<MemoryStore[]>([]);
   const [memories, setMemories] = useState<Record<string, Memory[]>>({});
   const [storeName, setStoreName] = useState("");
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -46,6 +47,29 @@ export default function MemoryStores() {
     await api("/v1/memory_stores", { json: { name: storeName } });
     setStoreName("");
     refresh();
+  }
+
+  async function renameStore() {
+    if (!renaming || !renaming.name.trim()) return;
+    await api(`/v1/memory_stores/${renaming.id}`, {
+      method: "PATCH",
+      json: { name: renaming.name.trim() },
+    });
+    setRenaming(null);
+    refresh();
+  }
+
+  async function deleteStore(store: MemoryStore) {
+    const files = memories[store.id]?.length ?? 0;
+    if (
+      await apiConfirm(
+        `Delete store "${store.name}"${files ? ` and its ${files} file(s)` : ""}?`,
+        `/v1/memory_stores/${store.id}`,
+        { method: "DELETE" },
+      )
+    ) {
+      refresh();
+    }
   }
 
   async function openMemory(storeId: string, memory: Memory) {
@@ -160,15 +184,58 @@ export default function MemoryStores() {
       {stores.map((store) => (
         <div className="panel" key={store.id}>
           <div className="row between">
-            <strong>{store.name}</strong>
-            <button
-              className="ghost"
-              onClick={() =>
-                setEditing({ storeId: store.id, id: null, originalPath: null, path: "", content: "" })
-              }
-            >
-              New file
-            </button>
+            <div className="row">
+              {renaming?.id === store.id ? (
+                <>
+                  <input
+                    value={renaming.name}
+                    onChange={(e) => setRenaming({ id: store.id, name: e.target.value })}
+                    onKeyDown={(e) => e.key === "Enter" && renameStore()}
+                    style={{ width: 220 }}
+                    aria-label="store name"
+                    autoFocus
+                  />
+                  <button className="primary" onClick={renameStore} disabled={!renaming.name.trim()}>
+                    Save
+                  </button>
+                  <button className="ghost" onClick={() => setRenaming(null)}>Cancel</button>
+                </>
+              ) : (
+                <>
+                  <strong>{store.name}</strong>
+                  {(store.used_by ?? []).length > 0 && (
+                    <span className="muted">used by {store.used_by!.join(", ")}</span>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="row">
+              <button
+                className="ghost"
+                onClick={() =>
+                  setEditing({ storeId: store.id, id: null, originalPath: null, path: "", content: "" })
+                }
+              >
+                New file
+              </button>
+              {renaming?.id !== store.id && (
+                <button className="ghost" onClick={() => setRenaming({ id: store.id, name: store.name })}>
+                  Rename
+                </button>
+              )}
+              <button
+                className="danger"
+                onClick={() => deleteStore(store)}
+                disabled={(store.used_by ?? []).length > 0}
+                title={
+                  (store.used_by ?? []).length > 0
+                    ? "detach this store from its agents before deleting"
+                    : undefined
+                }
+              >
+                Delete
+              </button>
+            </div>
           </div>
           <div className="table-wrap">
             <table>

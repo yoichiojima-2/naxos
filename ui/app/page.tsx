@@ -58,7 +58,7 @@ const PAGE_INFO: Record<Page, string> = {
   vaults:
     "Credentials for external services. Only names and targets are shown here — secret values are stored in Secret Manager, injected by the egress proxy at request time, and never enter the agent's sandbox or leave the API.",
   memory:
-    "What agents remember across sessions. Browse each memory store's files — open one to edit its content, rename it, or create and delete files directly.",
+    "What agents remember across sessions. Create, rename, and delete memory stores, see which agents use each one, and browse a store's files — open one to edit its content, rename it, or create and delete files directly.",
   skills:
     "Reusable know-how shared across the organization. A skill is a folder of instructions (SKILL.md plus supporting files) that any agent can be given; agents load it read-only — skills are edited only here.",
   docs:
