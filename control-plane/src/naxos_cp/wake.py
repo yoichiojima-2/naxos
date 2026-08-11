@@ -48,9 +48,7 @@ async def wake(conn: asyncpg.Connection, session_id: str) -> bool:
     # Re-read the status here: the advisory lock is transaction-scoped, so a
     # competing wake (e.g. the reconciler) has committed by the time it's acquired,
     # and the pre-lock snapshot in `row` can be stale.
-    prev_status = await conn.fetchval(
-        "SELECT status FROM sessions WHERE id = $1", session_id
-    )
+    prev_status = await conn.fetchval("SELECT status FROM sessions WHERE id = $1", session_id)
     if prev_status != str(SessionStatus.RESCHEDULING):
         await store.append_event(
             conn, session_id, EventType.SESSION_STATUS_RESCHEDULING, {}, processed=True
