@@ -176,6 +176,16 @@ export type DeploymentRun = {
 
 export type Environment = { id: string; name: string };
 export type Vault = { id: string; name: string };
+export type Connector = {
+  name: string;
+  title: string;
+  shape: "remote" | "hosted";
+  url: string;
+  available: boolean;
+  credential: string;
+  upstream: string;
+  tool_glob: string;
+};
 export type Credential = {
   id: string;
   name: string;

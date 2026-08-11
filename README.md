@@ -20,6 +20,7 @@ Hosted agent platforms run the agent loop and sandbox on the provider's cloud. n
 
 - **Data boundary** — model access via Vertex AI only; data never leaves the project.
 - **Internal-system integration** — self-hosted MCP servers reach closed-network systems without egress.
+- **Connectors without connector code** — Slack, Google Workspace, Notion, Jira, Confluence and GitHub attach as existing MCP servers, either self-hosted in the project or reached through the credential proxy. See [`docs/connectors.md`](docs/connectors.md).
 - **Execution-level governance** — per-tool-call audit, human approval gates, an instant per-agent kill switch, and per-tenant IAM.
 - **Scale-to-zero** — always *available* rather than always running; idle sessions checkpoint to storage and release their container.
 
@@ -32,7 +33,7 @@ Hosted agent platforms run the agent loop and sandbox on the provider's cloud. n
 | `egress-proxy/` | Credential-substituting proxy — vault secrets never enter the sandbox |
 | `shared/` | Pydantic event/config models shared by the three services |
 | `ui/` | Next.js static export, baked into the control-plane image |
-| `terraform/` | One root module; `environments.json` fans out per-environment SA / Job / bucket / IAM |
+| `terraform/` | One root module; `environments.json` fans out per-environment SA / Job / bucket / IAM, `connectors.json` fans out the self-hosted MCP connector services |
 | `docs/` | Design docs |
 
 ## Status

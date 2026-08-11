@@ -9,6 +9,7 @@ from naxos_shared.events import EventType, StopReason
 from .config import IDLE_LINGER_SECONDS
 from .control import ControlChannel
 from .harness import CONTINUE_PROMPT, Harness
+from .mcp_gateway import McpGateway
 from .memory_sync import MemorySync
 from .skills_sync import SkillsSync
 from .workspace import Workspace
@@ -82,10 +83,16 @@ async def _finalize(
     harness: Harness | None,
     workspace: Workspace | None,
     memory: MemorySync | None,
+    gateway: McpGateway | None,
     started_at: str,
     stop_reason: StopReason,
 ) -> None:
     """Best-effort teardown: every step runs even when earlier ones fail."""
+    if gateway is not None:
+        try:
+            await gateway.aclose()
+        except Exception:
+            log.exception("MCP gateway shutdown failed")
     if memory is not None:
         try:
             await memory.writeback()
@@ -119,9 +126,12 @@ async def run_session(session_id: str) -> None:
     memory: MemorySync | None = None
     stop_reason = StopReason.END_TURN
     harness: Harness | None = None
+    gateway: McpGateway | None = None
     try:
         await channel.claim()
         config = await channel.config()
+        gateway = McpGateway()
+        config.mcp_servers = await gateway.rewrite(config.mcp_servers)
         workspace = Workspace(session_id, config.session_bucket)
         workspace.restore()
         memory = MemorySync(channel, workspace.ws)
@@ -166,7 +176,7 @@ async def run_session(session_id: str) -> None:
         stop.set()
         if heartbeat_task is not None:
             heartbeat_task.cancel()
-        await _finalize(channel, harness, workspace, memory, started_at, stop_reason)
+        await _finalize(channel, harness, workspace, memory, gateway, started_at, stop_reason)
 
 
 def main() -> None:

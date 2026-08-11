@@ -25,6 +25,7 @@ Fixed design decisions:
 | `naxos-api` — /v1 REST + SSE, serves the UI static export | Cloud Run Service, IAP directly on Cloud Run (no LB) | min=0, request timeout 3600s (SSE) | `sa-api` |
 | `naxos-internal` — sandbox↔control-plane channel, scheduler targets, reconciler (same image as api, entrypoint flag) | Cloud Run Service, internal ingress, IAM auth | min=0 | `sa-api` |
 | `naxos-egress` — credential-substituting proxy for MCP/HTTP egress | Cloud Run Service, internal ingress, IAM auth | min=0 | `sa-egress` (sole secretAccessor on vault secrets) |
+| `naxos-mcp-{name}` — self-hosted connector: an unmodified upstream MCP server (Slack, Atlassian, Notion, Google Workspace) | Cloud Run Service, IAM auth, one per `connectors.json` entry | min=0, max=1 | `sa-mcp-{name}` (sole accessor of its own credential secrets) |
 | `naxos-sbx-{env}` — session sandbox: Claude Agent SDK loop + tools; one Job per environment, one execution per session wake | Cloud Run Job (`max_retries=0`, task timeout 3600s, self-checkpoint at ~55 min) | zero when idle | `sa-env-{env}` |
 | Deployment cron `naxos-deploy-{id}`; reconciler tick (1/min) | Cloud Scheduler | — | `sa-scheduler` |
 | State | Cloud SQL Postgres `db-g1-small`, private IP, Direct VPC egress from Cloud Run | always-on (the one fixed cost) | — |
@@ -91,9 +92,29 @@ Measured findings, all load-bearing:
 Credentials never enter the sandbox:
 
 - `POST /v1/vaults/{id}/credentials` writes the secret value straight to Secret Manager. Postgres stores metadata and the secret ref only; values are write-only and never returned by the API.
-- Agent config declares MCP servers by their real URL. The sandbox's resolved config rewrites MCP URLs to `naxos-egress` with an opaque route token. The proxy authenticates the caller (OIDC; the SA must match the session's environment), resolves session → vault_ids → credential matched by target URL, injects the Authorization/header, and forwards to the real server.
-- Env-var-style credentials for CLIs: the sandbox env carries an opaque placeholder; the proxy substitutes it in request headers for declared HTTP targets routed through it. Transparent interception of arbitrary egress is out of scope — bash traffic not routed through the proxy simply has no credential. This limitation is documented, not hidden.
+- Agent config declares MCP servers by their real URL. The sandbox's resolved config rewrites MCP URLs to `naxos-egress` with an opaque route token. The proxy authenticates the caller (OIDC; the SA must match the session's environment), resolves session → vault_ids → credential matched by target URL, injects the Authorization/header, and forwards to the real server. Route tokens are re-minted on every wake and deleted when the session terminates.
 - Only `sa-egress` holds `secretAccessor` on vault secrets. Environment SAs hold none.
+- Transparent interception of arbitrary egress is out of scope — bash traffic not routed through the proxy simply has no credential. This limitation is documented, not hidden. Credentials therefore have one shape, `header`, applied to MCP traffic for a named server; an env-var placeholder form was specified but never had a substitution path, and is not accepted.
+- The proxy streams both directions (`httpx` streamed send → `StreamingResponse`) so MCP streamable-HTTP and SSE transports work; a buffering proxy stalls them.
+
+### 5.1 Connectors
+
+naxos ships no connector code. A connector is an existing MCP server, attached to an agent version's `mcp_servers`, reached one of two ways:
+
+| Shape | Path | Credential |
+|---|---|---|
+| `remote` | vendor-hosted MCP endpoint → `naxos-egress` rewrites the URL and injects the header | vault `header` credential targeting `{"mcp_server": name}` |
+| `hosted` | upstream OSS MCP server deployed as a scale-to-zero Cloud Run service in this project (`naxos-mcp-{name}`) | Secret Manager env refs on that service, readable only by its own SA |
+
+`hosted` connectors keep third-party server code and its credentials out of the sandbox entirely, and are how closed-network/internal systems are reached without egress to a vendor. Terraform owns the service shells and IAM (`terraform/connectors.json` → `for_each`, mirroring `environments.json`); `scripts/mirror_connectors.sh` mirrors the upstream images into Artifact Registry (Cloud Run cannot pull from Docker Hub/ghcr directly) and rolls the services. `run.invoker` per environment SA is the per-tenant access knob.
+
+The sandbox authenticates to both shapes through an in-process localhost forwarder (`naxos_sbx.mcp_gateway`): the SDK's MCP client cannot mint Google OIDC ID tokens, and a token attached once at wake would expire mid-burst, so the forwarder mints per request (audience = the Cloud Run service) and streams both directions. Any `*.run.app` MCP URL is routed through it; other URLs pass through untouched.
+
+`mcp_servers` entries are validated at agent-version create: `{type: http|sse, url, headers?}` only. stdio (`command`) configs are rejected — they would execute inside the sandbox with no egress rewriting and no credential model — as are the reserved names `artifacts` and `schedules`.
+
+Governance is unchanged by either shape: connector tools are ordinary `mcp__{server}__{tool}` calls, so permission globs, the `PreToolUse` approval gate, the kill switch and `audit.tool_calls` all apply. `GET /v1/connectors` serves the curated catalog (a `hosted` entry without a deployed service URL is listed unavailable).
+
+Deferred: OAuth authorization-code flows, refresh tokens, and per-end-user identity. Every connector runs as a single service identity, so SaaS-side audit attributes actions to that identity, not to the human who triggered the session — naxos's own audit still records the human principal. This rules out the OAuth-only hosted endpoints (Atlassian's and Notion's) in favour of self-hosting those servers.
 
 ## 6. Data model
 
@@ -296,6 +317,8 @@ PATCH  /v1/agents/{id}                     {disabled: bool}    -- kill switch (e
 POST   /v1/environments                    register; 409 until Terraform-provisioned (deviation)
 GET    /v1/environments[/{id}] · POST /v1/environments/{id}/archive
 
+GET    /v1/connectors                      curated MCP connector catalog (§5.1)
+
 POST   /v1/sessions                        {agent: {id, version?} | agent_with_overrides,
                                             initial_events?, budget?, vault_ids?,
                                             memory_store_ids?, resources?}
@@ -376,7 +399,8 @@ sandbox-runner/    Python + claude-agent-sdk: main, harness, permissions, budget
 egress-proxy/      credential-substituting proxy (FastAPI/httpx)
 shared/            pydantic event/config models used by all three
 ui/                Next.js static export, baked into the control-plane image
-terraform/         one root module; environments.json → for_each (SA, Job, bucket, IAM)
+terraform/         one root module; environments.json → for_each (SA, Job, bucket, IAM);
+                   connectors.json → for_each (self-hosted MCP service, SA, secrets, IAM)
 docs/              design docs (English)
 .github/workflows/ lint/test + WIF deploy loop
 ```
@@ -423,4 +447,6 @@ Known issues (non-blocking):
   1. **Data residency**: using Vertex at all means using the `global` endpoint — inference is not pinned to `asia-northeast1`. Accept, or keep model traffic off Vertex until a regional endpoint exists.
   2. **Unblocking**: file the Vertex quota-increase request now, since it gates the removal of the Anthropic API-key exception. Until then the key exception stays, and no real internal data may be connected.
 - Egress proxy covers MCP + declared HTTP targets only; arbitrary bash egress is credential-less (documented limitation).
+- **Connectors run as a service identity** (§5.1): no OAuth authorization-code flow, no per-end-user identity. In the SaaS's own audit log every action is attributed to one integration account, so "which human caused this" is answerable from naxos's audit but not from Slack's or Jira's. Revisit if per-user attribution becomes a requirement.
+- **Connector deployment is not yet verified live**: the egress round-trip with a real token, `hosted` connector cold-start latency inside a turn, and Google Workspace domain-wide delegation all need a deployed project and real credentials.
 - Memory versioning, outcomes, multiagent, webhooks: deferred; schema leaves room.

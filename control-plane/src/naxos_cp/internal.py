@@ -290,6 +290,8 @@ async def checkpoint(
         await store.set_status(
             conn, session_id, status, None if body.terminated else body.stop_reason
         )
+        if body.terminated:
+            await conn.execute("DELETE FROM egress_routes WHERE session_id = $1", session_id)
         created_by = row["created_by"] or ""
         await conn.execute(
             "INSERT INTO session_runs (id, session_id, agent_id, environment_id, trigger_type, "
