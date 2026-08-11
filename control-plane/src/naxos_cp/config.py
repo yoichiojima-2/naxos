@@ -4,6 +4,7 @@ PROJECT_ID = os.environ.get("GCLOUD_PROJECT_ID", "")
 REGION = os.environ.get("REGION", "asia-northeast1")
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost/naxos")
 
+DEV_MODE = os.environ.get("NAXOS_DEV_MODE", "") == "1"
 IAP_AUDIENCE = os.environ.get("IAP_AUDIENCE", "")
 ENFORCE_CALLER_AUTH = os.environ.get("ENFORCE_CALLER_AUTH", "") == "1"
 DEV_PRINCIPAL = os.environ.get("DEV_PRINCIPAL", "local-dev")

@@ -5,6 +5,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres@/naxos?host=/tmp&port=55432")
+os.environ.setdefault("NAXOS_DEV_MODE", "1")
 
 from naxos_cp import api, db, internal, wake
 

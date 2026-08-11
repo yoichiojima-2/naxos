@@ -2,13 +2,12 @@ import functools
 import logging
 from typing import Any
 
-import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from naxos_shared.events import EventIn
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import config, db, store, wake
+from . import config, db, sessions
 from .auth import principal_of
 
 log = logging.getLogger(__name__)
@@ -29,8 +28,13 @@ def _job_name(deployment_id: str) -> str:
 
 async def _create_scheduler_job(deployment_id: str, cron: str, timezone: str) -> str:
     if not config.INTERNAL_URL or not config.PROJECT_ID:
-        log.warning("scheduler not configured; deployment %s fires manually only", deployment_id)
-        return ""
+        if config.DEV_MODE:
+            log.warning(
+                "scheduler not configured; deployment %s fires manually only", deployment_id
+            )
+            return ""
+        raise HTTPException(503, "scheduler is not configured (INTERNAL_URL / project missing)")
+    from google.api_core.exceptions import AlreadyExists
     from google.cloud import scheduler_v1
 
     name = _job_name(deployment_id)
@@ -48,7 +52,10 @@ async def _create_scheduler_job(deployment_id: str, cron: str, timezone: str) ->
         ),
     )
     parent = f"projects/{config.PROJECT_ID}/locations/{config.REGION}"
-    await _scheduler_client().create_job(parent=parent, job=job)
+    try:
+        await _scheduler_client().create_job(parent=parent, job=job)
+    except AlreadyExists:
+        log.warning("scheduler job %s already exists; reusing it", name)
     return name
 
 
@@ -92,7 +99,6 @@ async def create_deployment(body: DeploymentIn, principal: str = Depends(princip
         if agent is None:
             raise HTTPException(404, "agent not found or archived")
         deployment_id = new_id("deployment")
-        job_name = await _create_scheduler_job(deployment_id, body.cron, body.timezone)
         row = await conn.fetchrow(
             "INSERT INTO deployments (id, agent_id, agent_version, name, cron, timezone, "
             "  initial_events, budget_usd, scheduler_job_name, created_by) "
@@ -105,9 +111,16 @@ async def create_deployment(body: DeploymentIn, principal: str = Depends(princip
             body.timezone,
             [e.model_dump(mode="json") for e in body.initial_events],
             body.budget_usd,
-            job_name,
+            "",
             principal,
         )
+        job_name = await _create_scheduler_job(deployment_id, body.cron, body.timezone)
+        if job_name:
+            row = await conn.fetchrow(
+                "UPDATE deployments SET scheduler_job_name = $2 WHERE id = $1 RETURNING *",
+                deployment_id,
+                job_name,
+            )
     return dict(row)
 
 
@@ -168,9 +181,7 @@ async def archive_deployment(deployment_id: str, _: str = Depends(principal_of))
 
 @router.post("/deployments/{deployment_id}/run", status_code=201)
 async def run_deployment(deployment_id: str, principal: str = Depends(principal_of)) -> dict:
-    async with db.transaction() as conn:
-        run = await fire(conn, deployment_id, trigger=f"manual:{principal}")
-    return run
+    return await fire(deployment_id, trigger=f"manual:{principal}")
 
 
 @router.get("/deployments/{deployment_id}/runs")
@@ -184,19 +195,10 @@ async def list_runs(deployment_id: str, _: str = Depends(principal_of)) -> dict:
     return {"data": [dict(r) for r in rows]}
 
 
-async def fire(conn: asyncpg.Connection, deployment_id: str, trigger: str) -> dict[str, Any]:
-    """Create one session from a deployment and record the attempt."""
-    run_id = new_id("deployment_run")
-    deployment = await conn.fetchrow(
-        "SELECT d.*, a.disabled, a.archived_at AS agent_archived, a.environment_id, "
-        "  a.latest_version "
-        "FROM deployments d JOIN agents a ON a.id = d.agent_id WHERE d.id = $1",
-        deployment_id,
-    )
-    if deployment is None:
-        raise HTTPException(404, "deployment not found")
-
-    async def failed(error_type: str, message: str) -> dict[str, Any]:
+async def _record_failure(
+    run_id: str, deployment_id: str, error_type: str, message: str
+) -> dict[str, Any]:
+    async with db.transaction() as conn:
         row = await conn.fetchrow(
             "INSERT INTO deployment_runs (id, deployment_id, status, error_type, error_message, "
             "  finished_at) VALUES ($1, $2, 'failed', $3, $4, now()) RETURNING *",
@@ -205,47 +207,54 @@ async def fire(conn: asyncpg.Connection, deployment_id: str, trigger: str) -> di
             error_type,
             message,
         )
-        return dict(row)
+    return dict(row)
 
-    if deployment["archived_at"] is not None:
-        return await failed("deployment_archived", "deployment is archived")
-    if deployment["agent_archived"] is not None:
-        return await failed("agent_archived", "agent is archived")
-    if deployment["disabled"]:
-        return await failed("agent_disabled", "agent is disabled (kill switch)")
 
-    version = deployment["agent_version"] or deployment["latest_version"]
-    session_id = new_id("session")
-    try:
-        await conn.execute(
-            "INSERT INTO sessions (id, agent_id, agent_version, environment_id, title, "
-            "  budget_usd, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            session_id,
-            deployment["agent_id"],
-            version,
-            deployment["environment_id"],
-            f"{deployment['name']} ({trigger})",
-            deployment["budget_usd"],
-            f"deployment:{deployment_id}",
-        )
-        for raw in deployment["initial_events"]:
-            event = EventIn.model_validate(raw)
-            await store.append_event(
-                conn,
-                session_id,
-                event.type,
-                event.model_dump(mode="json"),
-                f"deployment:{deployment_id}",
-            )
-        await wake.wake(conn, session_id)
-        row = await conn.fetchrow(
-            "INSERT INTO deployment_runs (id, deployment_id, session_id, status) "
-            "VALUES ($1, $2, $3, 'running') RETURNING *",
-            run_id,
+async def fire(deployment_id: str, trigger: str) -> dict[str, Any]:
+    """Create one session from a deployment and record the attempt."""
+    run_id = new_id("deployment_run")
+    async with db.transaction() as conn:
+        deployment = await conn.fetchrow(
+            "SELECT d.*, a.disabled, a.archived_at AS agent_archived "
+            "FROM deployments d JOIN agents a ON a.id = d.agent_id WHERE d.id = $1",
             deployment_id,
-            session_id,
         )
+    if deployment is None:
+        raise HTTPException(404, "deployment not found")
+    if deployment["archived_at"] is not None:
+        return await _record_failure(
+            run_id, deployment_id, "deployment_archived", "deployment is archived"
+        )
+    if deployment["agent_archived"] is not None:
+        return await _record_failure(run_id, deployment_id, "agent_archived", "agent is archived")
+    if deployment["disabled"]:
+        return await _record_failure(
+            run_id, deployment_id, "agent_disabled", "agent is disabled (kill switch)"
+        )
+
+    try:
+        async with db.transaction() as conn:
+            agent = await sessions.resolve_agent(
+                conn, deployment["agent_id"], deployment["agent_version"]
+            )
+            if agent is None:
+                raise LookupError("agent version not found")
+            session = await sessions.create(
+                conn,
+                agent,
+                initial_events=[EventIn.model_validate(raw) for raw in deployment["initial_events"]],
+                principal=f"deployment:{deployment_id}",
+                title=f"{deployment['name']} ({trigger})",
+                budget_usd=deployment["budget_usd"],
+            )
+            row = await conn.fetchrow(
+                "INSERT INTO deployment_runs (id, deployment_id, session_id, status) "
+                "VALUES ($1, $2, $3, 'running') RETURNING *",
+                run_id,
+                deployment_id,
+                session["id"],
+            )
         return dict(row)
     except Exception as exc:
         log.exception("deployment fire failed: %s", deployment_id)
-        return await failed("infra_error", str(exc)[:500])
+        return await _record_failure(run_id, deployment_id, "infra_error", str(exc)[:500])

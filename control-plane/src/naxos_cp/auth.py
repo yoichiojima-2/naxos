@@ -13,9 +13,11 @@ _request = google_requests.Request()
 
 
 def principal_of(request: Request) -> str:
-    """Verified IAP identity, or the dev principal when IAP is not configured."""
+    """Verified IAP identity, or the dev principal in explicit dev mode."""
     if not config.IAP_AUDIENCE:
-        return config.DEV_PRINCIPAL
+        if config.DEV_MODE:
+            return config.DEV_PRINCIPAL
+        raise HTTPException(500, "IAP_AUDIENCE is not configured and NAXOS_DEV_MODE is not set")
     assertion = request.headers.get("x-goog-iap-jwt-assertion")
     if not assertion:
         raise HTTPException(401, "missing IAP assertion")

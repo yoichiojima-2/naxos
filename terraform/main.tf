@@ -377,6 +377,16 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "EGRESS_SA"
         value = google_service_account.egress.email
       }
+      env {
+        name  = "INTERNAL_URL"
+        value = google_cloud_run_v2_service.internal.uri
+      }
+      # Audience of the IAP JWT for IAP enabled directly on Cloud Run v2.
+      # Verify against a live x-goog-iap-jwt-assertion before relying on it.
+      env {
+        name  = "IAP_AUDIENCE"
+        value = length(var.iap_members) > 0 ? "/projects/${data.google_project.this.number}/locations/${var.region}/services/naxos-api" : ""
+      }
     }
   }
 

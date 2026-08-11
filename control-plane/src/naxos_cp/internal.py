@@ -370,8 +370,7 @@ async def egress_route(token: str, caller: str = Depends(caller_service_account)
 
 @router.post("/deployments/{deployment_id}/fire")
 async def fire_deployment(deployment_id: str, _: str = Depends(caller_service_account)) -> dict:
-    async with db.transaction() as conn:
-        return await deployments.fire(conn, deployment_id, trigger="schedule")
+    return await deployments.fire(deployment_id, trigger="schedule")
 
 
 @router.post("/reconcile")

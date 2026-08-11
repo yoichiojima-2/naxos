@@ -17,7 +17,7 @@ from naxos_shared.events import (
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
 
-from . import config, db, store, wake
+from . import config, db, sessions, store, wake
 from .auth import principal_of
 
 router = APIRouter(prefix="/v1")
@@ -237,44 +237,23 @@ class SessionIn(BaseModel):
 @router.post("/sessions", status_code=201)
 async def create_session(body: SessionIn, principal: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        agent = await conn.fetchrow(
-            "SELECT a.*, v.default_budget_usd, v.vault_ids, v.memory_store_ids "
-            "FROM agents a JOIN agent_versions v ON v.agent_id = a.id "
-            "  AND v.version = COALESCE($2, a.latest_version) "
-            "WHERE a.id = $1 AND a.archived_at IS NULL",
-            body.agent.id,
-            body.agent.version,
-        )
+        agent = await sessions.resolve_agent(conn, body.agent.id, body.agent.version)
         if agent is None:
             raise HTTPException(404, "agent or version not found")
         if agent["disabled"]:
             raise HTTPException(409, "agent is disabled")
-        version = body.agent.version or agent["latest_version"]
-        session_id = new_id("session")
-        await conn.execute(
-            "INSERT INTO sessions (id, agent_id, agent_version, environment_id, title, "
-            "  budget_usd, vault_ids, memory_store_ids, resources, created_by) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            session_id,
-            agent["id"],
-            version,
-            agent["environment_id"],
-            body.title,
-            body.budget_usd if body.budget_usd is not None else agent["default_budget_usd"],
-            body.vault_ids or list(agent["vault_ids"]),
-            body.memory_store_ids or list(agent["memory_store_ids"]),
-            body.resources,
-            principal,
+        row = await sessions.create(
+            conn,
+            agent,
+            initial_events=body.initial_events,
+            principal=principal,
+            title=body.title,
+            budget_usd=body.budget_usd,
+            vault_ids=body.vault_ids or None,
+            memory_store_ids=body.memory_store_ids or None,
+            resources=body.resources or None,
         )
-        for event in body.initial_events:
-            event.validate_for_send()
-            await store.append_event(
-                conn, session_id, event.type, event.model_dump(mode="json"), principal
-            )
-        if body.initial_events:
-            await wake.wake(conn, session_id)
-        out = dict(await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id))
-    return out
+    return dict(row)
 
 
 @router.get("/sessions")
