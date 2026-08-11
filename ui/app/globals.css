@@ -240,6 +240,24 @@ tr.click:hover td { background: var(--bg); }
 }
 .event.prose pre { font-family: var(--sans); font-size: 16px; line-height: 1.6; }
 
+.event.fold { padding-top: 2px; padding-bottom: 2px; }
+.event.fold summary, .event.fold .fold-line {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--muted); font-size: 14px; list-style: none;
+}
+.event.fold summary { cursor: pointer; user-select: none; }
+.event.fold summary::-webkit-details-marker { display: none; }
+.event.fold summary::before, .event.fold .fold-line::before {
+  content: "\25B8"; font-size: 11px; color: var(--faint);
+  transition: transform 0.15s;
+}
+.event.fold .fold-line::before { visibility: hidden; }
+.event.fold details[open] > summary::before { transform: rotate(90deg); }
+.event.fold pre {
+  background: var(--panel2); border-radius: 10px; padding: 10px 12px;
+  margin-top: 6px; max-height: 320px; overflow-y: auto;
+}
+
 .event .md { margin-top: 4px; font-size: 16px; line-height: 1.6; }
 .event .md > :first-child { margin-top: 0; }
 .event .md > :last-child { margin-bottom: 0; }
