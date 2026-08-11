@@ -18,8 +18,10 @@ def _config(**overrides) -> SessionConfig:
     return SessionConfig.model_validate({**base, **overrides})
 
 
-def _harness(config: SessionConfig, channel=None) -> Harness:
-    return Harness(channel or SimpleNamespace(session_id="session_x"), config, "/tmp")
+def _harness(config: SessionConfig, channel=None, plugin_dir=None) -> Harness:
+    return Harness(
+        channel or SimpleNamespace(session_id="session_x"), config, "/tmp", plugin_dir=plugin_dir
+    )
 
 
 def test_main_module_imports():
@@ -38,20 +40,27 @@ def test_options_empty_tools_means_unrestricted():
     assert _harness(_config()).options().allowed_tools == []
 
 
-def test_options_skills_enable_project_settings_and_skill_tool():
-    options = _harness(_config(tools=["Bash"], skill_names=["deploy-helper"])).options()
-    assert options.setting_sources == ["project"]
-    assert options.allowed_tools == ["Bash", "Skill"]
+def test_options_mount_skills_as_local_plugin():
+    options = _harness(
+        _config(tools=["Bash"], skill_names=["deploy-helper"]), plugin_dir="/plugin"
+    ).options()
+    assert options.plugins == [{"type": "local", "path": "/plugin"}]
+    assert options.skills == ["naxos:deploy-helper"]
+    assert options.allowed_tools == ["Bash"]
 
 
-def test_options_skills_keep_empty_allowlist_unrestricted():
-    options = _harness(_config(tools=[], skill_names=["deploy-helper"])).options()
-    assert options.setting_sources == ["project"]
-    assert options.allowed_tools == []
+def test_options_always_isolate_filesystem_settings():
+    # setting_sources=[] is the governance guarantee: agent-writable workspace
+    # settings (hooks, permissions) are never loaded, skills or not.
+    assert _harness(_config(tools=["Bash"])).options().setting_sources == []
+    with_skills = _harness(_config(skill_names=["x"]), plugin_dir="/plugin").options()
+    assert with_skills.setting_sources == []
 
 
-def test_options_without_skills_load_no_setting_sources():
-    assert _harness(_config(tools=["Bash"])).options().setting_sources is None
+def test_options_without_skills_load_no_plugin():
+    options = _harness(_config(tools=["Bash"]), plugin_dir="/plugin").options()
+    assert options.plugins == []
+    assert options.skills is None
 
 
 def test_cost_accumulates_on_top_of_prior_bursts():

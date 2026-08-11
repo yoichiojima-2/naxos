@@ -1,12 +1,16 @@
 CREATE TABLE skills (
     id          text PRIMARY KEY,
-    name        text NOT NULL UNIQUE,
+    name        text NOT NULL,
     description text,
     archived_at timestamptz,
     created_by  text,
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- archived skills keep their row (sessions may still reference the id) but
+-- release the name for reuse
+CREATE UNIQUE INDEX skills_active_name ON skills (name) WHERE archived_at IS NULL;
 
 CREATE TABLE skill_files (
     id         text PRIMARY KEY,

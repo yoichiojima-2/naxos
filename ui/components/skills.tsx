@@ -44,6 +44,9 @@ export default function Skills() {
 
   async function save() {
     if (!editing) return;
+    const clash =
+      editing.isNew && (files[editing.skillId] ?? []).some((f) => f.path === editing.path);
+    if (clash && !window.confirm(`"${editing.path}" already exists. Overwrite it?`)) return;
     await api(`/v1/skills/${editing.skillId}/files`, {
       json: { path: editing.path, content: editing.content },
     });

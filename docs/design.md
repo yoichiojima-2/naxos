@@ -175,16 +175,24 @@ same way memory stores and vaults are. `agent_versions.skill_ids` attaches
 skills to an agent; sessions copy the list at creation (overridable per
 session, like vaults and memory).
 
-- **Mount**: the sandbox materialises the session's skills under
-  `ws/.claude/skills/{name}/` on every wake (internal `GET
-  /sessions/{id}/skills`) and enables `setting_sources=["project"]` so the SDK
-  discovers them; the `Skill` tool is appended to the allowlist when the agent
-  restricts tools. A skill is mounted only if it is unarchived and has a
-  `SKILL.md`.
+- **Mount**: the sandbox materialises the session's skills as a **local
+  plugin** (`--plugin-dir`; skill names surface as `naxos:{name}`) in a
+  directory *outside* the checkpointed workspace, fetched from internal `GET
+  /sessions/{id}/skills` on every wake. A skill is mounted only if it is
+  unarchived and has a `SKILL.md`.
+- **Settings isolation**: the harness always runs the SDK with
+  `setting_sources=[]`. The SDK's default loads `.claude/settings.json` from
+  the cwd — which is the agent-writable, checkpoint-persisted workspace — and
+  settings can register hooks that execute outside the tool gate. Isolation
+  mode closes that hole; skills mount via the plugin mechanism instead of
+  project settings for the same reason.
 - **Read-only from the sandbox** — deliberate deviation from memory: there is
-  no skill writeback path, and the mount tree is rebuilt from Postgres on every
-  wake, so a prompt-injected agent cannot poison a skill shared by every other
-  agent. Skills change only through the API, by a human principal.
+  no skill writeback path, the plugin tree is outside the workspace checkpoint,
+  and it is rebuilt before every SDK turn, so a prompt-injected agent cannot
+  poison a skill shared by every other agent — even within its own session.
+  Skills change only through the API, by a human principal. Skill file paths
+  are validated control-plane-side (relative, no `..`/empty segments) and the
+  sandbox skips any file that would land outside its skill directory.
 - **Governance unchanged**: `Skill` invocations pass through the same
   `PreToolUse` gate as every other tool call — the permission policy and kill
   switch apply, and the call lands in `audit.tool_calls`.

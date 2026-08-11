@@ -125,7 +125,7 @@ async def session_config(session_id: str, caller: str = Depends(caller_service_a
         mcp_servers = await _resolve_egress(
             conn, session_id, list(row["vault_ids"] or []), version["mcp_servers"] or {}
         )
-        skill_names = await _mountable_skills(conn, list(row["skill_ids"] or []))
+        mountable = await _mountable_skills(conn, list(row["skill_ids"] or []))
     return SessionConfig(
         session_id=session_id,
         agent_id=row["agent_id"],
@@ -136,7 +136,7 @@ async def session_config(session_id: str, caller: str = Depends(caller_service_a
         tools=list(version["tools"] or []),
         permission_policy=PermissionPolicy.model_validate(version["permission_policy"] or {}),
         mcp_servers=mcp_servers,
-        skill_names=skill_names,
+        skill_names=[s["name"] for s in mountable],
         session_bucket=row["session_bucket"],
         sdk_session_id=row["sdk_session_id"],
         budget_usd=float(row["budget_usd"]) if row["budget_usd"] is not None else None,
@@ -307,43 +307,35 @@ async def checkpoint(
     return {"ok": True}
 
 
-async def _mountable_skills(conn, skill_ids: list[str]) -> list[str]:
-    """Names of the session's skills that are unarchived and have a SKILL.md."""
+async def _mountable_skills(conn, skill_ids: list[str]) -> list[Any]:
+    """(id, name) of the session's skills that are unarchived and have a SKILL.md."""
     if not skill_ids:
         return []
-    rows = await conn.fetch(
-        "SELECT s.name FROM skills s WHERE s.id = ANY($1) AND s.archived_at IS NULL "
+    return await conn.fetch(
+        "SELECT s.id, s.name FROM skills s WHERE s.id = ANY($1) AND s.archived_at IS NULL "
         "  AND EXISTS (SELECT 1 FROM skill_files f "
         "    WHERE f.skill_id = s.id AND f.path = 'SKILL.md') "
         "ORDER BY s.name",
         skill_ids,
     )
-    return [r["name"] for r in rows]
 
 
 @router.get("/sessions/{session_id}/skills")
 async def session_skills(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
-    """Skill files to materialise under the workspace, read-only for the agent:
+    """Skill files to materialise in the sandbox, read-only for the agent:
     edits are discarded at the next wake, writeback exists only for memory."""
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
-        skills: dict[str, dict[str, Any]] = {}
-        for skill_id in row["skill_ids"] or []:
-            skill = await conn.fetchrow(
-                "SELECT name FROM skills WHERE id = $1 AND archived_at IS NULL "
-                "  AND EXISTS (SELECT 1 FROM skill_files f "
-                "    WHERE f.skill_id = skills.id AND f.path = 'SKILL.md')",
-                skill_id,
-            )
-            if skill is None:
-                continue
-            files = await conn.fetch(
-                "SELECT path, content FROM skill_files WHERE skill_id = $1", skill_id
-            )
-            skills[skill_id] = {
-                "name": skill["name"],
-                "files": {f["path"]: f["content"] for f in files},
-            }
+        mountable = await _mountable_skills(conn, list(row["skill_ids"] or []))
+        skills: dict[str, dict[str, Any]] = {
+            s["id"]: {"name": s["name"], "files": {}} for s in mountable
+        }
+        files = await conn.fetch(
+            "SELECT skill_id, path, content FROM skill_files WHERE skill_id = ANY($1)",
+            list(skills),
+        )
+        for f in files:
+            skills[f["skill_id"]]["files"][f["path"]] = f["content"]
     return {"skills": skills}
 
 
@@ -379,6 +371,10 @@ async def session_memory_writeback(
             if store_id not in allowed:
                 continue
             for path, content in files.items():
+                segments = str(path).split("/")
+                if ".." in segments or "" in segments:
+                    log.warning("memory writeback skipped, unsafe path %s/%s", store_id, path)
+                    continue
                 if content is None:
                     await conn.execute(
                         "DELETE FROM memories WHERE store_id = $1 AND path = $2",

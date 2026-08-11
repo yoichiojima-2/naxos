@@ -1,3 +1,4 @@
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from naxos_shared.ids import new_id
 from pydantic import BaseModel, Field
@@ -8,6 +9,10 @@ from .auth import principal_of
 router = APIRouter(prefix="/v1")
 
 SKILL_ENTRY = "SKILL.md"
+READY = (
+    f"EXISTS (SELECT 1 FROM skill_files f "
+    f"  WHERE f.skill_id = s.id AND f.path = '{SKILL_ENTRY}') AS ready"
+)
 
 
 class SkillIn(BaseModel):
@@ -18,17 +23,17 @@ class SkillIn(BaseModel):
 @router.post("/skills", status_code=201)
 async def create_skill(body: SkillIn, principal: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        existing = await conn.fetchval("SELECT 1 FROM skills WHERE name = $1", body.name)
-        if existing:
-            raise HTTPException(409, "skill name already exists")
-        row = await conn.fetchrow(
-            "INSERT INTO skills (id, name, description, created_by) "
-            "VALUES ($1, $2, $3, $4) RETURNING *",
-            new_id("skill"),
-            body.name,
-            body.description,
-            principal,
-        )
+        try:
+            row = await conn.fetchrow(
+                "INSERT INTO skills (id, name, description, created_by) "
+                "VALUES ($1, $2, $3, $4) RETURNING *",
+                new_id("skill"),
+                body.name,
+                body.description,
+                principal,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(409, "an active skill with that name already exists") from None
     return dict(row)
 
 
@@ -36,10 +41,7 @@ async def create_skill(body: SkillIn, principal: str = Depends(principal_of)) ->
 async def list_skills(_: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch(
-            "SELECT s.*, EXISTS (SELECT 1 FROM skill_files f "
-            "  WHERE f.skill_id = s.id AND f.path = $1) AS ready "
-            "FROM skills s WHERE s.archived_at IS NULL ORDER BY s.name",
-            SKILL_ENTRY,
+            f"SELECT s.*, {READY} FROM skills s WHERE s.archived_at IS NULL ORDER BY s.name"
         )
     return {"data": [dict(r) for r in rows]}
 
@@ -47,7 +49,7 @@ async def list_skills(_: str = Depends(principal_of)) -> dict:
 @router.get("/skills/{skill_id}")
 async def get_skill(skill_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
-        row = await conn.fetchrow("SELECT * FROM skills WHERE id = $1", skill_id)
+        row = await conn.fetchrow(f"SELECT s.*, {READY} FROM skills s WHERE s.id = $1", skill_id)
     if row is None:
         raise HTTPException(404, "skill not found")
     return dict(row)
@@ -74,8 +76,9 @@ async def put_file(
 ) -> dict:
     if len(body.content.encode()) > config.MAX_MEMORY_BYTES:
         raise HTTPException(413, "skill file exceeds 64KB")
-    if ".." in body.path.split("/"):
-        raise HTTPException(400, "path may not contain ..")
+    segments = body.path.split("/")
+    if ".." in segments or "" in segments:
+        raise HTTPException(400, "path must be relative with no empty or .. segments")
     async with db.transaction() as conn:
         skill = await conn.fetchval(
             "SELECT 1 FROM skills WHERE id = $1 AND archived_at IS NULL", skill_id
@@ -101,7 +104,7 @@ async def put_file(
 async def list_files(skill_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch(
-            "SELECT id, skill_id, path, length(content) AS size, updated_by, updated_at "
+            "SELECT id, skill_id, path, octet_length(content) AS size, updated_by, updated_at "
             "FROM skill_files WHERE skill_id = $1 ORDER BY path",
             skill_id,
         )

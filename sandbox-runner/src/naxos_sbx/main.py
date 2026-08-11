@@ -126,9 +126,10 @@ async def run_session(session_id: str) -> None:
         workspace.restore()
         memory = MemorySync(channel, workspace.ws)
         await memory.materialise()
-        await SkillsSync(channel, workspace.ws).materialise()
+        skills = SkillsSync(channel, workspace.root / "skills-plugin")
+        await skills.materialise()
         heartbeat_task = asyncio.create_task(_heartbeat(channel, stop))
-        harness = Harness(channel, config, str(workspace.ws))
+        harness = Harness(channel, config, str(workspace.ws), plugin_dir=str(skills.root))
 
         idle_since: float | None = None
         carry: list[dict] = []
@@ -153,6 +154,7 @@ async def run_session(session_id: str) -> None:
                 continue
             idle_since = None
             harness.interrupted = False
+            skills.refresh()
             watcher = asyncio.create_task(_watch_queue(channel, harness, carry))
             try:
                 stop_reason = await harness.run(prompts)
