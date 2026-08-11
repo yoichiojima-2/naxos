@@ -1,6 +1,6 @@
 import pytest
 
-from naxos_cp import vaults
+from naxos_cp import skills, vaults
 
 from .test_session_flow import make_agent
 
@@ -466,7 +466,7 @@ async def test_skill_round_trip_and_validation(client):
 
     too_big = await client.post(
         f"/v1/skills/{skill['id']}/files",
-        json={"path": "big.md", "content": "x" * (64 * 1024 + 1)},
+        json={"path": "big.md", "content": "x" * (256 * 1024 + 1)},
     )
     assert too_big.status_code == 413
 
@@ -485,6 +485,65 @@ async def test_skill_round_trip_and_validation(client):
 
     reused = await client.post("/v1/skills", json={"name": "deploy-helper"})
     assert reused.status_code == 201
+
+
+async def test_seed_samples_creates_once_and_never_overrides(pool, client, tmp_path):
+    folder = tmp_path / "bigquery"
+    (folder / "reference").mkdir(parents=True)
+    (folder / "SKILL.md").write_text(
+        '---\nname: bigquery\ndescription: "Query BigQuery."\n---\ndescription: not this one'
+    )
+    (folder / "reference" / "queries.md").write_text("recipes")
+    (folder / ".hidden").write_text("ignored")
+    (folder / "font.ttf").write_bytes(b"\x00\x01\xfe\xff")
+    (folder / "huge.md").write_text("x" * (256 * 1024 + 1))
+    (tmp_path / "no-entry").mkdir()
+
+    async with pool.acquire() as conn:
+        assert await skills.seed_samples(conn, tmp_path) == ["bigquery"]
+
+    listed = (await client.get("/v1/skills")).json()["data"]
+    assert [(s["name"], s["description"], s["ready"]) for s in listed] == [
+        ("bigquery", "Query BigQuery.", True)
+    ]
+    skill = listed[0]
+    files = (await client.get(f"/v1/skills/{skill['id']}/files")).json()["data"]
+    assert [f["path"] for f in files] == ["SKILL.md", "reference/queries.md"]
+
+    entry = next(f for f in files if f["path"] == "SKILL.md")
+    await client.post(
+        f"/v1/skills/{skill['id']}/files", json={"path": "SKILL.md", "content": "edited"}
+    )
+    async with pool.acquire() as conn:
+        assert await skills.seed_samples(conn, tmp_path) == []
+    kept = (await client.get(f"/v1/skills/{skill['id']}/files/{entry['id']}")).json()
+    assert kept["content"] == "edited"
+
+    await client.post(f"/v1/skills/{skill['id']}/archive")
+    async with pool.acquire() as conn:
+        assert await skills.seed_samples(conn, tmp_path) == []
+    assert (await client.get("/v1/skills")).json()["data"] == []
+
+
+def test_frontmatter_description_parsing():
+    assert skills._frontmatter_description("no frontmatter\ndescription: nope") is None
+    assert skills._frontmatter_description('---\ndescription: "quoted"\n---\n') == "quoted"
+    assert (
+        skills._frontmatter_description("---\ndescription: |-\n  two\n  lines\nlicense: x\n---\n")
+        == "two lines"
+    )
+    assert skills._frontmatter_description("---\nname: x\n---\ndescription: body") is None
+
+
+async def test_bundled_sample_skills_seed_from_the_repo(pool, client):
+    async with pool.acquire() as conn:
+        seeded = await skills.seed_samples(conn)
+    assert "bigquery" in seeded
+    listed = (await client.get("/v1/skills")).json()["data"]
+    bigquery = next(s for s in listed if s["name"] == "bigquery")
+    assert bigquery["ready"] is True
+    assert bigquery["created_by"] == "system:seed"
+    assert bigquery["description"].startswith("Query BigQuery")
 
 
 async def _make_skill(client, name: str, ready: bool = True) -> dict:

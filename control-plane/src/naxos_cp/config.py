@@ -24,6 +24,9 @@ MAX_WAKE_RETRIES = int(os.environ.get("MAX_WAKE_RETRIES", "3"))
 LEASE_TTL_SECONDS = int(os.environ.get("LEASE_TTL_SECONDS", "90"))
 MAX_EVENT_PAYLOAD_BYTES = 64 * 1024
 MAX_MEMORY_BYTES = 64 * 1024
+# Sized for the Anthropic sample skills: their largest reference files
+# (OOXML schemas) are ~240KB.
+MAX_SKILL_FILE_BYTES = int(os.environ.get("MAX_SKILL_FILE_BYTES", str(256 * 1024)))
 MAX_ARTIFACT_BYTES = int(os.environ.get("MAX_ARTIFACT_BYTES", str(10 * 1024 * 1024)))
 MAX_AGENT_DEPLOYMENTS = int(os.environ.get("MAX_AGENT_DEPLOYMENTS", "20"))
 MAX_AGENT_DEPLOYMENT_BUDGET_USD = float(os.environ.get("MAX_AGENT_DEPLOYMENT_BUDGET_USD", "10"))
