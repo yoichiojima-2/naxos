@@ -7,9 +7,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
-log = logging.getLogger(__name__)
-
 INTERNAL_URL = os.environ.get("INTERNAL_URL", "").rstrip("/")
+METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 ROUTE_CACHE_SECONDS = 60
 SECRET_CACHE_SECONDS = 300
 HOP_HEADERS = {"host", "connection", "transfer-encoding", "content-length", "authorization"}
@@ -64,14 +63,8 @@ async def healthz() -> dict:
     return {"ok": True}
 
 
-@app.api_route(
-    "/r/{token}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-)
-@app.api_route(
-    "/r/{token}/{path:path}",
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-)
+@app.api_route("/r/{token}", methods=METHODS)
+@app.api_route("/r/{token}/{path:path}", methods=METHODS)
 async def forward(token: str, request: Request, path: str = "") -> Response:
     route = await _route(token)
     secret = _secret(route["secret_ref"])

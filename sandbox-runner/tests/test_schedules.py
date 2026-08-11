@@ -1,10 +1,11 @@
 import json
-from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from naxos_sbx.schedules import ScheduleTools
+
+from .conftest import make_harness
 
 
 class _Channel:
@@ -97,21 +98,9 @@ async def test_control_plane_rejection_surfaces_as_tool_error():
 
 
 def test_harness_exposes_schedule_server_and_blocks_cli_cron_tools():
-    from naxos_shared.events import SessionConfig
+    from naxos_sbx.harness import SESSION_LOCAL_SCHEDULER_TOOLS
 
-    from naxos_sbx.harness import SESSION_LOCAL_SCHEDULER_TOOLS, Harness
-
-    config = SessionConfig.model_validate(
-        {
-            "session_id": "session_x",
-            "agent_id": "agent_x",
-            "agent_version": 1,
-            "environment_id": "env_x",
-            "model": "claude-sonnet-5",
-            "session_bucket": "bucket-x",
-        }
-    )
-    options = Harness(SimpleNamespace(session_id="session_x"), config, "/tmp").options()
+    options = make_harness().options()
     assert "schedules" in options.mcp_servers
     assert options.disallowed_tools == SESSION_LOCAL_SCHEDULER_TOOLS
     assert "CronCreate" in options.disallowed_tools

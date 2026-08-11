@@ -13,10 +13,10 @@ def text(message: str) -> dict[str, Any]:
 
 
 def error(message: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": message}], "is_error": True}
+    return {**text(message), "is_error": True}
 
 
-def guarded(handler, noun: str = "tool"):
+def guarded(handler, noun: str):
     async def wrapped(args: dict[str, Any]) -> dict[str, Any]:
         try:
             return await handler(args)

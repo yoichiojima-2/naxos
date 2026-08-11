@@ -44,7 +44,7 @@ class Workspace:
             area, _, tail = relative.partition("/")
             if not tail:
                 continue
-            base = self.ws if area == "ws" else CLAUDE_CONFIG_DIR if area == "transcript" else None
+            base = {"ws": self.ws, "transcript": CLAUDE_CONFIG_DIR}.get(area)
             if base is None:
                 continue
             target = base / tail

@@ -31,7 +31,5 @@ def call_hash(tool_name: str, tool_input: dict) -> str:
     tool_use_id is regenerated when the SDK replays a pending call after resume,
     so approval decisions are keyed on the call's content instead.
     """
-    canonical = json.dumps(
-        tool_input, sort_keys=True, separators=(",", ":"), default=str
-    )
+    canonical = json.dumps(tool_input, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(f"{tool_name}\n{canonical}".encode()).hexdigest()

@@ -115,6 +115,10 @@ class Harness:
 
     # --- permission gate --------------------------------------------------
 
+    def _interrupt_client(self) -> None:
+        if self._client is not None:
+            asyncio.create_task(self._client.interrupt())
+
     async def _pre_tool_use(self, hook_input, tool_use_id, context):
         tool_name = hook_input.get("tool_name", "")
         tool_input = hook_input.get("tool_input", {}) or {}
@@ -137,8 +141,7 @@ class Harness:
             self.paused_call = call
             self._queue(EventType.AGENT_TOOL_USE, {**call, "decision": "awaiting_confirmation"})
             await self.flush()
-            if self._client is not None:
-                asyncio.create_task(self._client.interrupt())
+            self._interrupt_client()
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -151,7 +154,8 @@ class Harness:
             }
 
         allowed = decision == "allow"
-        if verdict.get("killed"):
+        killed = bool(verdict.get("killed"))
+        if killed:
             label = "killed"
         elif not allowed:
             label = "not_allowed" if verdict.get("by") == "policy" else "user_denied"
@@ -160,10 +164,9 @@ class Harness:
         else:
             label = "auto_allowed"
         self._queue(EventType.AGENT_TOOL_USE, {**call, "decision": label})
-        if verdict.get("killed"):
+        if killed:
             self.killed = True
-            if self._client is not None:
-                asyncio.create_task(self._client.interrupt())
+            self._interrupt_client()
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",

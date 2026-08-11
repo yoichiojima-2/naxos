@@ -1,23 +1,11 @@
 import json
 
 import pytest
-from naxos_shared.events import SessionConfig
 
 from naxos_sbx import artifacts
 from naxos_sbx.artifacts import ArtifactTools
 
-
-def _config() -> SessionConfig:
-    return SessionConfig.model_validate(
-        {
-            "session_id": "session_x",
-            "agent_id": "agent_x",
-            "agent_version": 1,
-            "environment_id": "env_x",
-            "model": "claude-sonnet-5",
-            "session_bucket": "bucket-x",
-        }
-    )
+from .conftest import make_config, make_harness
 
 
 class _Channel:
@@ -72,7 +60,7 @@ def uploads(monkeypatch):
 def tools(tmp_path, uploads):
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "report.md").write_text("# findings")
-    return ArtifactTools(_Channel(), _config(), tmp_path)
+    return ArtifactTools(_Channel(), make_config(), tmp_path)
 
 
 async def test_create_uploads_and_registers(tools, uploads):
@@ -136,10 +124,5 @@ async def test_share_and_unshare(tools):
 
 
 def test_harness_exposes_artifact_server():
-    from types import SimpleNamespace
-
-    from naxos_sbx.harness import Harness
-
-    harness = Harness(SimpleNamespace(session_id="session_x"), _config(), "/tmp")
-    options = harness.options()
+    options = make_harness().options()
     assert "artifacts" in options.mcp_servers
