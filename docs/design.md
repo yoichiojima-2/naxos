@@ -109,7 +109,9 @@ agents (id, name, environment_id, latest_version, disabled, archived_at,
 agent_versions (agent_id, version, PRIMARY KEY (agent_id, version),
         instructions, model, tools jsonb, permission_policy jsonb,
         vault_ids text[], memory_store_ids text[],
-        default_budget_usd numeric, max_turns int, created_by, created_at)
+        default_budget_usd numeric, max_turns int,
+        effort text CHECK IN ('low','medium','high','xhigh','max'),
+        created_by, created_at)
 
 sessions (id, agent_id, agent_version, overrides jsonb, environment_id,
         status CHECK IN ('idle','running','rescheduling','terminated'),

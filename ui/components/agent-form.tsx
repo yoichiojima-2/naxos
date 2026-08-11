@@ -171,7 +171,8 @@ export default function AgentForm({
       </select>
       <p className="hint">
         How much reasoning the model spends per response. Lower is faster and
-        cheaper; higher is more thorough.
+        cheaper; higher is more thorough. Only some models accept an effort
+        setting — leave it on model default if unsure.
       </p>
 
       {(editing || environments.length > 1) && (
