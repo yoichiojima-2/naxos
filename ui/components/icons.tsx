@@ -40,6 +40,13 @@ export const MemoryIcon = () => (
   </svg>
 );
 
+export const DocsIcon = () => (
+  <svg {...base}>
+    <path d="M12 6.5c-1.4-1.3-3.3-2-5.5-2H4.5v13h2c2.2 0 4.1.7 5.5 2 1.4-1.3 3.3-2 5.5-2h2v-13h-2c-2.2 0-4.1.7-5.5 2z" />
+    <path d="M12 6.5v13" />
+  </svg>
+);
+
 export const BackIcon = () => (
   <svg {...base}>
     <path d="M14.5 6 8.5 12l6 6" />
