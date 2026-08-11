@@ -37,6 +37,6 @@ jobs:
       - working-directory: control-plane
         run: uv run pytest -q
       - working-directory: sandbox-runner
-        run: uv sync --frozen && uv run python -c "import naxos_sbx.main"
+        run: uv sync --frozen --group dev && uv run pytest -q
       - working-directory: egress-proxy
         run: uv sync --frozen && uv run python -c "import naxos_egress.main"

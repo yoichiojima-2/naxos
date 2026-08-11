@@ -14,7 +14,7 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     UserMessage,
 )
-from naxos_shared.events import EventType, StopReason
+from naxos_shared.events import EventType, SessionConfig, StopReason
 from naxos_shared.ids import call_hash
 
 from .control import ControlChannel
@@ -39,14 +39,15 @@ class Harness:
     can_use_tool, so it cannot gate every call.
     """
 
-    def __init__(self, channel: ControlChannel, config: dict[str, Any], cwd: str) -> None:
+    def __init__(self, channel: ControlChannel, config: SessionConfig, cwd: str) -> None:
         self.channel = channel
         self.config = config
         self.cwd = cwd
         self.run_id = os.environ.get("CLOUD_RUN_EXECUTION", channel.session_id)
         self.pending: list[dict[str, Any]] = []
-        self.sdk_session_id: str | None = config.get("sdk_session_id")
-        self.cost_usd: float = float(config.get("cost_usd") or 0.0)
+        self.sdk_session_id: str | None = config.sdk_session_id
+        self.initial_cost_usd: float = float(config.cost_usd or 0.0)
+        self.cost_usd: float = self.initial_cost_usd
         self.stop_reason = StopReason.END_TURN
         self.paused_call: dict[str, Any] | None = None
         self._client: ClaudeSDKClient | None = None
@@ -118,6 +119,14 @@ class Harness:
             }
 
         allowed = decision == "allow"
+        if verdict.get("killed"):
+            label = "killed"
+        elif not allowed:
+            label = "user_denied"
+        elif verdict.get("by") == "user":
+            label = "user_allowed"
+        else:
+            label = "auto_allowed"
         self._queue(
             EventType.AGENT_TOOL_USE,
             {
@@ -125,7 +134,7 @@ class Harness:
                 "input": tool_input,
                 "tool_use_id": tool_use_id,
                 "call_hash": digest,
-                "decision": "auto_allowed" if allowed else "user_denied",
+                "decision": label,
             },
         )
         if verdict.get("killed"):
@@ -145,18 +154,24 @@ class Harness:
     def options(self) -> ClaudeAgentOptions:
         return ClaudeAgentOptions(
             cwd=self.cwd,
-            system_prompt=self.config.get("instructions"),
-            model=self.config.get("model"),
-            mcp_servers=self.config.get("mcp_servers") or {},
-            allowed_tools=self.config.get("tools") or [],
-            max_turns=self.config.get("max_turns"),
+            system_prompt=self.config.instructions,
+            model=self.config.model,
+            mcp_servers=self.config.mcp_servers,
+            allowed_tools=self.config.tools,
+            max_turns=self.config.max_turns,
             resume=self.sdk_session_id,
             hooks={"PreToolUse": [HookMatcher(hooks=[self._pre_tool_use])]},
         )
 
     def _budget_exhausted(self) -> bool:
-        budget = self.config.get("budget_usd")
+        budget = self.config.budget_usd
         return budget is not None and self.cost_usd >= float(budget)
+
+    def _accumulate_cost(self, total_cost_usd: float | None) -> None:
+        # The SDK's counter covers this burst only and resets on resume, while
+        # sessions.cost_usd accumulates across bursts.
+        if total_cost_usd is not None:
+            self.cost_usd = self.initial_cost_usd + float(total_cost_usd)
 
     async def run(self, prompts: list[str]) -> StopReason:
         if self._budget_exhausted():
@@ -208,7 +223,7 @@ class Harness:
                             },
                         )
             elif isinstance(message, ResultMessage):
-                self.cost_usd = float(message.total_cost_usd or self.cost_usd)
+                self._accumulate_cost(message.total_cost_usd)
                 self.num_turns += int(message.num_turns or 0)
                 self._queue(
                     EventType.SPAN_MODEL_REQUEST_END,

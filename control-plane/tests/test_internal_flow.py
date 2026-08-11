@@ -82,6 +82,7 @@ async def test_always_ask_pauses_then_resumes_after_confirmation(client, interna
         await internal_client.post(f"/internal/sessions/{sid}/permission", json=replay)
     ).json()
     assert second["decision"] == "allow"
+    assert second["by"] == "user"
 
 
 async def test_denied_call_stays_denied_across_replays(client, internal_client, launched):
@@ -114,6 +115,7 @@ async def test_denied_call_stays_denied_across_replays(client, internal_client, 
         )
     ).json()
     assert verdict["decision"] == "deny"
+    assert verdict["by"] == "user"
     assert verdict["reason"] == "not on production"
 
 
@@ -129,6 +131,7 @@ async def test_always_allow_needs_no_confirmation(client, internal_client, launc
         )
     ).json()
     assert verdict["decision"] == "allow"
+    assert verdict["by"] == "policy"
 
 
 async def test_kill_switch_denies_a_tool_call_mid_run(client, internal_client, launched):

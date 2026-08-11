@@ -218,12 +218,16 @@ async def permission(
             return {"decision": "deny", "reason": "agent disabled", "killed": True}
         policy = PermissionPolicy.model_validate(row["permission_policy"] or {})
         if policy.mode_for(body.tool_name) is PermissionMode.ALWAYS_ALLOW:
-            return {"decision": "allow"}
+            return {"decision": "allow", "by": "policy"}
         existing = await store.get_confirmation(conn, session_id, body.call_hash)
         if existing and existing["status"] == "allowed":
-            return {"decision": "allow"}
+            return {"decision": "allow", "by": "user"}
         if existing and existing["status"] == "denied":
-            return {"decision": "deny", "reason": existing["deny_message"] or "denied by operator"}
+            return {
+                "decision": "deny",
+                "by": "user",
+                "reason": existing["deny_message"] or "denied by operator",
+            }
         await store.upsert_confirmation(
             conn, session_id, body.call_hash, body.tool_name, body.input, body.tool_use_id
         )
