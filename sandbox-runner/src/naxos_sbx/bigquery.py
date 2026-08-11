@@ -58,12 +58,12 @@ def _access_token() -> str:
 
 
 def read_only_violation(sql: str) -> str | None:
-    body = STRING_RE.sub("''", COMMENT_RE.sub(" ", sql)).strip().rstrip(";").strip()
+    body = COMMENT_RE.sub(" ", STRING_RE.sub("''", sql)).strip().rstrip(";").strip()
     if not body:
         return "the query is empty"
     if ";" in body:
         return "multi-statement scripts are not allowed — send one statement at a time"
-    keyword = body.split(None, 1)[0].upper()
+    keyword = body.lstrip("( \t\r\n").split(None, 1)[0].upper()
     if keyword not in ("SELECT", "WITH"):
         return (
             f"only read-only SELECT queries are allowed, but this one starts with "
@@ -164,7 +164,7 @@ class BigQueryTools:
         self.datasets = datasets
         self.max_bytes_billed = max_bytes_billed
         self.max_rows = max_rows
-        self._location: str | None = None
+        self._locations: dict[str, str] = {}
 
     # --- transport --------------------------------------------------------
 
@@ -220,18 +220,21 @@ class BigQueryTools:
         Jobs against a regional dataset fail with a confusing 'not found in
         location US' unless the location travels with the request, and it has
         to be known before the dry run, so it cannot be read off the query.
+
+        Cached per dataset, not as a single answer: a dataset that failed to
+        resolve is retried on the next call rather than leaving every later
+        query without a location.
         """
-        if self._location is None:
-            found = set()
-            for dataset in self.datasets:
-                try:
-                    meta = await self.call("GET", f"/projects/{self.project}/datasets/{dataset}")
-                except BigQueryError:
-                    continue
-                if meta.get("location"):
-                    found.add(meta["location"])
-            self._location = found.pop() if len(found) == 1 else ""
-        return self._location or None
+        for dataset in self.datasets:
+            if dataset in self._locations:
+                continue
+            try:
+                meta = await self.call("GET", f"/projects/{self.project}/datasets/{dataset}")
+            except BigQueryError:
+                continue
+            self._locations[dataset] = meta.get("location", "")
+        found = {location for location in self._locations.values() if location}
+        return found.pop() if len(found) == 1 else None
 
     # --- tools ------------------------------------------------------------
 

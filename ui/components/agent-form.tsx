@@ -30,8 +30,8 @@ export const EFFORT_LEVELS: { id: EffortLevel; label: string }[] = [
 ];
 
 const BUILTIN_TOOLS = [
-  "Bash", "Read", "Write", "Edit", "Glob", "Grep",
-  "WebFetch", "WebSearch", "Task", "TodoWrite", "NotebookEdit",
+  "Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "Glob", "Grep",
+  "WebFetch", "WebSearch", "Task", "TodoWrite", "NotebookEdit", "Skill",
   // The platform's own sandbox tools. A restricted list covers these too, so
   // they have to be selectable; the BigQuery ones exist only in environments
   // an operator opted into BigQuery datasets.

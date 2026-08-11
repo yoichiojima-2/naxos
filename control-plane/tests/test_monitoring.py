@@ -85,3 +85,27 @@ async def test_summary_is_empty_without_activity(client):
     assert body["cost_by_day"] == []
     assert body["cost_by_agent"] == []
     assert body["deployment_runs"] == []
+
+
+async def test_denied_counter_includes_tools_blocked_by_the_agent_list(
+    client, internal_client, launched
+):
+    _, session = await start_session(client, launched, tools=["Read"])
+    sid = session["id"]
+    await internal_client.post(f"/internal/sessions/{sid}/claim")
+    await internal_client.get(f"/internal/sessions/{sid}/queue", params={"wait": 0})
+    await internal_client.post(
+        f"/internal/sessions/{sid}/events",
+        json={
+            "run_id": "run-1",
+            "events": [
+                {"type": "agent.tool_use", "payload": {"tool_name": "Bash", "decision": d}}
+                for d in ("not_allowed", "user_denied", "auto_allowed")
+            ],
+        },
+    )
+
+    usage = (await client.get("/v1/monitoring/summary")).json()["tool_usage"]
+    bash = next(row for row in usage if row["tool_name"] == "Bash")
+    assert bash["calls"] == 3
+    assert bash["denied"] == 2

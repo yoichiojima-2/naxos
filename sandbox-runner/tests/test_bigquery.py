@@ -16,8 +16,8 @@ class _Tools(BigQueryTools):
         super().__init__("naxos-503510", list(datasets), **kwargs)
         self.responses = list(responses or [])
         self.calls = []
-        # Pre-resolved so only the location test pays for the lookup.
-        self._location = ""
+        # Pre-resolved so only the location tests pay for the lookup.
+        self._locations = {dataset: "" for dataset in self.datasets}
 
     async def call(self, method, path, *, params=None, body=None):
         self.calls.append((method, path, params, body))
@@ -51,6 +51,8 @@ def _query_result(rows, fields, total=None, scanned="1024"):
         "SELECT 1;",
         "-- a comment\nSELECT 1",
         "SELECT 'a;b' AS s",
+        "(SELECT 1) UNION ALL (SELECT 2)",
+        "SELECT 1 -- don't stop",
     ],
 )
 def test_read_only_accepts_selects(sql):
@@ -63,6 +65,8 @@ def test_read_only_accepts_selects(sql):
         ("DELETE FROM t WHERE 1=1", "read-only"),
         ("CREATE TABLE t AS SELECT 1", "read-only"),
         ("SELECT 1; DROP TABLE t", "multi-statement"),
+        # A `--` inside a literal must not swallow the rest of the line.
+        ("SELECT '--' ; DELETE FROM analytics.events WHERE true", "multi-statement"),
         ("/* SELECT 1 */ UPDATE t SET a = 1", "read-only"),
         ("   ", "empty"),
     ],
@@ -217,6 +221,37 @@ async def test_query_polls_until_the_job_completes():
     assert tools.calls[2][2]["location"] == "asia-northeast1"
 
 
+async def test_location_is_not_cached_when_a_dataset_lookup_fails():
+    tools = _Tools(
+        [
+            BigQueryError("transient"),
+            {"location": "asia-northeast1"},
+            {"totalBytesProcessed": "1"},
+            _query_result([], []),
+        ],
+        datasets=["analytics"],
+    )
+    tools._locations = {}
+    assert await tools.location() is None
+    await tools.query({"query": "SELECT 1"})
+    assert tools.calls[2][3]["location"] == "asia-northeast1"
+
+
+async def test_location_is_omitted_when_datasets_span_regions():
+    tools = _Tools(
+        [
+            {"location": "asia-northeast1"},
+            {"location": "US"},
+            {"totalBytesProcessed": "1"},
+            _query_result([], []),
+        ],
+        datasets=["analytics", "sales"],
+    )
+    tools._locations = {}
+    await tools.query({"query": "SELECT 1"})
+    assert "location" not in tools.calls[2][3]
+
+
 async def test_location_resolves_from_the_readable_datasets_and_is_cached():
     tools = _Tools(
         [
@@ -227,7 +262,7 @@ async def test_location_resolves_from_the_readable_datasets_and_is_cached():
             _query_result([], []),
         ]
     )
-    tools._location = None
+    tools._locations = {}
     await tools.query({"query": "SELECT 1"})
     await tools.query({"query": "SELECT 1"})
     assert tools.calls[1][3]["location"] == "asia-northeast1"
