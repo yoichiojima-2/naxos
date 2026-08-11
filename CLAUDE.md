@@ -56,6 +56,7 @@ Single GCP project, `asia-northeast1`. Components:
 - Keep code simple: standard documented patterns over clever abstractions; no comments unless they state a constraint the code can't express.
 - Terraform owns topology (one root module, GCS state backend, no module abstraction): SAs, IAM, Cloud SQL, BigQuery, buckets, service/job shells, budget alerts. gcloud/CI owns image deploys and secret values. Scheduler jobs for deployments are created by the control plane (`sa-api` has a narrow custom Scheduler role), not Terraform.
 - Repo: `control-plane/` (FastAPI, entrypoints api|internal), `sandbox-runner/` (claude-agent-sdk harness), `egress-proxy/`, `shared/` (pydantic event/config models), `ui/` (Next.js static export), `terraform/`, `docs/`.
+- **Keep README.md in sync with the app.** When a change alters what the README describes — capabilities, layout, status — update it in the same change. The README's UI screenshots live in `docs/img/` (currently `sessions.png`, `session-timeline.png`); when the UI visibly changes what they show, retake them (run the UI, capture the same views at similar width, overwrite the same filenames) or, if you can't run the UI, flag the stale screenshot in your summary instead of leaving it silently outdated.
 
 ## Open issues
 
