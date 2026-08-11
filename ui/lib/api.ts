@@ -195,7 +195,7 @@ export type Artifact = {
   updated_at: string;
 };
 
-export type MemoryStore = { id: string; name: string };
+export type MemoryStore = { id: string; name: string; file_count?: number; used_by?: string[] };
 export type Memory = {
   id: string;
   path: string;

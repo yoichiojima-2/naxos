@@ -112,7 +112,7 @@ async def list_files(skill_id: str, _: str = Depends(principal_of)) -> dict:
     async with db.transaction() as conn:
         rows = await conn.fetch(
             "SELECT id, skill_id, path, octet_length(content) AS size, updated_by, updated_at "
-            "FROM skill_files WHERE skill_id = $1 ORDER BY path",
+            'FROM skill_files WHERE skill_id = $1 ORDER BY path COLLATE "C"',
             skill_id,
         )
     return {"data": [dict(r) for r in rows]}
