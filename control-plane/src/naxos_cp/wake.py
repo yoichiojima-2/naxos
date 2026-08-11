@@ -43,9 +43,12 @@ async def wake(conn: asyncpg.Connection, session_id: str) -> bool:
         log.warning("sandbox concurrency cap reached; %s stays queued", session_id)
         return False
 
+    # Emit session.status_rescheduling only on a real transition — re-wakes of a
+    # still-unclaimed session would otherwise append a duplicate event per attempt.
+    if row["status"] != str(SessionStatus.RESCHEDULING):
+        await store.set_status(conn, session_id, SessionStatus.RESCHEDULING)
     await conn.execute(
-        "UPDATE sessions SET status = 'rescheduling', retry_count = retry_count + 1, "
-        "updated_at = now() WHERE id = $1",
+        "UPDATE sessions SET retry_count = retry_count + 1, updated_at = now() WHERE id = $1",
         session_id,
     )
     execution = await sandbox.launch(row["sandbox_job_name"], session_id)

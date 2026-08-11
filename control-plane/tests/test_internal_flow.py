@@ -41,6 +41,26 @@ async def test_claim_is_exclusive_and_queue_delivers_once(client, internal_clien
     assert again["events"] == []
 
 
+async def test_warm_session_gets_no_rescheduling_event(client, internal_client, launched):
+    _, session = await start_session(client, launched)
+    sid = session["id"]
+    await internal_client.post(f"/internal/sessions/{sid}/claim")
+
+    await client.post(
+        f"/v1/sessions/{sid}/events",
+        json={"events": [{"type": "user.message", "content": [{"type": "text", "text": "more"}]}]},
+    )
+
+    types = [e["type"] for e in (await client.get(f"/v1/sessions/{sid}/events")).json()["data"]]
+    assert types == [
+        "user.message",
+        "session.status_rescheduling",
+        "session.status_running",
+        "user.message",
+    ]
+    assert [s for _, s in launched] == [sid]
+
+
 async def test_config_carries_resolved_agent_version(client, internal_client, launched):
     agent, session = await start_session(client, launched)
     await internal_client.post(f"/internal/sessions/{session['id']}/claim")
@@ -201,6 +221,7 @@ async def test_events_from_the_sandbox_land_on_the_stream(client, internal_clien
     types = [e["type"] for e in (await client.get(f"/v1/sessions/{sid}/events")).json()["data"]]
     assert types == [
         "user.message",
+        "session.status_rescheduling",
         "session.status_running",
         "agent.message",
         "agent.tool_use",

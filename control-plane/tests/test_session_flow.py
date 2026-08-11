@@ -58,8 +58,9 @@ async def test_session_with_initial_events_wakes_a_sandbox(client, launched):
     assert launched == [("naxos-sbx-default", session["id"])]
 
     events = (await client.get(f"/v1/sessions/{session['id']}/events")).json()["data"]
-    assert [e["type"] for e in events] == ["user.message"]
+    assert [e["type"] for e in events] == ["user.message", "session.status_rescheduling"]
     assert events[0]["processed_at"] is None
+    assert events[1]["processed_at"] is not None
 
 
 async def test_session_without_initial_events_starts_idle(client, launched):
@@ -142,10 +143,18 @@ async def test_sandbox_cap_counts_launched_but_unclaimed_sessions(client, launch
     assert second["status"] == "idle"
     assert [s for _, s in launched] == [first["id"]]
 
+    # A capped session gets no rescheduling event — it never left idle.
+    second_events = (await client.get(f"/v1/sessions/{second['id']}/events")).json()["data"]
+    assert [e["type"] for e in second_events] == ["user.message"]
+
     # A re-wake of the launched-but-unclaimed session must not count itself.
     async with db.transaction() as conn:
         assert await wake.wake(conn, first["id"]) is True
     assert [s for _, s in launched] == [first["id"], first["id"]]
+
+    # The re-wake was not a status transition, so no duplicate rescheduling event.
+    first_events = (await client.get(f"/v1/sessions/{first['id']}/events")).json()["data"]
+    assert [e["type"] for e in first_events] == ["user.message", "session.status_rescheduling"]
 
 
 async def test_event_sequence_is_per_session_and_monotonic(client, launched):
@@ -161,9 +170,15 @@ async def test_event_sequence_is_per_session_and_monotonic(client, launched):
         )
 
     events = (await client.get(f"/v1/sessions/{session['id']}/events")).json()["data"]
-    assert [e["seq"] for e in events] == [1, 2, 3]
+    assert [e["seq"] for e in events] == [1, 2, 3, 4]
+    assert [e["type"] for e in events] == [
+        "user.message",
+        "session.status_rescheduling",
+        "user.message",
+        "user.message",
+    ]
 
     after_first = (
-        await client.get(f"/v1/sessions/{session['id']}/events", params={"after": 1})
+        await client.get(f"/v1/sessions/{session['id']}/events", params={"after": 2})
     ).json()["data"]
-    assert [e["seq"] for e in after_first] == [2, 3]
+    assert [e["seq"] for e in after_first] == [3, 4]

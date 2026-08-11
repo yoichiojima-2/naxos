@@ -44,7 +44,7 @@ Statuses: `idle | running | rescheduling | terminated`, with `stop_reason` on id
 create ──▶ [idle]  (no container; workspace created lazily in GCS)
    │   user event → INSERT session_events (per-session seq; processed_at NULL = queued)
    ▼   no live lease? jobs.run(naxos-sbx-{env}, args=["--session", id])
-[rescheduling]
+[rescheduling]  wake() emits session.status_rescheduling → UI "waking up" state
    ▼   sandbox boot:
 [running]   1. OIDC ID token → POST /internal/sessions/{id}/claim   (lease)
             2. GET /internal/sessions/{id}/config   (resolved agent version, tools,
@@ -300,7 +300,7 @@ GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 
 Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share)`, plus `deployments/{id}/fire` and `reconcile`.
 
-Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
+Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_rescheduling` (deviation: extends the CMA status events so the §1 "waking up" UI state is observable over SSE — the `rescheduling` status itself is CMA's), `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
 
 Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks in v1.
 
