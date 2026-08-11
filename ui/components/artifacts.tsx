@@ -44,8 +44,7 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
   }
 
   async function copyLink(artifact: Artifact) {
-    const path = artifact.share_url ?? `/v1/artifacts/shared/${artifact.share_token}`;
-    const url = path.startsWith("http") ? path : `${window.location.origin}${path}`;
+    const url = `${window.location.origin}/#artifacts/shared/${artifact.share_token}`;
     await navigator.clipboard.writeText(url);
     setCopied(artifact.id);
     setTimeout(() => setCopied(null), 1500);
@@ -75,13 +74,15 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
               </thead>
               <tbody>
                 {artifacts.map((artifact) => (
-                  <tr key={artifact.id}>
+                  <tr
+                    key={artifact.id}
+                    className="click"
+                    onClick={() => { window.location.hash = `#artifacts/${artifact.id}`; }}
+                  >
                     <td>
                       <a
                         className="mono"
-                        href={`/v1/artifacts/${artifact.id}/content`}
-                        target="_blank"
-                        rel="noreferrer"
+                        href={`#artifacts/${artifact.id}`}
                         title={artifact.description ?? undefined}
                       >
                         {artifact.name}
@@ -98,7 +99,10 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
                     <td className="muted">v{artifact.version}</td>
                     <td>
                       {artifact.share_token ? (
-                        <button className="ghost" onClick={() => copyLink(artifact)}>
+                        <button
+                          className="ghost"
+                          onClick={(e) => { e.stopPropagation(); copyLink(artifact); }}
+                        >
                           {copied === artifact.id ? "Copied!" : "Copy link"}
                         </button>
                       ) : (
@@ -107,16 +111,32 @@ export default function Artifacts({ agents }: { agents: Agent[] }) {
                     </td>
                     <td className="ta-right" style={{ width: 1 }}>
                       <span className="row">
+                        <a
+                          className="mono"
+                          href={`/v1/artifacts/${artifact.id}/content`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Download
+                        </a>
                         {artifact.share_token ? (
-                          <button className="ghost" onClick={() => unshare(artifact)}>
+                          <button
+                            className="ghost"
+                            onClick={(e) => { e.stopPropagation(); unshare(artifact); }}
+                          >
                             Unshare
                           </button>
                         ) : (
-                          <button className="ghost" onClick={() => share(artifact)}>
+                          <button
+                            className="ghost"
+                            onClick={(e) => { e.stopPropagation(); share(artifact); }}
+                          >
                             Share
                           </button>
                         )}
-                        <button className="danger" onClick={() => remove(artifact)}>
+                        <button
+                          className="danger"
+                          onClick={(e) => { e.stopPropagation(); remove(artifact); }}
+                        >
                           Delete
                         </button>
                       </span>

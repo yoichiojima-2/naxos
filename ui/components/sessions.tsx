@@ -1,15 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import ReactMarkdown, { Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
 import { BackIcon } from "@/components/icons";
 import CountHeader from "@/components/list-header";
-
-const MD_COMPONENTS: Components = {
-  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-};
+import Markdown from "@/components/markdown";
 
 export default function Sessions({ agents }: { agents: Agent[] }) {
   const [sessions, setSessions] = useState<Session[] | null>(null);
@@ -333,6 +328,7 @@ function ArtifactEvent({ event }: { event: SessionEvent }) {
     version?: number;
     share_url?: string;
   };
+  const token = share_url?.match(/\/artifacts\/shared\/([^/]+)$/)?.[1];
   return (
     <div className="event agent fold">
       <span className="fold-line">
@@ -340,14 +336,16 @@ function ArtifactEvent({ event }: { event: SessionEvent }) {
         {action === "deleted" ? (
           <span className="mono">{name}</span>
         ) : (
-          <a className="mono" href={`/v1/artifacts/${artifact_id}/content`} target="_blank" rel="noreferrer">
+          <a className="mono" href={`#artifacts/${artifact_id}`}>
             {name}
           </a>
         )}
         {version != null && action !== "deleted" && <span className="muted">v{version}</span>}
-        {share_url && action === "shared" && (
-          <a href={share_url} target="_blank" rel="noreferrer">link</a>
-        )}
+        {action === "shared" && (token ? (
+          <a href={`#artifacts/shared/${token}`}>link</a>
+        ) : (
+          share_url && <a href={share_url} target="_blank" rel="noreferrer">link</a>
+        ))}
       </span>
     </div>
   );
@@ -447,13 +445,7 @@ function MessageEvent({ event }: { event: SessionEvent }) {
       ].join(" ").trim()}
     >
       <span className="muted">{event.type}{event.principal ? ` · ${event.principal}` : ""}</span>
-      {markdown && (
-        <div className="md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-            {markdown}
-          </ReactMarkdown>
-        </div>
-      )}
+      {markdown && <Markdown source={markdown} />}
       {body && <pre>{body}</pre>}
     </div>
   );

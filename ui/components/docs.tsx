@@ -58,8 +58,9 @@ export default function Docs() {
           <dd>Files an agent keeps across sessions, browsable and editable here.</dd>
           <dt>Artifact</dt>
           <dd>
-            A file an agent chose to publish as a durable output — downloadable,
-            versioned, and shareable via a stable org-internal link.
+            A file an agent chose to publish as a durable output — viewable in the
+            built-in preview, downloadable, versioned, and shareable via a stable
+            org-internal link.
           </dd>
           <dt>Skill</dt>
           <dd>
@@ -140,7 +141,8 @@ export default function Docs() {
           <a href="#memory">Memory</a> is what an agent carries between sessions.{" "}
           <a href="#artifacts">Artifacts</a> are the outputs agents publish with their
           built-in <code>artifact_create</code> / <code>artifact_share</code> tools —
-          download them or hand out a share link that stays inside the IAP boundary.{" "}
+          open them in the built-in viewer, download them, or hand out a share link
+          that stays inside the IAP boundary.{" "}
           <a href="#skills">Skills</a> package shared procedures once and attach them
           to any agent.
         </p>
