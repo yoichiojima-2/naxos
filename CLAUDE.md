@@ -27,7 +27,7 @@ A task that fits none of these axes belongs in the Claude app or hosted CMA, not
 - **Vaults** — credentials for MCP servers and declared HTTP targets. Values live only in Secret Manager (never in Postgres, never in the sandbox); the sandbox calls `naxos-egress` on a route token and the proxy substitutes the real headers. Arbitrary bash egress stays credential-less by design.
 - **Memory stores** — named file sets in Postgres, materialised into `ws/memory/{name}/` at wake and written back at checkpoint (last write wins; versioning deferred).
 
-Documented deviations from CMA (docs/design.md §7): IAP auth instead of API keys, operator-provisioned environments, and two naxos-only surfaces — Monitoring (cost/usage aggregates) and per-principal favorites on agents / sessions / artifacts / skills. Conveniences, not part of the object model.
+Documented deviations from CMA (docs/design.md §7): IAP auth instead of API keys, operator-provisioned environments, budget enforced post-response, and per-principal favorites on agents / sessions / artifacts / skills as a naxos-only convenience surface. The UI's Monitoring view (`/v1/monitoring/summary`, cost/usage aggregates over `session_runs`) is likewise a naxos operator surface, not part of the object model.
 
 ## Architecture (summary — details in docs/design.md)
 
