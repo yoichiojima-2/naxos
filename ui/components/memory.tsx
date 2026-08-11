@@ -13,14 +13,21 @@ type Editing = {
   content: string;
 };
 
-const pathValid = (path: string) =>
-  /^[a-zA-Z0-9._/-]{1,200}$/.test(path) && !path.split("/").includes("..");
+const pathValid = (path: string) => {
+  const segments = path.split("/");
+  return (
+    /^[a-zA-Z0-9._/-]{1,200}$/.test(path) &&
+    !segments.includes("..") &&
+    !segments.includes("")
+  );
+};
 
 export default function MemoryStores() {
   const [stores, setStores] = useState<MemoryStore[]>([]);
   const [memories, setMemories] = useState<Record<string, Memory[]>>({});
   const [storeName, setStoreName] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     const result = await api<{ data: MemoryStore[] }>("/v1/memory_stores");
@@ -53,23 +60,35 @@ export default function MemoryStores() {
   }
 
   async function save() {
-    if (!editing || !pathValid(editing.path)) return;
-    const collision = (memories[editing.storeId] ?? []).find(
-      (m) => m.path === editing.path && m.id !== editing.id,
-    );
-    if (collision && !window.confirm(`"${editing.path}" already exists — overwrite it?`)) {
-      return;
-    }
-    await api(`/v1/memory_stores/${editing.storeId}/memories`, {
-      json: { path: editing.path, content: editing.content },
-    });
-    if (editing.id && editing.originalPath && editing.originalPath !== editing.path) {
-      await api(`/v1/memory_stores/${editing.storeId}/memories/${editing.id}`, {
-        method: "DELETE",
+    if (!editing || saving || !pathValid(editing.path)) return;
+    setSaving(true);
+    try {
+      const fresh = await api<{ data: Memory[] }>(
+        `/v1/memory_stores/${editing.storeId}/memories`,
+      );
+      const collision = fresh.data.find(
+        (m) => m.path === editing.path && m.id !== editing.id,
+      );
+      if (collision && !window.confirm(`"${editing.path}" already exists — overwrite it?`)) {
+        return;
+      }
+      await api(`/v1/memory_stores/${editing.storeId}/memories`, {
+        json: { path: editing.path, content: editing.content },
       });
+      if (editing.id && editing.originalPath && editing.originalPath !== editing.path) {
+        try {
+          await api(`/v1/memory_stores/${editing.storeId}/memories/${editing.id}`, {
+            method: "DELETE",
+          });
+        } catch {
+          // content is saved under the new path; refresh shows the leftover if any
+        }
+      }
+      setEditing(null);
+      refresh();
+    } finally {
+      setSaving(false);
     }
-    setEditing(null);
-    refresh();
   }
 
   async function deleteMemory(storeId: string, memory: Memory) {
@@ -109,8 +128,8 @@ export default function MemoryStores() {
               <span className="muted">renaming {editing.originalPath}</span>
             )}
           </div>
-          <button className="primary" onClick={save} disabled={invalid}>
-            Save
+          <button className="primary" onClick={save} disabled={invalid || saving}>
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
         {invalid && editing.path !== "" && (
