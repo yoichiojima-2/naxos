@@ -31,7 +31,7 @@ Fixed design decisions:
 | State | Cloud SQL Postgres `db-g1-small`, private IP, Direct VPC egress from Cloud Run | always-on (the one fixed cost) | — |
 | Workspaces | GCS bucket per environment `naxos2-sess-{env}` | — | env SA + `sa-api` only |
 | Audit | BigQuery `audit.runs` + `audit.tool_calls`, written **only by the control plane** | — | `sa-api` |
-| UI — agents, session chat/timeline, approval inbox, deployments, artifacts, vaults, memory, skills, kill switch | Next.js static export baked into the api image | — | — |
+| UI — chat-first, macOS-style (sidebar of conversations + Messages-like live chat with inline approvals) with a console area: all sessions, agents, deployments, artifacts, monitoring, vaults, memory, skills, kill switch | Next.js static export baked into the api image | — | — |
 
 The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json`. Many agents can share an environment.
 
@@ -62,7 +62,9 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 [terminated]  explicit terminate; live sandbox told over the control channel
 ```
 
-**Client-facing streaming.** `GET /v1/sessions/{id}/events?stream=sse&after={seq}` — the API polls `session_events` every 1s, emits SSE frames with `id:{seq}`, honors `Last-Event-ID` for reconnect replay, sends a ping comment every 15s. Because the stream is DB-backed, replay survives instance loss, so no Cloud Run session affinity is needed anywhere. LISTEN/NOTIFY is a later latency optimization, deliberately deferred.
+**Client-facing streaming.** `GET /v1/sessions/{id}/events?stream=sse&after={seq}` — the API replays from the cursor, then tails `session_events` on Postgres LISTEN/NOTIFY, emitting SSE frames with `id:{seq}`, honoring `Last-Event-ID` for reconnect replay, with a ping comment every 15s of quiet. Because the stream is DB-backed, replay survives instance loss, so no Cloud Run session affinity is needed anywhere.
+
+**Token-level partial text.** The append-only event log cannot hold a row per token, so live typing rides *transient* `agent.message_delta` frames instead: the sandbox batches the SDK's partial-message text deltas (~0.3s cadence, ≤1000 chars/frame) to `POST /internal/sessions/{id}/stream`, which fans them out to SSE listeners over a second LISTEN/NOTIFY channel — nothing is stored. Delta frames carry no SSE `id:` line, so `Last-Event-ID` replay semantics are untouched; each frame carries a `stream` id that the persisted `agent.message` repeats, letting clients drop late deltas instead of duplicating text. Audit is unaffected: the persisted message remains the only durable record, and a lost delta loses nothing.
 
 **Interrupt.** `user.interrupt` is inserted as an event and surfaced immediately on the control channel; the sandbox calls `client.interrupt()`. Jumps the queue, per CMA.
 
@@ -477,11 +479,11 @@ GET    /v1/favorites · POST /v1/favorites  per-principal stars on agents / sess
 DELETE /v1/favorites/{type}/{id}           artifacts / skills, surfaced first in UI lists
 ```
 
-Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)`, plus `deployments/{id}/fire` and `reconcile`.
+Internal surface (`naxos-internal`, IAM-only): per-session `claim / heartbeat / queue?wait / events / permission / stream (transient partial-text fan-out) / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)`, plus `deployments/{id}/fire` and `reconcile`.
 
-Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_rescheduling` (deviation: extends the CMA status events so the §1 "waking up" UI state is observable over SSE — the `rescheduling` status itself is CMA's), `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`.
+Event types (CMA vocabulary): `user.message`, `user.interrupt`, `user.tool_confirmation`, `user.custom_tool_result`, `agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `agent.artifact` (deviation: artifact lifecycle in the timeline), `session.status_running`, `session.status_idle`, `session.status_rescheduling` (deviation: extends the CMA status events so the §1 "waking up" UI state is observable over SSE — the `rescheduling` status itself is CMA's), `session.status_terminated`, `session.error`, `span.model_request_start`, `span.model_request_end`. One transient frame type rides the SSE stream without being part of the persisted vocabulary: `agent.message_delta` (§4 token-level partial text) — never stored, never replayed, not client-sendable.
 
-Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks initially; per-principal favorites as a naxos-only convenience surface.
+Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; `span.*` approximated from the SDK stream; no outcomes / multiagent / webhooks initially; per-principal favorites as a naxos-only convenience surface; untitled sessions auto-derive their title from the first `user.message` (explicit titles always win) so lists never show bare ids.
 
 ## 8. Security model
 

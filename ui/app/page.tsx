@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, favKey, Agent, Environment, Favorite, FavoriteType } from "@/lib/api";
+import { api, favKey, Agent, Environment, Favorite, FavoriteType, Session } from "@/lib/api";
+import { shortId } from "@/lib/format";
 import Agents from "@/components/agents";
 import AgentDetail from "@/components/agent-detail";
 import Sessions from "@/components/sessions";
+import Chat from "@/components/chat";
+import ChatHome from "@/components/chat-home";
 import Deployments from "@/components/deployments";
 import Vaults from "@/components/vaults";
 import MemoryStores from "@/components/memory";
@@ -14,6 +17,7 @@ import Skills from "@/components/skills";
 import Docs from "@/components/docs";
 import Monitoring from "@/components/monitoring";
 import Approvals from "@/components/approvals";
+import DialogHost from "@/components/confirm";
 import {
   AgentsIcon,
   ApprovalsIcon,
@@ -27,20 +31,18 @@ import {
   VaultsIcon,
 } from "@/components/icons";
 
-const PAGES = [
-  "sessions", "approvals", "deployments", "artifacts", "monitoring", "agents", "vaults",
+const CONSOLE_PAGES = [
+  "sessions", "approvals", "agents", "deployments", "artifacts", "monitoring", "vaults",
   "memory", "skills", "docs",
 ] as const;
-type Page = (typeof PAGES)[number];
-type Route = { page: Page; id?: string };
+type ConsolePage = (typeof CONSOLE_PAGES)[number];
+type Route = { page: ConsolePage | "new" | "chat"; id?: string };
 
-const APPROVAL_POLL_MS = 15_000;
-
-const NAV: Record<Page, { label: string; icon: () => React.ReactNode; info: string }> = {
+const NAV: Record<ConsolePage, { label: string; icon: () => React.ReactNode; info: string }> = {
   sessions: {
-    label: "Sessions",
+    label: "All sessions",
     icon: SessionsIcon,
-    info: "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
+    info: "Every session on the platform, for operating rather than chatting: filter, set budgets, terminate, or delete in bulk. Open one to continue the conversation.",
   },
   approvals: {
     label: "Approvals",
@@ -89,28 +91,50 @@ const NAV: Record<Page, { label: string; icon: () => React.ReactNode; info: stri
   },
 };
 
-const NAV_SECTIONS: { label: string; pages: Page[] }[] = [
-  { label: "Work", pages: ["sessions", "approvals", "deployments", "artifacts", "monitoring"] },
-  { label: "Configure", pages: ["agents", "skills", "vaults", "memory"] },
-  { label: "Resources", pages: ["docs"] },
+const CONSOLE_ORDER: ConsolePage[] = [
+  "sessions", "approvals", "agents", "deployments", "artifacts", "monitoring", "skills",
+  "vaults", "memory", "docs",
 ];
+
+const APPROVAL_POLL_MS = 15_000;
 
 function parseHash(hash: string): Route {
   const [page, ...rest] = hash.replace(/^#/, "").split("/");
-  if ((PAGES as readonly string[]).includes(page)) {
-    return { page: page as Page, id: rest.join("/") || undefined };
+  const id = rest.join("/") || undefined;
+  if (page === "chat" && id) return { page: "chat", id };
+  // Old deep links: #sessions/{id} was the timeline; it is a chat now.
+  if (page === "sessions" && id) return { page: "chat", id };
+  if ((CONSOLE_PAGES as readonly string[]).includes(page)) {
+    return { page: page as ConsolePage, id };
   }
-  return { page: "sessions" };
+  return { page: "new" };
 }
 
+function timeGroup(iso: string): string {
+  const day = 24 * 60 * 60 * 1000;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const at = new Date(iso).getTime();
+  if (at >= today) return "Today";
+  if (at >= today - day) return "Yesterday";
+  if (at >= today - 7 * day) return "Previous 7 days";
+  return "Older";
+}
+
+const needsApproval = (s: Session) =>
+  s.status === "idle" && s.stop_reason === "requires_action";
+
 export default function Page() {
-  const [route, setRoute] = useState<Route>({ page: "sessions" });
+  const [route, setRoute] = useState<Route>({ page: "new" });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [query, setQuery] = useState("");
+  const [sideOpen, setSideOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<string | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   const refresh = useCallback(async () => {
     const [agentResult, envResult, favResult] = await Promise.all([
@@ -123,7 +147,10 @@ export default function Page() {
     setFavorites(new Set(favResult.data.map((f) => favKey(f.entity_type, f.entity_id))));
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  const refreshSessions = useCallback(async () => {
+    const result = await api<{ data: Session[] }>("/v1/sessions?limit=200");
+    setSessions(result.data);
+  }, []);
 
   // The badge is the whole point of the inbox: a paused agent has to be visible
   // from wherever you happen to be standing, not only from its own session.
@@ -135,8 +162,24 @@ export default function Page() {
   useEffect(() => {
     refreshApprovals();
     const timer = setInterval(refreshApprovals, APPROVAL_POLL_MS);
-    return () => clearInterval(timer);
+    window.addEventListener("naxos-sessions", refreshApprovals);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("naxos-sessions", refreshApprovals);
+    };
   }, [refreshApprovals]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    refreshSessions();
+    const timer = setInterval(refreshSessions, 20_000);
+    window.addEventListener("naxos-sessions", refreshSessions);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("naxos-sessions", refreshSessions);
+    };
+  }, [refreshSessions]);
 
   const toggleFavorite = useCallback(async (type: FavoriteType, id: string) => {
     const key = favKey(type, id);
@@ -152,7 +195,15 @@ export default function Page() {
   }, [favorites]);
 
   useEffect(() => {
-    const fromHash = () => setRoute(parseHash(window.location.hash));
+    const fromHash = () => {
+      const next = parseHash(window.location.hash);
+      setRoute(next);
+      setSideOpen(false);
+      // Normalize legacy #sessions/{id} links so copied URLs stay canonical.
+      if (next.page === "chat" && window.location.hash.startsWith("#sessions/")) {
+        window.history.replaceState(null, "", `#chat/${next.id}`);
+      }
+    };
     fromHash();
     window.addEventListener("hashchange", fromHash);
     return () => window.removeEventListener("hashchange", fromHash);
@@ -185,86 +236,155 @@ export default function Page() {
     setTheme(next);
   }
 
-  // Collapsed to a scrolling row on narrow screens, the active page can sit
-  // past the right edge; keep it in view.
-  useEffect(() => {
-    document
-      .querySelector(".sidebar a.active")
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [route.page]);
-
-  const current = NAV[route.page];
-  const agentDetail = route.page === "agents" ? route.id : undefined;
-  const artifactDetail = route.page === "artifacts" ? route.id : undefined;
-  const sessionDetail = route.page === "sessions" ? route.id : undefined;
+  const consolePage = route.page !== "new" && route.page !== "chat"
+    ? (route.page as ConsolePage)
+    : null;
 
   useEffect(() => {
-    document.title = `naxos · ${current.label}`;
-  }, [current.label]);
+    document.title = consolePage ? `naxos · ${NAV[consolePage].label}` : "naxos";
+  }, [consolePage]);
+
+  const q = query.trim().toLowerCase();
+  const recents = sessions.filter(
+    (s) => !q || `${s.title ?? ""} ${s.id}`.toLowerCase().includes(q),
+  );
+  const starred = recents.filter((s) => favorites.has(favKey("session", s.id)));
+  const rest = recents.filter((s) => !favorites.has(favKey("session", s.id)));
+  const groups: { label: string; items: Session[] }[] = [];
+  for (const s of rest) {
+    const label = timeGroup(s.created_at);
+    const group = groups[groups.length - 1];
+    if (group?.label === label) group.items.push(s);
+    else groups.push({ label, items: [s] });
+  }
+
+  const sideItem = (s: Session) => (
+    <a
+      key={s.id}
+      className={`side-item ${route.page === "chat" && route.id === s.id ? "active" : ""}`}
+      href={`#chat/${s.id}`}
+    >
+      {needsApproval(s) && <span className="dot ask" title="waiting for approval" />}
+      {(s.status === "running" || s.status === "rescheduling") && (
+        <span className="dot live" title="agent is working" />
+      )}
+      <span className="title">{s.title ?? shortId(s.id)}</span>
+    </a>
+  );
 
   return (
     <div className="shell">
-      <header className="appbar">
-        <a className="brand" href="#sessions">
-          <span className="brand-mark" aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2 22 12 12 22 2 12z" />
-            </svg>
-          </span>
-          <span>naxos</span>
-        </a>
-        <div className="appbar-spacer" />
-        <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
-          {theme === "dark" ? "☀" : "☾"}
-        </button>
-      </header>
-      <div className="body">
-        <aside className="sidebar">
-          {NAV_SECTIONS.map(({ label, pages }) => (
-            <nav className="nav-group" key={label}>
+      <button
+        className="icon-btn side-toggle"
+        onClick={() => setSideOpen(!sideOpen)}
+        aria-label="toggle navigation"
+      >
+        ☰
+      </button>
+      <div className={`side-scrim ${sideOpen ? "show" : ""}`} onClick={() => setSideOpen(false)} />
+      <aside className={`side ${sideOpen ? "open" : ""}`}>
+        <div className="side-head">
+          <a className="brand" href="#new">
+            <span className="brand-mark" aria-hidden>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2 22 12 12 22 2 12z" />
+              </svg>
+            </span>
+            <span>naxos</span>
+          </a>
+          <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+        </div>
+        <div className="side-top">
+          <a className="new-chat" href="#new">
+            <span className="plus" aria-hidden>+</span>
+            New chat
+          </a>
+          {sessions.length > 0 && (
+            <input
+              className="side-search"
+              placeholder="Search chats…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="search chats"
+            />
+          )}
+        </div>
+        <div className="side-scroll">
+          {recents.length === 0 && (
+            <p className="side-empty">
+              {sessions.length === 0 ? "no chats yet" : "no chats match"}
+            </p>
+          )}
+          {starred.length > 0 && (
+            <div className="side-group">
+              <span className="nav-label">Starred</span>
+              {starred.map(sideItem)}
+            </div>
+          )}
+          {groups.map(({ label, items }) => (
+            <div className="side-group" key={label}>
               <span className="nav-label">{label}</span>
-              {pages.map((page) => {
-                const { label: pageLabel, icon: Icon } = NAV[page];
-                const badge = page === "approvals" && pendingApprovals > 0;
-                return (
-                  <a
-                    key={page}
-                    href={`#${page}`}
-                    className={page === route.page ? "active" : ""}
-                  >
-                    <Icon />
-                    {pageLabel}
-                    {badge && (
-                      <span className="nav-count" aria-label={`${pendingApprovals} waiting`}>
-                        {pendingApprovals}
-                      </span>
-                    )}
-                  </a>
-                );
-              })}
-            </nav>
+              {items.map(sideItem)}
+            </div>
           ))}
-        </aside>
-        <div className="frame">
-          <main className="content">
-            {!agentDetail && !artifactDetail && !sessionDetail && (
+        </div>
+        <div className="side-foot">
+          <span className="nav-label">Console</span>
+          {CONSOLE_ORDER.map((page) => {
+            const { label, icon: Icon } = NAV[page];
+            const badge = page === "approvals" && pendingApprovals > 0;
+            return (
+              <a
+                key={page}
+                href={`#${page}`}
+                className={`side-item ${consolePage === page ? "active" : ""}`}
+              >
+                <Icon />
+                <span className="title">{label}</span>
+                {badge && (
+                  <span className="nav-count" aria-label={`${pendingApprovals} waiting`}>
+                    {pendingApprovals}
+                  </span>
+                )}
+              </a>
+            );
+          })}
+        </div>
+      </aside>
+
+      <main className="main">
+        {route.page === "new" && <ChatHome agents={agents} />}
+        {route.page === "chat" && route.id && (
+          <Chat
+            key={route.id}
+            sessionId={route.id}
+            agents={agents}
+            favorites={favorites}
+            onToggleFavorite={toggleFavorite}
+          />
+        )}
+        {consolePage && (
+          <div className="content">
+            {!route.id && (
               <div className="page-head">
                 <div className="breadcrumbs">
-                  naxos<span className="sep">/</span>{current.label}
+                  console<span className="sep">/</span>{NAV[consolePage].label}
                 </div>
-                <h2>{current.label}</h2>
-                <p>{current.info}</p>
+                <h2>{NAV[consolePage].label}</h2>
+                <p>{NAV[consolePage].info}</p>
               </div>
             )}
-            {route.page === "sessions" && (
+            {consolePage === "sessions" && (
               <Sessions
                 agents={agents}
-                sessionId={sessionDetail}
                 favorites={favorites}
                 onToggleFavorite={toggleFavorite}
+                onChange={refreshSessions}
               />
             )}
-            {route.page === "agents" && !route.id && (
+            {consolePage === "agents" && !route.id && (
               <Agents
                 agents={agents}
                 environments={environments}
@@ -273,38 +393,39 @@ export default function Page() {
                 onToggleFavorite={toggleFavorite}
               />
             )}
-            {agentDetail && (
+            {consolePage === "agents" && route.id && (
               <AgentDetail
-                agentId={agentDetail}
+                agentId={route.id}
                 environments={environments}
                 onChange={refresh}
               />
             )}
-            {route.page === "deployments" && <Deployments agents={agents} view={route.id} />}
-            {route.page === "artifacts" && !route.id && (
+            {consolePage === "deployments" && <Deployments agents={agents} view={route.id} />}
+            {consolePage === "artifacts" && !route.id && (
               <Artifacts agents={agents} favorites={favorites} onToggleFavorite={toggleFavorite} />
             )}
-            {artifactDetail && (
-              artifactDetail.startsWith("shared/")
-                ? <ArtifactViewer token={artifactDetail.slice("shared/".length)} agents={agents} />
-                : <ArtifactViewer artifactId={artifactDetail} agents={agents} />
+            {consolePage === "artifacts" && route.id && (
+              route.id.startsWith("shared/")
+                ? <ArtifactViewer token={route.id.slice("shared/".length)} agents={agents} />
+                : <ArtifactViewer artifactId={route.id} agents={agents} />
             )}
-            {route.page === "approvals" && <Approvals onDecided={refreshApprovals} />}
-            {route.page === "monitoring" && <Monitoring />}
-            {route.page === "vaults" && <Vaults />}
-            {route.page === "memory" && <MemoryStores />}
-            {route.page === "skills" && (
+            {consolePage === "approvals" && <Approvals onDecided={refreshApprovals} />}
+            {consolePage === "monitoring" && <Monitoring />}
+            {consolePage === "vaults" && <Vaults />}
+            {consolePage === "memory" && <MemoryStores />}
+            {consolePage === "skills" && (
               <Skills favorites={favorites} onToggleFavorite={toggleFavorite} />
             )}
-            {route.page === "docs" && <Docs />}
-          </main>
-          {toast && (
-            <div className="toast" role="alert" onClick={() => setToast(null)}>
-              {toast}
-            </div>
-          )}
-        </div>
-      </div>
+            {consolePage === "docs" && <Docs />}
+          </div>
+        )}
+        {toast && (
+          <div className="toast" role="alert" onClick={() => setToast(null)}>
+            {toast}
+          </div>
+        )}
+      </main>
+      <DialogHost />
     </div>
   );
 }

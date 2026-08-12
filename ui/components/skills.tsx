@@ -78,7 +78,16 @@ export default function Skills({ favorites, onToggleFavorite }: FavoriteProps) {
     if (!editing) return;
     const clash =
       editing.isNew && (files[editing.skillId] ?? []).some((f) => f.path === editing.path);
-    if (clash && !window.confirm(`"${editing.path}" already exists. Overwrite it?`)) return;
+    if (clash) {
+      const { confirmDialog } = await import("@/components/confirm");
+      const ok = await confirmDialog({
+        title: "Overwrite file?",
+        body: `"${editing.path}" already exists.`,
+        action: "Overwrite",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     await api(`/v1/skills/${editing.skillId}/files`, {
       json: { path: editing.path, content: editing.content },
     });

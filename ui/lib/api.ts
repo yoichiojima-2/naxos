@@ -53,7 +53,8 @@ export async function apiConfirm(
   path: string,
   init?: RequestInit & { json?: unknown },
 ): Promise<boolean> {
-  if (!window.confirm(message)) return false;
+  const { confirmDialog } = await import("@/components/confirm");
+  if (!(await confirmDialog({ title: "Are you sure?", body: message, danger: true }))) return false;
   await api(path, init ?? { json: {} });
   return true;
 }
@@ -146,6 +147,12 @@ export type SessionEvent = {
   principal: string | null;
   created_at: string;
 };
+
+// Transient partial-text frame interleaved into the SSE stream while the agent
+// is generating. Never persisted, never replayed; the persisted agent.message
+// with the same `stream` id supersedes it. Mirrors naxos_shared.events.
+export const STREAM_DELTA_TYPE = "agent.message_delta";
+export type StreamDelta = { type: string; stream?: string; text?: string };
 
 export type Deployment = {
   id: string;

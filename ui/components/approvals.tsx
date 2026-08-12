@@ -129,7 +129,7 @@ function Row({
           {item.agent_disabled && <span className="badge terminated">disabled</span>}
         </td>
         <td>
-          <a href={`#sessions/${item.session_id}`} onClick={(e) => e.stopPropagation()}>
+          <a href={`#chat/${item.session_id}`} onClick={(e) => e.stopPropagation()}>
             {item.session_title || shortId(item.session_id)}
           </a>
         </td>
