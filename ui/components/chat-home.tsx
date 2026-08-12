@@ -55,10 +55,7 @@ export default function ChatHome({ agents }: { agents: Agent[] }) {
 
   return (
     <div className="home">
-      <h1 className="greet">
-        <span className="brand-mark" aria-hidden>✳</span>
-        {greeting()}
-      </h1>
+      <h1 className="greet">{greeting()}</h1>
       {enabled.length === 0 ? (
         <p className="muted">
           no agents yet — <a className="mono" href="#agents">create one in the console</a> to start

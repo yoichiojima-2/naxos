@@ -2,7 +2,7 @@
 
 A Google Cloud implementation of Claude Managed Agents: versioned agents, isolated per-session sandboxes on Cloud Run, an event-sourced session API with SSE streaming — including token-level live text while the agent is typing — approval gates, vaults with an egress credential proxy, scheduled deployments, and full execution-level audit — inside a single GCP project with Vertex AI as the only model exit.
 
-The UI is chat-first: a Claude-app-style surface (sidebar of auto-titled conversations, live streaming replies, markdown with syntax-highlighted copyable code, inline tool-approval cards) on top of a console for operating the platform (all sessions, agents, deployments, monitoring, skills, vaults, memory).
+The UI is chat-first with a native macOS-style look: a sidebar of auto-titled conversations, Messages-style chat with live streaming replies, markdown with syntax-highlighted copyable code, and inline tool-approval cards — on top of a console for operating the platform (all sessions, agents, deployments, monitoring, skills, vaults, memory).
 
 - Docs site: [yoichiojima-2.github.io/naxos](https://yoichiojima-2.github.io/naxos/)
 - Design: [`docs/design.md`](docs/design.md)

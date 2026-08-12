@@ -31,7 +31,7 @@ Fixed design decisions:
 | State | Cloud SQL Postgres `db-g1-small`, private IP, Direct VPC egress from Cloud Run | always-on (the one fixed cost) | — |
 | Workspaces | GCS bucket per environment `naxos2-sess-{env}` | — | env SA + `sa-api` only |
 | Audit | BigQuery `audit.runs` + `audit.tool_calls`, written **only by the control plane** | — | `sa-api` |
-| UI — chat-first (Claude-app-style sidebar of conversations + live chat with inline approvals) with a console area: all sessions, agents, deployments, artifacts, monitoring, vaults, memory, skills, kill switch | Next.js static export baked into the api image | — | — |
+| UI — chat-first, macOS-style (sidebar of conversations + Messages-like live chat with inline approvals) with a console area: all sessions, agents, deployments, artifacts, monitoring, vaults, memory, skills, kill switch | Next.js static export baked into the api image | — | — |
 
 The **environment is the tenant/isolation boundary** (as in CMA). Agents are cheap DB rows; environments carry the service account, the sandbox Job, and the session bucket, fanned out by Terraform from `environments.json`. Many agents can share an environment.
 

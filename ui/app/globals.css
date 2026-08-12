@@ -1,37 +1,38 @@
 :root {
   color-scheme: light dark;
-  /* Warm Claude-like palette: ivory / dark-oat surfaces, terracotta accent. */
-  --bg: light-dark(#faf9f5, #262624);
-  --panel: light-dark(#ffffff, #2b2a27);
-  --panel2: light-dark(#f2f0e8, #34332f);
-  --border: light-dark(#e5e2d7, #403e39);
-  --ink: light-dark(#3d3929, #e8e6dd);
-  --text: light-dark(#3d3929, #dedcd3);
-  --muted: light-dark(#6e6a5b, #b3b0a4);
-  --faint: light-dark(#a19d8d, #83817a);
-  --neutral: light-dark(rgba(61, 57, 41, 0.07), rgba(232, 230, 221, 0.08));
-  --neutral-hover: light-dark(rgba(61, 57, 41, 0.14), rgba(232, 230, 221, 0.16));
-  --accent: light-dark(#c6613f, #d97757);
-  --accent-strong: light-dark(#a84e30, #e08a6e);
-  --accent-soft: light-dark(#f6e8e0, #423229);
+  /* macOS-style system palette: white / window-gray surfaces, hairline
+     separators, system-blue accent, SF-style type at desktop density. */
+  --bg: light-dark(#ffffff, #1e1e1e);
+  --panel: light-dark(#ffffff, #262628);
+  --panel2: light-dark(#f2f2f7, #333336);
+  --border: light-dark(rgba(60, 60, 67, 0.16), rgba(255, 255, 255, 0.13));
+  --ink: light-dark(#111113, #f2f2f7);
+  --text: light-dark(#1c1c1e, #e5e5ea);
+  --muted: light-dark(rgba(60, 60, 67, 0.65), rgba(235, 235, 245, 0.62));
+  --faint: light-dark(rgba(60, 60, 67, 0.35), rgba(235, 235, 245, 0.32));
+  --neutral: light-dark(rgba(118, 118, 128, 0.12), rgba(118, 118, 128, 0.24));
+  --neutral-hover: light-dark(rgba(118, 118, 128, 0.2), rgba(118, 118, 128, 0.36));
+  --accent: light-dark(#007aff, #0a84ff);
+  --accent-strong: light-dark(#0062cc, #409cff);
+  --accent-soft: light-dark(#e8f1ff, #1c3252);
   --on-accent: #ffffff;
-  --contrast: light-dark(#3d3929, #e8e6dd);
-  --ok: light-dark(#37725a, #7ec5a2);
-  --ok-soft: light-dark(#e3f0e7, #223d31);
-  --warn: light-dark(#9c5b00, #e0b352);
-  --warn-soft: light-dark(#f9efd4, #3c3320);
-  --danger: light-dark(#ab3830, #ef8a7e);
-  --danger-strong: #c04a3d;
-  --danger-soft: light-dark(#f9e8e4, #442a25);
-  --info: light-dark(#58676f, #a4b2ba);
-  --info-soft: light-dark(#e9edef, #333a3e);
-  --shadow-1: light-dark(rgba(61, 57, 41, 0.08), rgba(0, 0, 0, 0.25));
-  --shadow-2: light-dark(rgba(61, 57, 41, 0.12), rgba(0, 0, 0, 0.35));
-  --shadow-strong: light-dark(rgba(61, 57, 41, 0.3), rgba(0, 0, 0, 0.55));
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans",
-    Ubuntu, "Droid Sans", "Helvetica Neue", sans-serif;
-  --display: "Iowan Old Style", Georgia, "Times New Roman", serif;
-  --serif: var(--display);
+  --contrast: light-dark(#111113, #f2f2f7);
+  --ok: light-dark(#248a3d, #30d158);
+  --ok-soft: light-dark(#e4f4e8, #1f3a28);
+  --warn: light-dark(#c76a00, #ff9f0a);
+  --warn-soft: light-dark(#fdf1de, #43351a);
+  --danger: light-dark(#d70015, #ff453a);
+  --danger-strong: #e0332c;
+  --danger-soft: light-dark(#fdebea, #462421);
+  --info: light-dark(#5856d6, #7d7aff);
+  --info-soft: light-dark(#ecebfb, #2e2d4d);
+  --shadow-1: light-dark(rgba(0, 0, 0, 0.07), rgba(0, 0, 0, 0.3));
+  --shadow-2: light-dark(rgba(0, 0, 0, 0.11), rgba(0, 0, 0, 0.4));
+  --shadow-strong: light-dark(rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.6));
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    "Noto Sans", Ubuntu, "Helvetica Neue", sans-serif;
+  --display: var(--sans);
+  --serif: var(--sans);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
   --radius: 10px;
@@ -60,18 +61,22 @@ body {
 .side {
   width: var(--sidebar-w); flex: none; min-height: 0;
   display: flex; flex-direction: column;
-  background: light-dark(#f2f0e8, #1f1e1c); border-right: 1px solid var(--border);
+  background: light-dark(#f0f0f3, #232325); border-right: 1px solid var(--border);
 }
 .side-head {
   flex: none; display: flex; align-items: center; justify-content: space-between;
   padding: 14px 14px 6px;
 }
 .brand {
-  display: inline-flex; align-items: baseline; gap: 7px;
+  display: inline-flex; align-items: center; gap: 8px;
   color: var(--ink); text-decoration: none;
-  font-family: var(--display); font-size: 17px; letter-spacing: 0.01em;
+  font-size: 16px; font-weight: 700; letter-spacing: -0.02em;
 }
-.brand-mark { color: var(--accent); font-size: 15px; }
+.brand-mark {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; flex: none;
+  background: var(--accent); color: var(--on-accent);
+  border-radius: 6px; font-size: 12px; line-height: 1;
+}
 
 .side-top { flex: none; padding: 8px 10px 4px; display: flex; flex-direction: column; gap: 6px; }
 .new-chat {
@@ -80,18 +85,18 @@ body {
   color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600;
   transition: background 0.1s;
 }
-.new-chat:hover { background: var(--accent-soft); }
+.new-chat:hover { background: var(--neutral); }
 .new-chat .plus {
   display: inline-grid; place-items: center; width: 22px; height: 22px; flex: none;
   background: var(--accent); color: var(--on-accent); border-radius: 999px;
   font-size: 14px; line-height: 1;
 }
 .side-search {
-  background: transparent; border: 1px solid transparent; box-shadow: none;
-  padding: 6px 12px; font-size: 13.5px;
+  background: var(--neutral); border: 1px solid transparent; box-shadow: none;
+  border-radius: 8px; padding: 5px 12px; font-size: 13px;
 }
-.side-search:hover:not(:focus) { background: var(--neutral); }
-.side-search:focus { background: var(--panel); border-color: var(--border); }
+.side-search:hover:not(:focus) { background: var(--neutral-hover); }
+.side-search:focus { background: var(--panel); border-color: var(--accent); }
 
 .side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px 10px; }
 .side-group { margin-top: 14px; }
@@ -162,8 +167,7 @@ body {
 
 .page-head { margin-bottom: 24px; }
 .page-head h2 {
-  font-family: var(--display); font-size: 26px; font-weight: 500;
-  letter-spacing: -0.01em; color: var(--ink);
+  font-size: 23px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink);
 }
 .page-head p { color: var(--muted); font-size: 13.5px; max-width: 640px; margin-top: 6px; }
 
@@ -351,8 +355,8 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
 
 .chat-head {
   position: sticky; top: 0; z-index: 10; flex: none;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
   border-bottom: 1px solid var(--border);
 }
 .chat-head-row {
@@ -371,11 +375,11 @@ button.chip:hover { border-color: var(--accent); color: var(--accent); }
 
 .turn { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
 .turn.user { align-items: flex-end; margin-top: 18px; }
+/* Messages-style send bubble. */
 .turn.user .bubble {
-  max-width: min(85%, 640px); background: var(--panel2); color: var(--ink);
-  border: 1px solid var(--border);
-  border-radius: 16px 16px 4px 16px; padding: 10px 16px;
-  white-space: pre-wrap; word-break: break-word; font-size: 14.5px; line-height: 1.6;
+  max-width: min(85%, 640px); background: var(--accent); color: var(--on-accent);
+  border-radius: 16px 16px 4px 16px; padding: 9px 14px;
+  white-space: pre-wrap; word-break: break-word; font-size: 14.5px; line-height: 1.5;
 }
 .turn.agent { max-width: 100%; }
 .turn.agent .md { font-size: 15px; line-height: 1.65; }
@@ -460,10 +464,9 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
   align-items: center; justify-content: center; gap: 26px; padding: 48px 24px;
 }
 .greet {
-  font-family: var(--display); font-size: clamp(26px, 4vw, 34px);
-  color: var(--ink); text-align: center; letter-spacing: -0.01em; font-weight: 400;
+  font-size: clamp(24px, 3.2vw, 30px);
+  color: var(--ink); text-align: center; letter-spacing: -0.02em; font-weight: 700;
 }
-.greet .brand-mark { margin-right: 10px; }
 .home .chat-composer { width: min(100%, 720px); }
 .home-hint { color: var(--faint); font-size: 13px; }
 .spinner {
@@ -530,16 +533,17 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
 .codeblock:hover .copy-code, .copy-code:focus-visible { opacity: 1; }
 .copy-code:hover { color: var(--accent); border-color: var(--accent); }
 
-.hljs-comment, .hljs-quote { color: var(--faint); font-style: italic; }
+/* Xcode-flavoured token colours, light and dark. */
+.hljs-comment, .hljs-quote { color: light-dark(#5d6c79, #6c7986); font-style: italic; }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type,
-.hljs-built_in { color: light-dark(#af2e9b, #d097ce); }
+.hljs-built_in { color: light-dark(#9b2393, #fc5fa3); }
 .hljs-string, .hljs-regexp, .hljs-addition,
-.hljs-meta .hljs-string { color: light-dark(#216e4e, #7ee2b8); }
-.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link { color: light-dark(#a54800, #fbc828); }
+.hljs-meta .hljs-string { color: light-dark(#c41a16, #fc6a5d); }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link { color: light-dark(#1c00cf, #d0bf69); }
 .hljs-title, .hljs-section, .hljs-name,
-.hljs-selector-id, .hljs-selector-class { color: light-dark(#0055cc, #85b8ff); }
+.hljs-selector-id, .hljs-selector-class { color: light-dark(#326d74, #5dd8ff); }
 .hljs-attr, .hljs-attribute, .hljs-variable,
-.hljs-template-variable, .hljs-params { color: light-dark(#206a83, #8bdbe5); }
+.hljs-template-variable, .hljs-params { color: light-dark(#3900a0, #a167e6); }
 .hljs-meta, .hljs-doctag { color: var(--muted); }
 .hljs-deletion { color: var(--danger); }
 .hljs-emphasis { font-style: italic; }
@@ -663,8 +667,8 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
 /* --- monitoring ------------------------------------------------------------ */
 
 :root {
-  --chart-series: light-dark(#c6613f, #d97757);
-  --chart-series-strong: light-dark(#a84e30, #e08a6e);
+  --chart-series: light-dark(#007aff, #0a84ff);
+  --chart-series-strong: light-dark(#0062cc, #409cff);
 }
 
 .refetching { opacity: 0.6; transition: opacity 0.15s; }
@@ -803,8 +807,7 @@ dialog.modal {
 }
 dialog.modal::backdrop { background: rgba(20, 18, 12, 0.4); }
 dialog.modal h3 {
-  font-family: var(--display); font-size: 17px; font-weight: 500;
-  color: var(--ink); margin-bottom: 8px;
+  font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 8px;
 }
 dialog.modal p { color: var(--muted); font-size: 13.5px; line-height: 1.55; }
 dialog.modal .row.end { margin-top: 16px; }

@@ -258,7 +258,11 @@ export default function Page() {
       <aside className={`side ${sideOpen ? "open" : ""}`}>
         <div className="side-head">
           <a className="brand" href="#new">
-            <span className="brand-mark" aria-hidden>✳</span>
+            <span className="brand-mark" aria-hidden>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2 22 12 12 22 2 12z" />
+              </svg>
+            </span>
             <span>naxos</span>
           </a>
           <button className="icon-btn" onClick={toggleTheme} aria-label="toggle dark mode">

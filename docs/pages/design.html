@@ -413,7 +413,7 @@ table.api td.d code { font-size: 0.9em; }
     <tr><td>State</td><td>Cloud SQL Postgres <code>db-g1-small</code>, private IP, Direct VPC egress from Cloud Run</td><td>always-on (the one fixed cost)</td><td>—</td></tr>
     <tr><td>Workspaces</td><td>GCS bucket per environment <code>naxos2-sess-{env}</code></td><td>—</td><td>env SA + <code>sa-api</code> only</td></tr>
     <tr><td>Audit</td><td>BigQuery <code>audit.runs</code> + <code>audit.tool_calls</code>, written <strong>only by the control plane</strong></td><td>—</td><td><code>sa-api</code></td></tr>
-    <tr><td>UI — chat-first (Claude-app-style sidebar of conversations + live chat with inline approvals) with a console area: all sessions, agents, deployments, artifacts, monitoring, vaults, memory, skills, kill switch</td><td>Next.js static export baked into the api image</td><td>—</td><td>—</td></tr>
+    <tr><td>UI — chat-first, macOS-style (sidebar of conversations + Messages-like live chat with inline approvals) with a console area: all sessions, agents, deployments, artifacts, monitoring, vaults, memory, skills, kill switch</td><td>Next.js static export baked into the api image</td><td>—</td><td>—</td></tr>
   </tbody>
 </table>
 </div>
