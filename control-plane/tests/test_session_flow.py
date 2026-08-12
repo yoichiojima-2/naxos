@@ -267,3 +267,65 @@ async def test_event_sequence_is_per_session_and_monotonic(client, launched):
         await client.get(f"/v1/sessions/{session['id']}/events", params={"after": 2})
     ).json()["data"]
     assert [e["seq"] for e in after_first] == [3, 4]
+
+
+async def test_session_title_derives_from_the_first_user_message(client, launched):
+    _, agent = await make_agent(client)
+    session = (
+        await client.post(
+            "/v1/sessions",
+            json={
+                "agent": {"id": agent["id"]},
+                "initial_events": [
+                    {
+                        "type": "user.message",
+                        "content": [{"type": "text", "text": "  Check the\nnightly   logs  "}],
+                    }
+                ],
+            },
+        )
+    ).json()
+    assert session["title"] == "Check the nightly logs"
+
+
+async def test_session_title_set_on_first_message_and_never_overwritten(client, launched):
+    _, agent = await make_agent(client)
+    session = (await client.post("/v1/sessions", json={"agent": {"id": agent["id"]}})).json()
+    assert session["title"] is None
+
+    long_text = "x" * 200
+    await client.post(
+        f"/v1/sessions/{session['id']}/events",
+        json={
+            "events": [{"type": "user.message", "content": [{"type": "text", "text": long_text}]}]
+        },
+    )
+    titled = (await client.get(f"/v1/sessions/{session['id']}")).json()
+    assert len(titled["title"]) == 80
+    assert titled["title"].endswith("…")
+
+    await client.post(
+        f"/v1/sessions/{session['id']}/events",
+        json={
+            "events": [{"type": "user.message", "content": [{"type": "text", "text": "second"}]}]
+        },
+    )
+    again = (await client.get(f"/v1/sessions/{session['id']}")).json()
+    assert again["title"] == titled["title"]
+
+
+async def test_explicit_session_title_wins_over_derivation(client, launched):
+    _, agent = await make_agent(client)
+    session = (
+        await client.post(
+            "/v1/sessions",
+            json={
+                "agent": {"id": agent["id"]},
+                "title": "ops run",
+                "initial_events": [
+                    {"type": "user.message", "content": [{"type": "text", "text": "hello"}]}
+                ],
+            },
+        )
+    ).json()
+    assert session["title"] == "ops run"

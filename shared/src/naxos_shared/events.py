@@ -38,6 +38,12 @@ class EventType(StrEnum):
     SPAN_MODEL_REQUEST_END = "span.model_request_end"
 
 
+# Transient SSE frame carrying partial text of the agent message currently
+# generating. Deliberately not an EventType: it is never persisted, never
+# replayed, and the persisted agent.message that follows supersedes it.
+STREAM_DELTA_TYPE = "agent.message_delta"
+
+
 USER_EVENT_TYPES = {
     EventType.USER_MESSAGE,
     EventType.USER_INTERRUPT,

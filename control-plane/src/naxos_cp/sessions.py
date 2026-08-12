@@ -1,10 +1,24 @@
 from typing import Any
 
 import asyncpg
-from naxos_shared.events import EventIn
+from naxos_shared.events import EventIn, EventType
 from naxos_shared.ids import new_id
 
 from . import store, wake
+
+TITLE_MAX_CHARS = 80
+
+
+def derive_title(events: list[EventIn]) -> str | None:
+    """A title from the first user message, so lists never show bare ids."""
+    for event in events:
+        if event.type is not EventType.USER_MESSAGE:
+            continue
+        text = " ".join(" ".join(block.text.split()) for block in event.content)
+        text = text.strip()
+        if text:
+            return text if len(text) <= TITLE_MAX_CHARS else text[: TITLE_MAX_CHARS - 1] + "…"
+    return None
 
 
 async def resolve_agent(
@@ -43,7 +57,7 @@ async def create(
         agent["id"],
         agent["version"],
         agent["environment_id"],
-        title,
+        title or derive_title(initial_events),
         budget_usd if budget_usd is not None else agent["default_budget_usd"],
         vault_ids or list(agent["vault_ids"]),
         memory_store_ids or list(agent["memory_store_ids"]),

@@ -110,6 +110,213 @@ async def test_deployment_records_failure_when_agent_disabled(client, launched):
     assert launched == []
 
 
+async def _fire_and_claim(client, internal_client, launched, **overrides):
+    _, agent = await make_agent(client)
+    deployment = await make_deployment(client, agent, **overrides)
+    run = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
+    lease = (await internal_client.post(f"/internal/sessions/{run['session_id']}/claim")).json()[
+        "lease_id"
+    ]
+    return deployment, run, lease
+
+
+async def _only_run(client, deployment_id):
+    runs = (await client.get(f"/v1/deployments/{deployment_id}/runs")).json()["data"]
+    assert len(runs) == 1
+    return runs[0]
+
+
+async def test_deployment_run_is_closed_when_the_session_goes_idle(
+    client, internal_client, launched
+):
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 0.25, "num_turns": 3},
+    )
+
+    closed = await _only_run(client, deployment["id"])
+    assert closed["status"] == "succeeded"
+    assert closed["stop_reason"] == "end_turn"
+    assert closed["cost_usd"] == 0.25
+    assert closed["num_turns"] == 3
+    assert closed["finished_at"] is not None
+    assert closed["duration_seconds"] >= 0
+
+
+async def test_deployment_run_stays_open_while_it_awaits_approval(
+    client, internal_client, launched
+):
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 0.1, "num_turns": 1, "stop_reason": "requires_action"},
+    )
+
+    waiting = await _only_run(client, deployment["id"])
+    assert waiting["status"] == "running"
+    assert waiting["stop_reason"] == "requires_action"
+    assert waiting["finished_at"] is None
+
+    # The operator approves, the session wakes again and finishes for real.
+    lease = (await internal_client.post(f"/internal/sessions/{run['session_id']}/claim")).json()[
+        "lease_id"
+    ]
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 0.4, "num_turns": 2},
+    )
+
+    closed = await _only_run(client, deployment["id"])
+    assert closed["status"] == "succeeded"
+    assert closed["cost_usd"] == 0.4  # burst deltas, summed to the session's cost
+    assert closed["num_turns"] == 3
+    assert closed["finished_at"] is not None
+
+
+async def test_budget_leaves_the_run_open_because_raising_it_resumes(
+    client, internal_client, launched
+):
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 0.5, "stop_reason": "budget_reached"},
+    )
+
+    blocked = await _only_run(client, deployment["id"])
+    assert blocked["status"] == "running"
+    assert blocked["stop_reason"] == "budget_reached"
+    assert blocked["finished_at"] is None
+
+    # Raising the budget is the resume signal, and the rest of the run's cost
+    # still lands on the same row.
+    await client.patch(f"/v1/sessions/{run['session_id']}", json={"budget_usd": 10})
+    lease = (await internal_client.post(f"/internal/sessions/{run['session_id']}/claim")).json()[
+        "lease_id"
+    ]
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 3.0},
+    )
+
+    done = await _only_run(client, deployment["id"])
+    assert done["status"] == "succeeded"
+    assert done["cost_usd"] == 3.0
+    assert done["finished_at"] is not None
+
+
+async def test_crashed_burst_is_a_failed_run_not_a_successful_one(
+    client, internal_client, launched
+):
+    """The sandbox stops at end_turn however it died, so it flags the crash."""
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "errored": True, "num_turns": 0},
+    )
+
+    crashed = await _only_run(client, deployment["id"])
+    assert crashed["status"] == "failed"
+    assert crashed["error_type"] == "session_error"
+    assert crashed["finished_at"] is not None
+
+
+async def test_kill_switch_cancels_a_run_instead_of_recording_a_success(
+    client, internal_client, launched
+):
+    """The sandbox stops on the kill signal but reports an ordinary end_turn."""
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    agent_id = (await client.get(f"/v1/deployments/{deployment['id']}")).json()["agent_id"]
+
+    await client.patch(f"/v1/agents/{agent_id}", json={"disabled": True})
+    killed = await _only_run(client, deployment["id"])
+    assert killed["status"] == "cancelled"
+    assert killed["error_type"] == "agent_disabled"
+
+    # The killed sandbox's own checkpoint must not reopen or overwrite it.
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 0.1},
+    )
+    assert (await _only_run(client, deployment["id"]))["status"] == "cancelled"
+
+
+async def test_run_fails_when_the_sandbox_cannot_be_started(client, internal_client, launched):
+    from naxos_cp import config as cp_config
+    from naxos_cp import db
+
+    deployment, run, _ = await _fire_and_claim(client, internal_client, launched)
+    async with db.transaction() as conn:
+        await conn.execute(
+            "UPDATE sessions SET retry_count = $2, lease_expires_at = NULL WHERE id = $1",
+            run["session_id"],
+            cp_config.MAX_WAKE_RETRIES,
+        )
+
+    await client.post(
+        f"/v1/sessions/{run['session_id']}/events",
+        json={"events": [{"type": "user.message", "content": [{"type": "text", "text": "go"}]}]},
+    )
+
+    stuck = await _only_run(client, deployment["id"])
+    assert stuck["status"] == "failed"
+    assert stuck["error_type"] == "retries_exhausted"
+    assert stuck["finished_at"] is not None
+
+
+async def test_terminating_the_session_cancels_its_deployment_run(
+    client, internal_client, launched
+):
+    deployment, run, _ = await _fire_and_claim(client, internal_client, launched)
+    await client.post(f"/v1/sessions/{run['session_id']}/terminate")
+
+    cancelled = await _only_run(client, deployment["id"])
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["finished_at"] is not None
+
+
+async def test_runs_overview_reports_history_per_deployment(client, internal_client, launched):
+    deployment, run, lease = await _fire_and_claim(client, internal_client, launched)
+    await internal_client.post(
+        f"/internal/sessions/{run['session_id']}/checkpoint",
+        json={"lease_id": lease, "cost_usd": 0.5, "num_turns": 2},
+    )
+    failed = (await client.post(f"/v1/deployments/{deployment['id']}/run")).json()
+    await client.post(f"/v1/sessions/{failed['session_id']}/terminate")
+
+    overview = (await client.get("/v1/deployments/runs", params={"days": 7})).json()
+    assert overview["window_days"] == 7
+    assert [r["id"] for r in overview["runs"]] == [failed["id"], run["id"]]
+    assert overview["runs"][0]["deployment_name"] == deployment["name"]
+
+    totals = overview["deployments"]
+    assert len(totals) == 1
+    assert totals[0]["id"] == deployment["id"]
+    assert (totals[0]["runs"], totals[0]["succeeded"], totals[0]["cancelled"]) == (2, 1, 1)
+    assert totals[0]["cost_usd"] == 0.5
+    assert totals[0]["finished"] == 2
+    assert totals[0]["duration_seconds"] >= 0
+
+    only_succeeded = (
+        await client.get("/v1/deployments/runs", params={"status": "succeeded"})
+    ).json()
+    assert [r["id"] for r in only_succeeded["runs"]] == [run["id"]]
+    assert (
+        await client.get("/v1/deployments/runs", params={"status": "nonsense"})
+    ).status_code == (422)
+
+
+async def test_archived_deployments_keep_their_runs_in_the_overview(
+    client, internal_client, launched
+):
+    deployment, run, _ = await _fire_and_claim(client, internal_client, launched)
+    await client.post(f"/v1/deployments/{deployment['id']}/archive")
+
+    overview = (await client.get("/v1/deployments/runs")).json()
+    assert [r["id"] for r in overview["runs"]] == [run["id"]]
+    assert overview["deployments"][0]["archived"] is True
+
+
 async def _make_session(client, agent):
     session = (
         await client.post(

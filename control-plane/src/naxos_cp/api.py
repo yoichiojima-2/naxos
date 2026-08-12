@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from naxos_shared.events import (
+    STREAM_DELTA_TYPE,
     Decision,
     EffortLevel,
     EventIn,
@@ -21,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from . import (
     artifacts,
     config,
+    confirmations,
     connectors,
     db,
     deployments,
@@ -32,6 +34,7 @@ from . import (
     sessions,
     skills,
     store,
+    tool_calls,
     vaults,
     wake,
     workspace,
@@ -55,6 +58,8 @@ def create_app(manage_pool: bool = True) -> FastAPI:
     app.include_router(workspace.router)
     app.include_router(artifacts.router)
     app.include_router(favorites.router)
+    app.include_router(tool_calls.router)
+    app.include_router(confirmations.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))
@@ -209,6 +214,10 @@ async def patch_agent(agent_id: str, body: AgentPatch, _: str = Depends(principa
         )
         if db.rowcount(result) != 1:
             raise HTTPException(404, "agent not found")
+        if body.disabled:
+            await deployments.cancel_agent_runs(
+                conn, agent_id, "the agent was disabled (kill switch)"
+            )
     return {"id": agent_id, "disabled": body.disabled}
 
 
@@ -370,6 +379,9 @@ async def delete_session(session_id: str, principal: str = Depends(principal_of)
             r["id"]
             for r in await conn.fetch("SELECT id FROM artifacts WHERE session_id = $1", session_id)
         ]
+        # Before the delete: the run's session_id is nulled by the FK, so an open
+        # run could no longer be found. A rollback on the 409 below undoes it.
+        await deployments.cancel_open_runs(conn, session_id, "the session was deleted")
         # Conditional DELETE so the liveness check and the delete are one atomic
         # statement — a claim landing in between makes the condition fail, not race.
         result = await conn.execute(
@@ -398,6 +410,7 @@ async def terminate_session(session_id: str, _: str = Depends(principal_of)) -> 
             raise HTTPException(404, "session not found")
         await store.set_status(conn, session_id, SessionStatus.TERMINATED)
         await store.clear_egress_routes(conn, session_id)
+        await deployments.cancel_open_runs(conn, session_id, "session terminated by an operator")
     return {"id": session_id, "status": "terminated"}
 
 
@@ -416,8 +429,8 @@ async def send_events(
         raise HTTPException(400, "events must not be empty")
     async with db.transaction() as conn:
         session = await conn.fetchrow(
-            "SELECT s.status, a.disabled FROM sessions s JOIN agents a ON a.id = s.agent_id "
-            "WHERE s.id = $1",
+            "SELECT s.status, s.title, a.disabled FROM sessions s "
+            "JOIN agents a ON a.id = s.agent_id WHERE s.id = $1",
             session_id,
         )
         if session is None:
@@ -445,6 +458,15 @@ async def send_events(
                 conn, session_id, event.type, event.model_dump(mode="json"), principal
             )
             created.append({"id": record["id"], "seq": record["seq"], "type": record["type"]})
+        if session["title"] is None:
+            title = sessions.derive_title(body.events)
+            if title:
+                await conn.execute(
+                    "UPDATE sessions SET title = $2, updated_at = now() "
+                    "WHERE id = $1 AND title IS NULL",
+                    session_id,
+                    title,
+                )
         await wake.wake(conn, session_id)
     return {"data": created}
 
@@ -461,10 +483,12 @@ async def get_events(
     if stream == "sse":
         last_event_id = request.headers.get("last-event-id")
         start = int(last_event_id) if last_event_id else after
+        # no-transform: intermediaries (the Next dev proxy included) buffer SSE
+        # to compress it, which stalls the stream until the connection closes.
         return StreamingResponse(
             _sse(session_id, start),
             media_type="text/event-stream",
-            headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
+            headers={"cache-control": "no-cache, no-transform", "x-accel-buffering": "no"},
         )
     async with db.transaction() as conn:
         rows = await store.list_events(conn, session_id, after, limit)
@@ -472,34 +496,47 @@ async def get_events(
 
 
 async def _sse(session_id: str, after: int):
-    """Replay from `after`, then tail on LISTEN/NOTIFY. Frame ids are the seq."""
+    """Replay from `after`, then tail on LISTEN/NOTIFY. Frame ids are the seq.
+
+    Transient partial-text frames are interleaved without an id line, so they
+    never advance Last-Event-ID and are never replayed — the persisted
+    agent.message that follows carries the durable text.
+    """
     cursor = after
-    while True:
-        async with db.pool().acquire() as conn:
-            rows = await store.list_events(conn, session_id, cursor, 200)
-        for row in rows:
-            cursor = row["seq"]
-            payload = json.dumps(
-                {
-                    "type": row["type"],
-                    "seq": row["seq"],
-                    "payload": row["payload"],
-                    "principal": row["principal"],
-                    "created_at": row["created_at"].isoformat(),
-                },
-                default=str,
-            )
-            yield f"id: {row['seq']}\nevent: {row['type']}\ndata: {payload}\n\n"
-            if row["type"] == str(EventType.SESSION_STATUS_TERMINATED):
+    queue = notify.subscribe_stream(session_id)
+    try:
+        while True:
+            async with db.pool().acquire() as conn:
+                rows = await store.list_events(conn, session_id, cursor, 200)
+            for row in rows:
+                cursor = row["seq"]
+                payload = json.dumps(
+                    {
+                        "type": row["type"],
+                        "seq": row["seq"],
+                        "payload": row["payload"],
+                        "principal": row["principal"],
+                        "created_at": row["created_at"].isoformat(),
+                    },
+                    default=str,
+                )
+                yield f"id: {row['seq']}\nevent: {row['type']}\ndata: {payload}\n\n"
+                if row["type"] == str(EventType.SESSION_STATUS_TERMINATED):
+                    return
+            if rows:
+                continue
+            async with db.pool().acquire() as conn:
+                exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", session_id)
+            if not exists:
                 return
-        if rows:
-            continue
-        async with db.pool().acquire() as conn:
-            exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", session_id)
-        if not exists:
-            return
-        if not await notify.wait(session_id, config.SSE_PING_SECONDS):
-            yield ": ping\n\n"
+            result = await notify.wait_or_delta(session_id, queue, config.SSE_PING_SECONDS)
+            if result is False:
+                yield ": ping\n\n"
+            elif isinstance(result, dict):
+                data = json.dumps({"type": STREAM_DELTA_TYPE, **result}, default=str)
+                yield f"event: {STREAM_DELTA_TYPE}\ndata: {data}\n\n"
+    finally:
+        notify.unsubscribe_stream(session_id, queue)
 
 
 app = create_app()

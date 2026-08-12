@@ -7,6 +7,7 @@ import FavoriteStar, { FavoriteProps, useFavoriteFilter } from "@/components/fav
 import CountHeader from "@/components/list-header";
 import FilterInput from "@/components/filter-input";
 import TableStates from "@/components/table-states";
+import { confirmDialog } from "@/components/confirm";
 
 export default function Agents({
   agents,
@@ -31,12 +32,15 @@ export default function Agents({
   }
 
   async function toggleKill(agent: Agent) {
-    if (
-      !agent.disabled &&
-      !window.confirm(
-        `Kill "${agent.name}"? Running sessions stop before their next tool call and its deployments pause.`,
-      )
-    ) return;
+    if (!agent.disabled) {
+      const ok = await confirmDialog({
+        title: `Kill "${agent.name}"?`,
+        body: "Running sessions stop before their next tool call and its deployments pause.",
+        action: "Kill",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     await api(`/v1/agents/${agent.id}`, { method: "PATCH", json: { disabled: !agent.disabled } });
     onChange();
   }

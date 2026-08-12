@@ -1,17 +1,28 @@
 # naxos
 
-A Google Cloud implementation of Claude Managed Agents: versioned agents, isolated per-session sandboxes on Cloud Run, an event-sourced session API with SSE streaming, approval gates, vaults with an egress credential proxy, scheduled deployments, and full execution-level audit — inside a single GCP project with Vertex AI as the only model exit.
+A Google Cloud implementation of Claude Managed Agents: versioned agents, isolated per-session sandboxes on Cloud Run, an event-sourced session API with SSE streaming — including token-level live text while the agent is typing — approval gates, vaults with an egress credential proxy, scheduled deployments, and full execution-level audit — inside a single GCP project with Vertex AI as the only model exit.
+
+The UI is chat-first with a native macOS-style look: a sidebar of auto-titled conversations, Messages-style chat with live streaming replies, markdown with syntax-highlighted copyable code, and inline tool-approval cards — on top of a console for operating the platform (all sessions, an approvals inbox, agents, deployments, monitoring, skills, vaults, memory).
 
 - Docs site: [yoichiojima-2.github.io/naxos](https://yoichiojima-2.github.io/naxos/)
 - Design: [`docs/design.md`](docs/design.md)
 - Constraints and conventions: [`CLAUDE.md`](CLAUDE.md)
 
-![Sessions — live agent runs with status, principal, and cost per session](docs/img/sessions.png)
+![Chat — conversations with agents, auto-titled and grouped by recency](docs/img/sessions.png)
+
+![Approvals — every tool call an agent is paused on, across all sessions, with the agent, the session and who it is for](docs/img/approvals.png)
 
 <details>
-<summary>A session timeline: event stream, tool calls, and a human approval gate</summary>
+<summary>A conversation paused on a human approval gate</summary>
 
-![Session timeline — the agent pauses on a gated tool call until a human allows or denies it](docs/img/session-timeline.png)
+![A chat where the agent pauses on a gated tool call until a human allows or denies it](docs/img/session-timeline.png)
+
+</details>
+
+<details>
+<summary>Deployment runs: duration, outcome and cost of every unattended run</summary>
+
+![Deployment runs — run duration over time coloured by outcome, with success rate, average duration and spend per deployment](docs/img/deployment-runs.png)
 
 </details>
 
@@ -22,7 +33,8 @@ Hosted agent platforms run the agent loop and sandbox on the provider's cloud. n
 - **Data boundary** — model access via Vertex AI only; data never leaves the project.
 - **Internal-system integration** — self-hosted MCP servers reach closed-network systems without egress.
 - **Connectors without connector code** — Slack, Google Workspace, Notion, Jira, Confluence and GitHub attach as existing MCP servers, either self-hosted in the project or reached through the credential proxy. See [`docs/connectors.md`](docs/connectors.md).
-- **Execution-level governance** — per-tool-call audit, human approval gates, an instant per-agent kill switch, and per-tenant IAM.
+- **Execution-level governance** — human approval gates with a cross-session inbox, an off-app alert and an expiry deadline; an instant per-agent kill switch; per-tenant IAM.
+- **An execution record you can hand to an auditor** — every tool call an agent attempted, recorded by the control plane at the permission gate: who asked, who approved, the arguments, the decision, and what came back. Queryable and exportable over `/v1/tool_calls`, and it outlives the session it describes.
 - **Scale-to-zero** — always *available* rather than always running; idle sessions checkpoint to storage and release their container.
 
 ## Layout

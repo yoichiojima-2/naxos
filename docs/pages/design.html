@@ -413,7 +413,7 @@ table.api td.d code { font-size: 0.9em; }
     <tr><td>State</td><td>Cloud SQL Postgres <code>db-g1-small</code>, private IP, Direct VPC egress from Cloud Run</td><td>always-on (the one fixed cost)</td><td>—</td></tr>
     <tr><td>Workspaces</td><td>GCS bucket per environment <code>naxos2-sess-{env}</code></td><td>—</td><td>env SA + <code>sa-api</code> only</td></tr>
     <tr><td>Audit</td><td>BigQuery <code>audit.runs</code> + <code>audit.tool_calls</code>, written <strong>only by the control plane</strong></td><td>—</td><td><code>sa-api</code></td></tr>
-    <tr><td>UI — agents, session chat/timeline, approval inbox, deployments, artifacts, vaults, memory, skills, kill switch</td><td>Next.js static export baked into the api image</td><td>—</td><td>—</td></tr>
+    <tr><td>UI — chat-first, macOS-style (sidebar of conversations + Messages-like live chat with inline approvals) with a console area: all sessions, agents, deployments, artifacts, monitoring, vaults, memory, skills, kill switch</td><td>Next.js static export baked into the api image</td><td>—</td><td>—</td></tr>
   </tbody>
 </table>
 </div>
@@ -497,7 +497,9 @@ table.api td.d code { font-size: 0.9em; }
 </ol>
 <p>Then the processing loop: long-poll <code>/internal/sessions/{id}/queue?wait=25</code> (queued events + control signals: interrupt / kill / terminate) → SDK turn → batch-POST <code>agent.*</code>/<code>span.*</code> events to <code>/internal</code>.</p>
 
-<p><strong>Client-facing streaming.</strong> <code>GET /v1/sessions/{id}/events?stream=sse&amp;after={seq}</code> — the API polls <code>session_events</code> every 1s, emits SSE frames with <code>id:{seq}</code>, honors <code>Last-Event-ID</code> for reconnect replay, sends a ping comment every 15s. This is v1's <code>EventStream</code> re-derived but DB-backed: replay survives instance loss, so no Cloud Run session affinity is needed anywhere. LISTEN/NOTIFY is a later latency optimization, deliberately not built in v1.</p>
+<p><strong>Client-facing streaming.</strong> <code>GET /v1/sessions/{id}/events?stream=sse&amp;after={seq}</code> — the API replays from the cursor, then tails <code>session_events</code> on Postgres LISTEN/NOTIFY, emitting SSE frames with <code>id:{seq}</code>, honoring <code>Last-Event-ID</code> for reconnect replay, with a ping comment every 15s of quiet. Because the stream is DB-backed, replay survives instance loss, so no Cloud Run session affinity is needed anywhere.</p>
+
+<p><strong>Token-level partial text.</strong> The append-only event log cannot hold a row per token, so live typing rides <em>transient</em> <code>agent.message_delta</code> frames instead: the sandbox batches the SDK's partial-message text deltas (~0.3s cadence, ≤1000 chars/frame) to <code>POST /internal/sessions/{id}/stream</code>, which fans them out to SSE listeners over a second LISTEN/NOTIFY channel — nothing is stored. Delta frames carry no SSE <code>id:</code> line, so <code>Last-Event-ID</code> replay semantics are untouched; each frame carries a <code>stream</code> id that the persisted <code>agent.message</code> repeats, letting clients drop late deltas instead of duplicating text. Audit is unaffected: the persisted message remains the only durable record, and a lost delta loses nothing.</p>
 
 <p><strong>Interrupt.</strong> <code>user.interrupt</code> is inserted as an event and surfaced immediately on the control channel; the sandbox calls <code>client.interrupt()</code>. Jumps the queue, per CMA.</p>
 
@@ -505,11 +507,16 @@ table.api td.d code { font-size: 0.9em; }
 
 <ol>
   <li>Check the kill switch (<code>agents.disabled</code>; 15s cache + control-channel push).</li>
-  <li>Match the tool against the agent version's permission policy. <code>always_allow</code> → allow, record the decision in audit.</li>
+  <li>Match the tool against the agent version's permission policy. <code>always_allow</code> → allow.</li>
   <li><code>always_ask</code> → look up <code>tool_confirmations</code> by <code>(session_id, call_hash)</code> where <code>call_hash = sha256(tool_name + canonical_json(input))</code>. Stored decision → return it. <strong>The key is the call hash, not <code>tool_use_id</code></strong> — the SDK assigns a fresh <code>tool_use_id</code> when a pending call is replayed after resume (measured; §4.1).</li>
   <li>No decision → insert a pending row, emit <code>session.status_idle(stop_reason=requires_action)</code>, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, <strong>checkpoint and exit</strong> — a blocked container costs nothing.</li>
   <li>A later <code>user.tool_confirmation</code> stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.</li>
+  <li><strong>Nothing answers.</strong> The pending row carries <code>expires_at = now() + CONFIRMATION_TTL_HOURS</code> (default 24h; 0 disables it). The reconciler marks anything past it <code>expired</code>, queues the same <code>user.tool_confirmation(deny)</code> event a human decision would, and wakes the session — so the replayed call is refused with a reason that tells the agent to stop rather than retry, and the run ends instead of parking forever. Terminated sessions are skipped: nothing would consume the resume event.</li>
 </ol>
+
+<p>Every branch above — including the pause and both denials — commits a <code>tool_calls</code> row in the same transaction before answering (§8). A paused call and the approved call that replaces it are two rows chained by <code>call_hash</code>. <code>expired</code> is a decision of its own, distinct from <code>user_denied</code>: "nobody answered" and "a human said no" mean different things to whoever reads the record later.</p>
+
+<p><strong>Being paused is not the same as being seen.</strong> A gate that only works when someone happens to have the right session open is not a control. Three things close that: <code>GET /v1/tool_confirmations</code> is a cross-session queue (the UI's Approvals view, with a pending count badged on every page); the gate emits a <code>naxos.approval_required</code> log line that a Terraform-provisioned log-based metric and alert policy turn into mail (§8); and expiry above bounds how long a forgotten approval can hold a session. Deciding stays <code>POST /v1/sessions/{id}/events</code> — the inbox hands back the <code>session_id</code> and <code>call_hash</code> that call needs, rather than adding a second decision path that could drift from the audit write and the wake.</p>
 
 <h3 id="s4-1"><span class="num">4.1</span>Measured SDK resume semantics (<code>claude-agent-sdk</code> 0.2.134)</h3>
 
@@ -591,13 +598,28 @@ table.api td.d code { font-size: 0.9em; }
 </div>
 
 <div class="tbl">
+  <div class="tbl-head"><span class="tbl-name">tool_calls</span><span class="tbl-key">the execution record — written at the permission gate, see §8</span></div>
+  <div class="table-wrap"><table>
+    <tr><td class="c">id bigserial, session_id, run_id, agent_id, agent_version, environment_id</td><td class="n">no FK: like <code>session_runs</code> it must outlive the session it describes</td></tr>
+    <tr><td class="c">principal</td><td class="n">the turn's actor, or <code>deployment:{id}</code></td></tr>
+    <tr><td class="c">approved_by</td><td class="n">the human who answered a gated call</td></tr>
+    <tr><td class="c">tool_name, call_hash, tool_use_id</td><td class="n"></td></tr>
+    <tr><td class="c">args_json, args_truncated</td><td class="n">the exact canonical bytes <code>call_hash</code> covers, capped</td></tr>
+    <tr><td class="c">decision</td><td class="n">CHECK IN <code>auto_allowed · user_allowed · user_denied · not_allowed · killed · awaiting_confirmation</code></td></tr>
+    <tr><td class="c">result_status</td><td class="n">CHECK IN <code>ok · error · denied · no_result</code></td></tr>
+    <tr><td class="c">latency_ms, error, decided_at, resulted_at, exported_at</td><td class="n"></td></tr>
+  </table></div>
+</div>
+
+<div class="tbl">
   <div class="tbl-head"><span class="tbl-name">tool_confirmations</span><span class="tbl-key">UNIQUE <code>(session_id, call_hash)</code></span></div>
   <div class="table-wrap"><table>
     <tr><td class="c">id, session_id, call_hash</td><td class="n"><code>sha256(tool_name + canonical_json(input))</code></td></tr>
     <tr><td class="c">tool_use_id</td><td class="n">audit only; not stable across resume</td></tr>
     <tr><td class="c">tool_name, input jsonb</td><td class="n"></td></tr>
     <tr><td class="c">status</td><td class="n">CHECK IN <code>pending · allowed · denied · expired</code></td></tr>
-    <tr><td class="c">requested_at, expires_at, decided_by, decided_at</td><td class="n"></td></tr>
+    <tr><td class="c">requested_at, decided_by, decided_at</td><td class="n"></td></tr>
+    <tr><td class="c">expires_at</td><td class="n"><code>CONFIRMATION_TTL_HOURS</code> at insert; the reconciler sweeps it</td></tr>
   </table></div>
 </div>
 
@@ -615,9 +637,10 @@ table.api td.d code { font-size: 0.9em; }
   <div class="tbl-head"><span class="tbl-name">deployment_runs</span></div>
   <div class="table-wrap"><table>
     <tr><td class="c">id, deployment_id, session_id</td><td class="n"></td></tr>
-    <tr><td class="c">status</td><td class="n">CHECK IN <code>queued · running · succeeded · failed</code></td></tr>
-    <tr><td class="c">error_type</td><td class="n"><code>session_error · budget_reached · timeout · retries_exhausted · infra_error</code></td></tr>
-    <tr><td class="c">fired_at, finished_at</td><td class="n"></td></tr>
+    <tr><td class="c">status</td><td class="n">CHECK IN <code>queued · running · succeeded · failed · cancelled</code></td></tr>
+    <tr><td class="c">error_type</td><td class="n"><code>session_error · budget_reached · timeout · retries_exhausted · infra_error · agent_disabled · cancelled</code></td></tr>
+    <tr><td class="c">stop_reason, cost_usd, num_turns</td><td class="n">folded in at the fired session's checkpoint</td></tr>
+    <tr><td class="c">fired_at, started_at, finished_at</td><td class="n">a run blocked on an operator (<code>requires_action</code>, <code>budget_reached</code> — raising the budget resumes) stays open and keeps accumulating; terminal failures come from the control plane, since a crashed burst still reports <code>end_turn</code> and exhausted wake retries never reach a checkpoint</td></tr>
   </table></div>
 </div>
 
@@ -685,7 +708,7 @@ table.api td.d code { font-size: 0.9em; }
 <ul>
   <li>The sandbox exposes an <strong>in-process MCP server</strong> (<code>bigquery</code>) with four tools: <code>bigquery_list_datasets</code>, <code>bigquery_list_tables</code>, <code>bigquery_describe_table</code>, <code>bigquery_query</code>. Ordinary tool calls — they pass the <code>PreToolUse</code> permission gate, land in <code>audit.tool_calls</code> with the SQL as the recorded input, and obey the kill switch. Requests go straight from the sandbox to <code>bigquery.googleapis.com</code> as the environment SA, which is what bounds them.</li>
   <li><strong>The server is registered only when the environment was opted in.</strong> Terraform passes the environment's <code>bigquery_datasets</code> list to the sandbox job as <code>BIGQUERY_DATASETS</code>; when it is empty the server is not built, so an environment without the grant has no BigQuery tools at all rather than tools that fail. Same list as the IAM grants, so tool surface and IAM boundary cannot drift apart.</li>
-  <li><strong>The audit dataset is read through authorized views, never through a grant.</strong> <code>naxos_audit</code> holds every tenant's rows and is never grantable to an environment SA. Terraform republishes <code>runs</code> and <code>tool_calls</code> as authorized views in a separate dataset, <code>naxos_audit_shared</code>, and grants those views access on the source: an environment that lists <code>naxos_audit_shared</code> reads the platform's own history while holding no permission on <code>naxos_audit</code> itself. Writes remain control-plane-only, so the single-writer property is unaffected. The views select every row, so a second environment needs a tenant filter in the view query before this dataset is opted into more than once.</li>
+  <li><strong>The audit dataset is read through authorized views, never through a grant.</strong> <code>naxos_audit</code> holds every tenant's rows and is never grantable to an environment SA. Terraform republishes <code>runs</code> and <code>tool_calls</code> as authorized views in a separate dataset, <code>naxos_audit_shared</code>, and grants those views access on the source: an environment that lists <code>naxos_audit_shared</code> reads the platform's own history while holding no permission on <code>naxos_audit</code> itself. Writes remain control-plane-only, so the single-writer property is unaffected. The <code>tool_calls</code> view selects explicit columns and omits <code>args_json</code> and <code>error</code> — the full tool arguments and tool output of every tenant — while keeping <code>call_hash</code> so an agent can still correlate calls without reading their contents. The views select every <em>row</em>, so a second environment still needs a tenant filter in the view query before this dataset is opted into more than once.</li>
   <li><strong>Guardrails are enforced in code, not prompt</strong>: only a single read-only <code>SELECT</code>/<code>WITH</code> runs (DML, DDL, and multi-statement scripts are refused before the API call); every query is dry-run first and refused if it would scan more than <code>MAX_QUERY_BYTES_BILLED</code> (default 1GiB), which is also sent as <code>maximumBytesBilled</code> so the cap holds even if the estimate is wrong; results are capped at <code>MAX_QUERY_ROWS</code> (default 200).</li>
   <li>The job location is resolved once from the readable datasets and cached — a job against a regional dataset otherwise fails as "not found in location US", and the location has to be known before the dry run, so it cannot be read off the query.</li>
   <li>A denial is reported to the agent as terminal (which datasets it can read, and to stop rather than retry): no amount of retrying widens a Terraform-provisioned grant.</li>
@@ -732,14 +755,20 @@ table.api td.d code { font-size: 0.9em; }
 </div>
 
 <div class="tbl">
-  <div class="tbl-head"><span class="tbl-name">audit.tool_calls</span></div>
+  <div class="tbl-head"><span class="tbl-name">audit.tool_calls</span><span class="tbl-key">an append-only export of the Postgres record</span></div>
   <div class="table-wrap"><table>
-    <tr><td class="c">run_id, session_id, agent_id, principal, ts, tool_use_id</td><td class="n"></td></tr>
-    <tr><td class="c">tool_name, args_redacted</td><td class="n"></td></tr>
-    <tr><td class="c">decision</td><td class="n"><code>auto_allowed · user_allowed · user_denied · not_allowed · killed</code></td></tr>
+    <tr><td class="c">tool_call_id, run_id, session_id, agent_id, agent_version, environment_id</td><td class="n"></td></tr>
+    <tr><td class="c">principal, approved_by, ts, tool_use_id</td><td class="n"></td></tr>
+    <tr><td class="c">tool_name, call_hash, args_json, args_truncated</td><td class="n"></td></tr>
+    <tr><td class="c">decision</td><td class="n"><code>auto_allowed · user_allowed · user_denied · not_allowed · killed · awaiting_confirmation</code></td></tr>
     <tr><td class="c">result_status, latency_ms, error</td><td class="n"></td></tr>
+    <tr><td class="c">args_redacted</td><td class="n">dead column: rows written before the execution record have it populated and <code>args_json</code> NULL</td></tr>
   </table></div>
 </div>
+
+<p><strong>The write is two-stage, and it has to be.</strong> Postgres is the system of record: the <code>tool_calls</code> row is committed at the permission gate, before the tool runs. BigQuery is an append-only export of <em>completed</em> rows, written at each checkpoint — a streamed row cannot be updated for ~90 minutes, so a row written at decision time could never gain its result. The Postgres id is sent as the BigQuery <code>insertId</code>, so an export retried after a failed watermark update is de-duplicated rather than double-counted; a call still open at the burst boundary is exported as <code>no_result</code>.</p>
+
+<p><code>latency_ms</code> is measured control-plane side, from the gate's answer to the arrival of the reported result, so it includes the sandbox's event batching and is an <strong>upper bound</strong> — deliberately, rather than trusting a sandbox-supplied number in a field meant as evidence.</p>
 
 <h2 id="s7"><span class="num">7</span>API surface (v1)</h2>
 
@@ -779,6 +808,7 @@ table.api td.d code { font-size: 0.9em; }
   <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments · /v1/deployments/{id}</td><td class="d">list / get</td></tr>
   <tr><td class="m"><span class="mb post">POST</span></td><td class="p">/v1/deployments/{id}/pause | /unpause | /archive | /run</td><td class="d">lifecycle + run-now</td></tr>
   <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments/{id}/runs</td><td class="d">run history</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/deployments/runs?days=&amp;deployment_id=&amp;status=</td><td class="d">run history across deployments + per-deployment rollup (the runs view)</td></tr>
 </table></div>
 
 <h4>Vaults</h4>
@@ -820,7 +850,18 @@ table.api td.d code { font-size: 0.9em; }
   <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/skills/{id}/files[/{fid}]</td><td class="d">list / get (also <span class="mb del" style="width:auto;padding:0.2em 0.5em;">DELETE</span> on <code>/{fid}</code>)</td></tr>
 </table></div>
 
-<p>Internal surface (<code>naxos-internal</code>, IAM-only): per-session <code>claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)</code>, plus <code>deployments/{id}/fire</code> and <code>reconcile</code>.</p>
+<h4>Approvals</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/tool_confirmations</td><td class="d">approval inbox across every session; filter by <code>status · agent_id · environment_id · session_id</code>. Decide via <code>POST /v1/sessions/{id}/events</code></td></tr>
+</table></div>
+
+<h4>Execution record</h4>
+<div class="table-wrap api-group"><table class="api">
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/tool_calls</td><td class="d">filter by <code>session_id · agent_id · environment_id · tool_name · principal · decision · result_status · since · until</code>; cursor = last row id</td></tr>
+  <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/tool_calls/export</td><td class="d">the whole filtered record as NDJSON</td></tr>
+</table></div>
+
+<p>Internal surface (<code>naxos-internal</code>, IAM-only): per-session <code>claim / heartbeat / queue?wait / events / permission / stream (transient partial-text fan-out) / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)</code>, plus <code>deployments/{id}/fire</code> and <code>reconcile</code>.</p>
 
 <h4>Event types (CMA vocabulary)</h4>
 <div class="chip-row"><span class="lbl">user.</span><span class="chip">message</span><span class="chip">interrupt</span><span class="chip">tool_confirmation</span><span class="chip">custom_tool_result</span></div>
@@ -828,7 +869,9 @@ table.api td.d code { font-size: 0.9em; }
 <div class="chip-row"><span class="lbl">session.</span><span class="chip">status_running</span><span class="chip">status_idle</span><span class="chip">status_terminated</span><span class="chip">error</span></div>
 <div class="chip-row"><span class="lbl">span.</span><span class="chip">model_request_start</span><span class="chip">model_request_end</span></div>
 
-<p style="margin-top: 1rem;">Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; <code>span.*</code> approximated from the SDK stream; <code>agent.artifact</code> puts the artifact lifecycle in the timeline; no outcomes / multiagent / webhooks initially.</p>
+<p style="margin-top: 1rem;">One transient frame type rides the SSE stream without being part of the persisted vocabulary: <code>agent.message_delta</code> (§4 token-level partial text) — never stored, never replayed, not client-sendable.</p>
+
+<p style="margin-top: 1rem;">Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; <code>span.*</code> approximated from the SDK stream; <code>agent.artifact</code> puts the artifact lifecycle in the timeline; no outcomes / multiagent / webhooks initially; untitled sessions auto-derive their title from the first <code>user.message</code> (explicit titles always win).</p>
 
 <h2 id="s8"><span class="num">8</span>Security model</h2>
 
@@ -836,8 +879,10 @@ table.api td.d code { font-size: 0.9em; }
   <li><strong>Per-environment SA is the isolation boundary.</strong> <code>sa-env-{env}</code> gets <code>aiplatform.user</code> (the only model exit), objectAdmin on its own session bucket, and <code>run.invoker</code> on <code>naxos-internal</code> + <code>naxos-egress</code> — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a <code>bigquery_datasets</code> list in <code>environments.json</code> grants the SA <code>bigquery.jobUser</code> plus <code>dataViewer</code> on exactly the listed datasets (<code>naxos_audit</code> itself is never grantable; the platform's own history is reachable only as authorized views in <code>naxos_audit_shared</code>, see §6 BigQuery) and is passed to the sandbox job as <code>BIGQUERY_DATASETS</code>, which is what decides whether the BigQuery tools exist at all — so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.</li>
   <li><strong>Sandbox ↔ control-plane auth</strong>: OIDC ID token of the env SA → Cloud Run IAM on <code>naxos-internal</code>, then an app-level check that the token's SA equals <code>environments.service_account_email</code> for the session being touched. No bearer tokens to mint or leak.</li>
   <li><strong>Tool restriction</strong>: a non-empty <code>tools</code> list on the agent version is enforced in the control plane's permission endpoint — a call to anything outside it is denied before any policy or confirmation lookup, and audited <code>not_allowed</code>. It cannot be enforced by the SDK: <code>allowed_tools</code> only pre-approves calls (measured, §4.1), and the CLI's built-ins cannot be withheld from the model at all. Entries may be globs, so <code>mcp__artifacts__*</code> names a whole built-in server. An empty list means unrestricted. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.</li>
+  <li><strong>Approval reaches a human off-app.</strong> The gate logs <code>naxos.approval_required</code> when it parks a call. When <code>alert_email</code> is set, Terraform creates a log-based metric on that marker plus an alert policy that mails it — no new service, nothing always-on, and the signal stays inside the project. Empty <code>alert_email</code> skips all of it. The alert is deliberately coarse: it says somebody should look, not who must decide.</li>
   <li><strong>Kill switch, three levels</strong>: <code>agents.disabled</code> (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.</li>
-  <li><strong>Audit</strong>: all agent events flow through <code>naxos-internal</code>, so the control plane is the single audit writer — the sandbox cannot forge or skip audit rows. <code>principal</code> is the IAP email for user-triggered turns, <code>deployment:{id}</code> for cron.</li>
+  <li><strong>Audit</strong>: the record is written at the permission gate, not reconstructed from what the sandbox reports. Every tool call blocks on <code>POST /internal/sessions/{id}/permission</code>, and that endpoint commits the <code>tool_calls</code> row inside the same transaction that resolves the decision — so the row exists before the tool runs, the decision label is computed control-plane side, and a call the sandbox never lives to report (OOM, lost lease, the 60-minute execution cap) is still on the record. <code>agent.tool_use</code> remains a timeline event and is no longer an audit source; the gate returns its <code>label</code> and <code>tool_call_id</code> so the two cannot drift. <code>principal</code> is the IAP email of whoever sent the turn — latched from the queued events at claim, not the session's creator — or <code>deployment:{id}</code> for cron, with <code>approved_by</code> naming the human who answered a gated call.</li>
+  <li><strong>What the record proves, and what it does not.</strong> It is complete and single-writer: it covers every call that passed the gate, with its arguments, decision and outcome. It is not tamper-evident against a Postgres-level compromise, and it does not follow a call past the gate — a <code>Bash</code> call that spawns subprocesses is one audited call, and what those subprocesses may reach is bounded by IAM, not by audit.</li>
   <li><strong>IAP</strong> directly on Cloud Run with the custom OAuth client (no-org project); the app verifies the IAP JWT.</li>
 </ul>
 
@@ -884,7 +929,7 @@ docs/              design docs (English)
   <li><strong>Spike (blocking)</strong>: Agent SDK resume semantics — pending tool_use replay through <code>can_use_tool</code>, transcript restore from a relocated directory, Vertex backend availability in asia-northeast1/global (resolves the model-region open issue).</li>
   <li><strong>Walking skeleton</strong>: Terraform base (SQL, buckets, BQ, SAs, services, one <code>default</code> environment Job) + agents CRUD (versioned) + sessions + events + the full loop: create session → job launch → SDK turn on Vertex → events → SSE → idle checkpoint → resume. Audit (<code>runs</code> + <code>tool_calls</code>) and kill switch from day one. Reconciler.</li>
   <li><strong>Permissions + budget + interrupt</strong>: <code>always_ask</code> round-trip including pause/release/resume, budget enforcement, minimal UI (session timeline + approval inbox).</li>
-  <li><strong>Deployments</strong>: Scheduler-per-deployment, <code>deployment_runs</code> with error types, pause/unpause/run-now, UI tab.</li>
+  <li><strong>Deployments</strong>: Scheduler-per-deployment, <code>deployment_runs</code> with error types, outcome and duration closed at checkpoint, pause/unpause/run-now, UI tab with a runs view (duration chart, per-deployment success rate and run history).</li>
   <li><strong>Vaults + egress proxy</strong>: Secret Manager write path, MCP URL rewriting, header substitution, per-vault IAM.</li>
   <li><strong>Memory stores</strong>: CRUD + mount/writeback + UI.</li>
   <li><strong>Hardening</strong>: second environment (proves the fan-out), budget alerts, cost review at the phase gate.</li>
@@ -896,7 +941,7 @@ docs/              design docs (English)
   <li>Phase 1 spike has an explicit pass/fail: resume replays the pending tool_use, or the fallback is adopted and documented here.</li>
   <li>Every phase ships to the project and runs its end-to-end demo (Phase 2: curl create agent → session → SSE shows <code>agent.message</code> → <code>audit.runs</code> row exists → flip <code>disabled</code> → event rejected).</li>
   <li>Approval flow: <code>always_ask</code> tool → container exits during the pause (verify zero cost while pending) → confirm via UI → session resumes and completes.</li>
-  <li>Deployments: cron fires → <code>deployment_runs</code> row → session completes; error path exercised by archiving the agent.</li>
+  <li>Deployments: cron fires → <code>deployment_runs</code> row → session completes and the run closes with its outcome, duration and cost; error path exercised by archiving the agent, and the budget/terminate paths by stopping a fired session.</li>
   <li>Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.</li>
 </ul>
 

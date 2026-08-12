@@ -53,7 +53,8 @@ export async function apiConfirm(
   path: string,
   init?: RequestInit & { json?: unknown },
 ): Promise<boolean> {
-  if (!window.confirm(message)) return false;
+  const { confirmDialog } = await import("@/components/confirm");
+  if (!(await confirmDialog({ title: "Are you sure?", body: message, danger: true }))) return false;
   await api(path, init ?? { json: {} });
   return true;
 }
@@ -147,6 +148,12 @@ export type SessionEvent = {
   created_at: string;
 };
 
+// Transient partial-text frame interleaved into the SSE stream while the agent
+// is generating. Never persisted, never replayed; the persisted agent.message
+// with the same `stream` id supersedes it. Mirrors naxos_shared.events.
+export const STREAM_DELTA_TYPE = "agent.message_delta";
+export type StreamDelta = { type: string; stream?: string; text?: string };
+
 export type Deployment = {
   id: string;
   name: string;
@@ -161,12 +168,78 @@ export type Deployment = {
   created_at: string;
 };
 
+export const RUN_STATUSES = ["succeeded", "failed", "cancelled", "running", "queued"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
 export type DeploymentRun = {
   id: string;
+  deployment_id: string;
   session_id: string | null;
-  status: string;
+  status: RunStatus;
   error_type: string | null;
+  error_message: string | null;
+  stop_reason: string | null;
+  cost_usd: number;
+  num_turns: number;
   fired_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  queued_seconds: number | null;
+};
+
+export type DeploymentRunRow = DeploymentRun & {
+  deployment_name: string;
+  agent_id: string;
+  session_status: string | null;
+};
+
+export type DeploymentRunTotals = {
+  id: string;
+  name: string;
+  cron: string;
+  timezone: string;
+  agent_id: string;
+  paused: boolean;
+  archived: boolean;
+  runs: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  active: number;
+  finished: number;
+  cost_usd: number;
+  duration_seconds: number;
+  last_fired_at: string | null;
+  // Oldest first, independent of the run list's status filter and its cap.
+  recent: { id: string; status: RunStatus; fired_at: string }[];
+};
+
+export type RunsOverview = {
+  window_days: number;
+  now: string;
+  runs: DeploymentRunRow[];
+  deployments: DeploymentRunTotals[];
+};
+
+export type ToolConfirmation = {
+  id: string;
+  session_id: string;
+  call_hash: string;
+  tool_name: string;
+  input: Record<string, unknown>;
+  status: "pending" | "allowed" | "denied" | "expired";
+  requested_at: string;
+  expires_at: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  session_title: string | null;
+  session_status: string;
+  agent_id: string;
+  agent_name: string;
+  agent_disabled: boolean;
+  environment_id: string;
+  requested_for: string | null;
 };
 
 export type Environment = { id: string; name: string };

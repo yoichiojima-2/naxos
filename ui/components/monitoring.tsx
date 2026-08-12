@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, MonitoringSummary } from "@/lib/api";
+import { barPath, niceScale, useWidth } from "@/lib/chart";
 
 const RANGES = [7, 30, 90] as const;
 
@@ -18,28 +19,6 @@ const fmtUsd = (v: number) =>
         : "$0";
 
 const fmtInt = (v: number) => v.toLocaleString();
-
-function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
-  const ref = useRef<T>(null);
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
-    observer.observe(el);
-    setWidth(el.clientWidth);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width];
-}
-
-function niceScale(max: number): { top: number; ticks: number[] } {
-  if (max <= 0) return { top: 1, ticks: [0, 0.5, 1] };
-  const step = Math.pow(10, Math.floor(Math.log10(max)));
-  const mult = max / step;
-  const top = (mult <= 1 ? 1 : mult <= 2 ? 2 : mult <= 5 ? 5 : 10) * step;
-  return { top, ticks: [0, top / 2, top] };
-}
 
 export default function Monitoring() {
   const [days, setDays] = useState<(typeof RANGES)[number]>(30);
@@ -303,18 +282,7 @@ function DailySpend({
   const maxIndex = maxValue > 0 ? series.findIndex((s) => s.cost_usd === maxValue) : -1;
   const labelEvery = Math.ceil(series.length / 6);
 
-  const bar = (x: number, value: number) => {
-    const barTop = y(value);
-    const bottom = padTop + plotHeight;
-    const h = bottom - barTop;
-    const r = Math.min(4, barWidth / 2, h);
-    if (h <= 0) return "";
-    return (
-      `M ${x} ${bottom} L ${x} ${barTop + r} Q ${x} ${barTop} ${x + r} ${barTop} ` +
-      `L ${x + barWidth - r} ${barTop} Q ${x + barWidth} ${barTop} ${x + barWidth} ${barTop + r} ` +
-      `L ${x + barWidth} ${bottom} Z`
-    );
-  };
+  const bar = (x: number, value: number) => barPath(x, barWidth, y(value), padTop + plotHeight);
 
   const show = (s: (typeof series)[number], center: number) =>
     setTip({ x: center, y: y(s.cost_usd), day: s.day, cost: s.cost_usd, runs: s.runs });

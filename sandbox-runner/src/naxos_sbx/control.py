@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 import httpx
@@ -17,6 +18,9 @@ class ControlChannel:
         self.session_id = session_id
         self.base_url = base_url.rstrip("/")
         self.lease_id: str | None = None
+        # One id for this wake-to-idle burst, reported at claim so the control
+        # plane keys tool_calls, session_runs and audit.runs on the same value.
+        self.run_id = os.environ.get("CLOUD_RUN_EXECUTION", session_id)
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=70.0))
 
     async def aclose(self) -> None:
@@ -58,7 +62,7 @@ class ControlChannel:
         return await self._request("DELETE", path)
 
     async def claim(self) -> str:
-        self.lease_id = (await self._post("/claim"))["lease_id"]
+        self.lease_id = (await self._post("/claim", {"run_id": self.run_id}))["lease_id"]
         return self.lease_id
 
     async def heartbeat(self) -> bool:
@@ -131,6 +135,10 @@ class ControlChannel:
         if events:
             await self._post("/events", {"events": events, "run_id": run_id})
 
+    async def emit_stream(self, delta: dict[str, Any]) -> None:
+        """Transient partial-text frame: relayed to SSE listeners, never stored."""
+        await self._post("/stream", delta)
+
     async def ask_permission(
         self, call_hash: str, tool_name: str, tool_input: dict[str, Any], tool_use_id: str | None
     ) -> dict[str, Any]:
@@ -152,6 +160,9 @@ class ControlChannel:
         run_id: str | None = None,
         started_at: str | None = None,
         num_turns: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        errored: bool = False,
     ) -> None:
         await self._post(
             "/checkpoint",
@@ -164,5 +175,8 @@ class ControlChannel:
                 "run_id": run_id,
                 "started_at": started_at,
                 "num_turns": num_turns,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "errored": errored,
             },
         )
