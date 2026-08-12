@@ -270,7 +270,9 @@ async def test_kill_switch_denies_a_tool_call_mid_run(client, internal_client, l
             json={"call_hash": DIGEST, "tool_use_id": "toolu_x", **BASH},
         )
     ).json()
-    assert verdict == {"decision": "deny", "reason": "agent disabled", "killed": True}
+    assert verdict["decision"] == "deny"
+    assert verdict["killed"] is True
+    assert verdict["label"] == "killed"
 
     batch = (
         await internal_client.get(f"/internal/sessions/{session['id']}/queue", params={"wait": 0})

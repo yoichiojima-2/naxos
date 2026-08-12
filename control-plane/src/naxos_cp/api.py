@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from . import (
     artifacts,
     config,
+    confirmations,
     connectors,
     db,
     deployments,
@@ -32,6 +33,7 @@ from . import (
     sessions,
     skills,
     store,
+    tool_calls,
     vaults,
     wake,
     workspace,
@@ -55,6 +57,8 @@ def create_app(manage_pool: bool = True) -> FastAPI:
     app.include_router(workspace.router)
     app.include_router(artifacts.router)
     app.include_router(favorites.router)
+    app.include_router(tool_calls.router)
+    app.include_router(confirmations.router)
     ui_dir = Path(os.environ.get("UI_DIR", "/app/ui"))
     if ui_dir.is_dir():
         app.mount("/", StaticFiles(directory=ui_dir, html=True))

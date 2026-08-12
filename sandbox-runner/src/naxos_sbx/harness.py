@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +53,14 @@ def _result_text(content: Any) -> str:
     return ("" if content is None else str(content))[:4000]
 
 
+def _derive_label(allowed: bool, killed: bool, by: str | None) -> str:
+    if killed:
+        return "killed"
+    if not allowed:
+        return "not_allowed" if by == "policy" else "user_denied"
+    return "user_allowed" if by == "user" else "auto_allowed"
+
+
 class Harness:
     """Runs one wake-to-idle burst of a session.
 
@@ -73,7 +80,7 @@ class Harness:
         self.config = config
         self.cwd = cwd
         self.plugin_dir = plugin_dir
-        self.run_id = os.environ.get("CLOUD_RUN_EXECUTION", channel.session_id)
+        self.run_id = channel.run_id
         self.pending: list[dict[str, Any]] = []
         self.sdk_session_id: str | None = config.sdk_session_id
         self.initial_cost_usd: float = float(config.cost_usd or 0.0)
@@ -84,6 +91,8 @@ class Harness:
         self.interrupted = False
         self.killed = False
         self.num_turns = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
         for reserved in ("artifacts", "schedules", "bigquery"):
             if reserved in (config.mcp_servers or {}):
                 log.warning(
@@ -155,15 +164,14 @@ class Harness:
 
         allowed = decision == "allow"
         killed = bool(verdict.get("killed"))
-        if killed:
-            label = "killed"
-        elif not allowed:
-            label = "not_allowed" if verdict.get("by") == "policy" else "user_denied"
-        elif verdict.get("by") == "user":
-            label = "user_allowed"
-        else:
-            label = "auto_allowed"
-        self._queue(EventType.AGENT_TOOL_USE, {**call, "decision": label})
+        # The gate labels its own decision; deriving it here again would let the
+        # timeline drift from the audit record. The fallback covers a control
+        # plane rolled back to before it sent one.
+        label = verdict.get("label") or _derive_label(allowed, killed, verdict.get("by"))
+        self._queue(
+            EventType.AGENT_TOOL_USE,
+            {**call, "decision": label, "tool_call_id": verdict.get("tool_call_id")},
+        )
         if killed:
             self.killed = True
             self._interrupt_client()
@@ -211,6 +219,15 @@ class Harness:
     def _budget_exhausted(self) -> bool:
         budget = self.config.budget_usd
         return budget is not None and self.cost_usd >= float(budget)
+
+    def _accumulate_usage(self, usage: Any) -> None:
+        # Reported as-is. Cache-read and cache-creation tokens are deliberately not
+        # folded in: the audited number must mean what its name says. cost_usd
+        # already carries the true billed spend.
+        if not isinstance(usage, dict):
+            return
+        self.input_tokens += int(usage.get("input_tokens") or 0)
+        self.output_tokens += int(usage.get("output_tokens") or 0)
 
     def _accumulate_cost(self, total_cost_usd: float | None) -> None:
         # The SDK's counter covers this burst only and resets on resume, while
@@ -269,6 +286,7 @@ class Harness:
                         )
             elif isinstance(message, ResultMessage):
                 self._accumulate_cost(message.total_cost_usd)
+                self._accumulate_usage(message.usage)
                 self.num_turns += int(message.num_turns or 0)
                 self._queue(
                     EventType.SPAN_MODEL_REQUEST_END,
@@ -276,6 +294,8 @@ class Harness:
                         "num_turns": message.num_turns,
                         "cost_usd": self.cost_usd,
                         "is_error": message.is_error,
+                        "input_tokens": self.input_tokens,
+                        "output_tokens": self.output_tokens,
                     },
                 )
                 await self.flush()

@@ -197,11 +197,23 @@ resource "google_bigquery_table" "tool_calls" {
     { name = "ts", type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "tool_use_id", type = "STRING" },
     { name = "tool_name", type = "STRING" },
+    # Superseded by args_json. Kept because dropping a column needs
+    # deletion_protection = false and a table recreate; rows written before the
+    # execution-record change have it populated and args_json NULL.
     { name = "args_redacted", type = "STRING" },
     { name = "decision", type = "STRING" },
     { name = "result_status", type = "STRING" },
     { name = "latency_ms", type = "INTEGER" },
     { name = "error", type = "STRING" },
+    # Appended, never reordered: additive schema changes apply in place, while a
+    # reorder or retype is destructive and blocked by deletion_protection.
+    { name = "tool_call_id", type = "STRING" },
+    { name = "environment_id", type = "STRING" },
+    { name = "agent_version", type = "INTEGER" },
+    { name = "approved_by", type = "STRING" },
+    { name = "call_hash", type = "STRING" },
+    { name = "args_json", type = "STRING" },
+    { name = "args_truncated", type = "BOOL" },
   ])
 }
 
@@ -225,11 +237,14 @@ resource "google_bigquery_table" "shared_runs" {
   }
 }
 
+# Explicit columns, not SELECT *: args_json holds the full tool arguments of
+# every tenant, and error holds tool output. An agent can still correlate calls
+# by call_hash without being handed their contents.
 resource "google_bigquery_table" "shared_tool_calls" {
   dataset_id = google_bigquery_dataset.audit_shared.dataset_id
   table_id   = "tool_calls"
   view {
-    query          = "SELECT * FROM `${var.project_id}.${google_bigquery_dataset.audit.dataset_id}.${google_bigquery_table.tool_calls.table_id}`"
+    query          = "SELECT tool_call_id, run_id, session_id, agent_id, agent_version, environment_id, principal, approved_by, ts, tool_use_id, tool_name, call_hash, decision, result_status, latency_ms FROM `${var.project_id}.${google_bigquery_dataset.audit.dataset_id}.${google_bigquery_table.tool_calls.table_id}`"
     use_legacy_sql = false
   }
 }
@@ -885,6 +900,64 @@ resource "google_billing_budget" "monthly" {
   }
   threshold_rules {
     threshold_percent = 1.0
+  }
+}
+
+# An approval nobody sees is the failure mode the gate is supposed to prevent, so
+# the pause has to reach a human who is not looking at the UI. Cloud Logging is
+# already collecting the control plane's output — a log-based metric on the marker
+# the permission gate writes turns that into mail, with no new service to run.
+# Empty alert_email skips all of it, like the budget above.
+
+resource "google_logging_metric" "approval_required" {
+  count  = var.alert_email != "" ? 1 : 0
+  name   = "naxos/approval_required"
+  filter = <<-EOT
+    resource.type="cloud_run_revision"
+    resource.labels.service_name="${google_cloud_run_v2_service.internal.name}"
+    textPayload:"naxos.approval_required"
+  EOT
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+}
+
+resource "google_monitoring_notification_channel" "approvals" {
+  count        = var.alert_email != "" ? 1 : 0
+  display_name = "naxos approvals"
+  type         = "email"
+  labels       = { email_address = var.alert_email }
+}
+
+resource "google_monitoring_alert_policy" "approval_required" {
+  count        = var.alert_email != "" ? 1 : 0
+  display_name = "naxos — agent waiting for approval"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "a tool call is waiting on a human"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.approval_required[0].name}\" AND resource.type=\"cloud_run_revision\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+      aggregations {
+        alignment_period   = "300s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+    }
+  }
+
+  # The session stays parked until someone answers, so the alert has to stay open
+  # until it is acknowledged rather than auto-closing on a quiet five minutes.
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.approvals[0].id]
+  documentation {
+    content = "An agent paused on a tool call that needs human approval. Decide it in the naxos Approvals view; it expires after CONFIRMATION_TTL_HOURS with no decision."
   }
 }
 

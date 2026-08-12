@@ -215,6 +215,26 @@ export type RunsOverview = {
   deployments: DeploymentRunTotals[];
 };
 
+export type ToolConfirmation = {
+  id: string;
+  session_id: string;
+  call_hash: string;
+  tool_name: string;
+  input: Record<string, unknown>;
+  status: "pending" | "allowed" | "denied" | "expired";
+  requested_at: string;
+  expires_at: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  session_title: string | null;
+  session_status: string;
+  agent_id: string;
+  agent_name: string;
+  agent_disabled: boolean;
+  environment_id: string;
+  requested_for: string | null;
+};
+
 export type Environment = { id: string; name: string };
 export type Vault = { id: string; name: string };
 export type Connector = {

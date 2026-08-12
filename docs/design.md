@@ -69,10 +69,15 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 **Permission pause (`always_ask`).** The gate is a **`PreToolUse` hook**, not `can_use_tool` — see §4.1 for why. On every tool call:
 
 1. Check the kill switch (`agents.disabled`; 15s cache + control-channel push).
-2. Match the tool against the agent version's permission policy — first matching rule wins; rules match exact tool names or fnmatch-style globs (e.g. `mcp__artifacts__*`). `always_allow` → allow, record the decision in audit.
+2. Match the tool against the agent version's permission policy — first matching rule wins; rules match exact tool names or fnmatch-style globs (e.g. `mcp__artifacts__*`). `always_allow` → allow.
 3. `always_ask` → look up `tool_confirmations` by `(session_id, call_hash)` where `call_hash = sha256(tool_name + canonical_json(input))`. Stored decision → return it. **The key is the call hash, not `tool_use_id`** — the SDK assigns a fresh `tool_use_id` when a pending call is replayed after resume (measured; §4.1).
 4. No decision → insert a pending row, emit `session.status_idle(stop_reason=requires_action)`, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, **checkpoint and exit** — a blocked container costs nothing.
 5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.
+6. **Nothing answers.** The pending row carries `expires_at = now() + CONFIRMATION_TTL_HOURS` (default 24h; 0 disables it). The reconciler marks anything past it `expired`, queues the same `user.tool_confirmation(deny)` event a human decision would, and wakes the session — so the replayed call is refused with a reason that tells the agent to stop rather than retry, and the run ends instead of parking forever. Terminated sessions are skipped: nothing would consume the resume event.
+
+Every branch above — including the pause and both denials — commits a `tool_calls` row in the same transaction before answering (§8). A paused call and the approved call that replaces it are two rows chained by `call_hash`, which is what makes the pause, the approver and the eventual execution all readable as one story. `expired` is a decision of its own, distinct from `user_denied`: "nobody answered" and "a human said no" mean different things to whoever reads the record later.
+
+**Being paused is not the same as being seen.** A gate that only works when someone happens to have the right session open is not a control. Three things close that: `GET /v1/tool_confirmations` is a cross-session queue (the UI's Approvals view, with a pending count badged on every page); the gate emits a `naxos.approval_required` log line that a Terraform-provisioned log-based metric and alert policy turn into mail (§8); and expiry above bounds how long a forgotten approval can hold a session. Deciding stays `POST /v1/sessions/{id}/events` — the inbox hands back the `session_id` and `call_hash` that call needs, rather than adding a second decision path that could drift from the audit write and the wake.
 
 ### 4.1 Measured SDK resume semantics (`claude-agent-sdk` 0.2.134)
 
@@ -141,6 +146,9 @@ sessions (id, agent_id, agent_version, overrides jsonb, environment_id,
         stop_reason, budget_usd, cost_usd DEFAULT 0,
         vault_ids text[], memory_store_ids text[], resources jsonb,
         sdk_session_id, lease_id uuid, lease_expires_at, execution_name,
+        turn_principal,    -- actor of the turn being processed, latched at queue claim
+        current_run_id,    -- the sandbox's run id, taken at claim; execution_name is a
+                           -- full Cloud Run resource path and does not match it
         retry_count DEFAULT 0, last_event_seq DEFAULT 0,
         created_by, created_at, updated_at, terminated_at)
 
@@ -150,12 +158,27 @@ session_events (id bigserial, session_id, seq, UNIQUE (session_id, seq),
         created_at)
         -- seq assigned under SELECT … FOR UPDATE on the session row
 
+tool_calls (id bigserial, session_id, run_id, agent_id, agent_version, environment_id,
+        principal,      -- the turn's actor, or 'deployment:{id}'
+        approved_by,    -- the human who answered a gated call
+        tool_name, call_hash, tool_use_id,
+        args_json,      -- the exact canonical bytes call_hash covers, capped
+        args_truncated,
+        decision CHECK IN ('auto_allowed','user_allowed','user_denied','not_allowed',
+                           'killed','awaiting_confirmation'),
+        result_status CHECK IN ('ok','error','denied','no_result'),
+        latency_ms, error,
+        decided_at, resulted_at, exported_at)
+        -- the execution record; written at the permission gate, see §8
+        -- no FK: like session_runs it must outlive the session it describes
+
 tool_confirmations (id, session_id,
         call_hash, UNIQUE (session_id, call_hash),  -- sha256(tool_name + canonical_json(input))
         tool_use_id,                                -- audit only; not stable across resume
         tool_name, input jsonb,
         status CHECK IN ('pending','allowed','denied','expired'),
-        requested_at, expires_at, decided_by, decided_at)
+        requested_at, decided_by, decided_at,
+        expires_at)   -- CONFIRMATION_TTL_HOURS at insert; the reconciler sweeps it
 
 deployments (id, agent_id, agent_version,   -- NULL = latest at fire time
         name, cron, timezone DEFAULT 'Asia/Tokyo', initial_events jsonb,
@@ -268,9 +291,11 @@ built-in tool rather than a shell command. The mechanism mirrors artifacts:
   dataset, `naxos_audit_shared`, and grants those views access on the source: an
   environment that lists `naxos_audit_shared` reads the platform's own history while
   holding no permission on `naxos_audit` itself. Writes remain control-plane-only, so
-  the single-writer property is unaffected. The views select every row, so a second
-  environment needs a tenant filter in the view query before this dataset is opted
-  into more than once.
+  the single-writer property is unaffected. The `tool_calls` view selects explicit
+  columns and omits `args_json` and `error` — the full tool arguments and tool output of
+  every tenant — while keeping `call_hash` so an agent can still correlate calls without
+  reading their contents. The views select every *row*, so a second environment still
+  needs a tenant filter in the view query before this dataset is opted into more than once.
 - **Guardrails are enforced in code, not prompt**: only a single read-only
   `SELECT`/`WITH` runs (DML, DDL, and multi-statement scripts are refused before the
   API call); every query is dry-run first and refused if it would scan more than
@@ -353,16 +378,33 @@ session, like vaults and memory).
 
 ```
 audit.runs(run_id, session_id, agent_id, environment_id, deployment_run_id,
-           trigger_type,        -- interactive | deployment | api
+           trigger_type,        -- interactive | deployment
            principal, started_at, ended_at, status, stop_reason,
            num_turns, input_tokens, output_tokens, cost_usd, approx_cost_jpy, model)
            -- a "run" = one wake-to-idle processing burst of a session
 
-audit.tool_calls(run_id, session_id, agent_id, principal, ts, tool_use_id,
-           tool_name, args_redacted,
-           decision,            -- auto_allowed | user_allowed | user_denied | not_allowed | killed
+audit.tool_calls(tool_call_id, run_id, session_id, agent_id, agent_version,
+           environment_id, principal, approved_by, ts, tool_use_id,
+           tool_name, call_hash, args_json, args_truncated,
+           decision,            -- auto_allowed | user_allowed | user_denied |
+                                -- not_allowed | killed | awaiting_confirmation
            result_status, latency_ms, error)
+           -- args_redacted is a dead column: rows written before the execution
+           -- record change have it populated and args_json NULL. Dropping it needs
+           -- deletion_protection = false and a table recreate.
 ```
+
+**The write is two-stage, and it has to be.** Postgres is the system of record: the
+`tool_calls` row is committed at the permission gate, before the tool runs. BigQuery is
+an append-only export of *completed* rows, written at each checkpoint — a streamed row
+cannot be updated for ~90 minutes, so a row written at decision time could never gain its
+result. The Postgres id is sent as the BigQuery `insertId`, so an export retried after a
+failed watermark update is de-duplicated rather than double-counted; a call still open at
+the burst boundary is exported as `no_result`.
+
+`latency_ms` is measured control-plane side, from the gate's answer to the arrival of the
+reported result, so it includes the sandbox's event batching and is an **upper bound** —
+deliberately, rather than trusting a sandbox-supplied number in a field meant as evidence.
 
 ## 7. API surface (v1)
 
@@ -418,6 +460,15 @@ POST   /v1/skills/{id}/archive
 POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 
+GET    /v1/tool_confirmations?status&agent_id&environment_id&session_id&limit
+                                           approval inbox across every session;
+                                           decide via POST /v1/sessions/{id}/events
+
+GET    /v1/tool_calls?session_id&agent_id&environment_id&tool_name&principal&decision
+                      &result_status&since&until&cursor&limit
+                                           the execution record; cursor = last row id
+GET    /v1/tool_calls/export?<same filters>  the whole filtered record as NDJSON
+
 GET    /v1/monitoring/summary?days=N       cost/usage aggregates from session_runs
                                            (the deployments runs view reads
                                             /v1/deployments/runs, not this)
@@ -437,8 +488,12 @@ Documented deviations from CMA: IAP auth instead of API keys; environments opera
 - **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a `bigquery_datasets` list in `environments.json` grants the SA `bigquery.jobUser` plus `dataViewer` on exactly the listed datasets (`naxos_audit` itself is never grantable; the platform's own history is reachable only as authorized views in `naxos_audit_shared`, see §6 BigQuery) and is passed to the sandbox job as `BIGQUERY_DATASETS`, which is what decides whether the BigQuery tools exist at all — so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.
 - **Sandbox ↔ control-plane auth**: OIDC ID token of the env SA → Cloud Run IAM on `naxos-internal`, then an app-level check that the token's SA equals `environments.service_account_email` for the session being touched. No bearer tokens to mint or leak.
 - **Tool restriction**: a non-empty `tools` list on the agent version is enforced in the control plane's permission endpoint — a call to anything outside it is denied before any policy or confirmation lookup, and audited `not_allowed`. It cannot be enforced by the SDK: `allowed_tools` only pre-approves calls (measured, §4.1), and the CLI's built-ins cannot be withheld from the model at all, so the gate is the only place the restriction can actually hold. Entries may be globs, so `mcp__artifacts__*` names a whole built-in server. An empty list means unrestricted. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
+- **Approval reaches a human off-app.** The gate logs `naxos.approval_required` when it parks a call. When `alert_email` is set, Terraform creates a log-based metric on that marker plus an alert policy that mails it — no new service, nothing always-on, and the signal stays inside the project. Empty `alert_email` skips all of it. The alert is deliberately coarse (see §14): it says somebody should look, not who must decide.
+
 - **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
-- **Audit**: all agent events flow through `naxos-internal`, so the control plane is the single audit writer — the sandbox cannot forge or skip audit rows. `principal` is the IAP email for user-triggered turns, `deployment:{id}` for cron.
+- **Audit**: the record is written at the permission gate, not reconstructed from what the sandbox reports. Every tool call blocks on `POST /internal/sessions/{id}/permission`, and that endpoint commits the `tool_calls` row inside the same transaction that resolves the decision — so the row exists before the tool runs, the decision label is computed control-plane side, and a call the sandbox never lives to report (OOM, lost lease, the 60-minute execution cap) is still on the record. `agent.tool_use` remains a timeline event and is no longer an audit source; the gate returns its `label` and `tool_call_id` so the two cannot drift. `principal` is the IAP email of whoever sent the turn — latched from the queued events at claim, not the session's creator — or `deployment:{id}` for cron, with `approved_by` naming the human who answered a gated call.
+
+  **What the record proves, and what it does not.** It is complete and single-writer: it covers every call that passed the gate, with its arguments, decision and outcome. It is not tamper-evident against a Postgres-level compromise, and it does not follow a call past the gate — a `Bash` call that spawns subprocesses is one audited call, and what those subprocesses may reach is bounded by IAM, not by audit.
 - **IAP** directly on Cloud Run with the custom OAuth client (no-org project); the app verifies the IAP JWT.
 
 ## 9. Cost model (reference sizing: ¥100k/month cap, ¥70k target)
@@ -453,6 +508,8 @@ Documented deviations from CMA: IAP auth instead of API keys; environments opera
 | Model (Vertex) headroom | | ~¥60–90k |
 
 Runaway protection: a control-plane global cap on concurrent sandbox executions (default 5). The idle-linger window (~120s) is the main sandbox cost knob. If cold-resume chat UX hurts, `naxos-api` min=1 adds ~¥4k — still inside target.
+
+`tool_calls` is the only Cloud SQL growth the execution record introduces, and Cloud SQL is the one always-on cost. At the 4KB `MAX_TOOL_ARGS_BYTES` cap, 200k calls is roughly 1GB — comfortable on the 10GB instance, but unbounded over years. A retention sweep is deferred (§14); the BigQuery export is already the archive, so pruning exported rows is the eventual answer rather than growing the disk.
 
 ## 10. Repo layout
 
@@ -502,9 +559,10 @@ The end-to-end system was deployed to a live project and verified:
 - **Audit**: `naxos_audit.runs` (one row per wake-to-idle burst) and `naxos_audit.tool_calls` (per-call decisions) populated by the control plane.
 - **Deviation found on GCP**: exceptions raised inside a `PreToolUse` hook are swallowed by the SDK (the CLI falls back to its own permission system). The pause is therefore implemented as deny + interrupt, with `paused_call` state driving `requires_action` — §4 updated accordingly by the code.
 
-Known issues (non-blocking):
-- Per-run `cost_usd` delta can go negative on resume bursts — the SDK cost counter resets per burst while the session accumulates; per-burst baseline accounting needed.
-- A call approved by a human is audit-labeled `auto_allowed`; should be `user_allowed`.
+Both issues this run surfaced have since been fixed in code: the negative per-run
+`cost_usd` delta on resume bursts (per-burst baseline accounting in the harness plus a
+delta at checkpoint) and the human-approved call mislabelled `auto_allowed` (the gate now
+labels its own decision, and the sandbox uses that label verbatim).
 
 ## 14. Risks and open items
 
@@ -515,6 +573,8 @@ Known issues (non-blocking):
   1. **Data residency**: using Vertex at all means using the `global` endpoint — inference is not pinned to `asia-northeast1`. Accept, or keep model traffic off Vertex until a regional endpoint exists.
   2. **Unblocking**: file the Vertex quota-increase request now, since it gates the removal of the Anthropic API-key exception. Until then the key exception stays, and no real internal data may be connected.
 - Egress proxy covers MCP + declared HTTP targets only; arbitrary bash egress is credential-less (documented limitation).
+- **No retention sweep on `tool_calls` yet.** Rows accumulate in Postgres after export. The bound is §9's sizing, not a policy; pruning exported rows past a retention window is the follow-up.
+- **Approval notification is one channel, and it is coarse.** The log-based alert (§8) mails a single address on any pause; there is no routing to the agent's owner, no per-approver assignment, and no acknowledgement. It answers "somebody should look" rather than "you specifically must decide this". Per-approver routing needs an org/role model the platform does not have.
 - **Connectors run as a service identity** (§5.1): no OAuth authorization-code flow, no per-end-user identity. In the SaaS's own audit log every action is attributed to one integration account, so "which human caused this" is answerable from naxos's audit but not from Slack's or Jira's. Revisit if per-user attribution becomes a requirement.
 - **A connector granted to a tenant is reachable outside the tool gate.** `run.invoker` is network reach and the hosted servers rely on Cloud Run IAM alone, so an agent with Bash in a granted environment can call that connector directly with a self-minted ID token, bypassing the permission policy, the approval gate and `audit.tool_calls`. Governance inside the sandbox harness cannot close this — only the IAM grant can. Keep `connectors` in `environments.json` to tenants that may use the system with its shared credential, and scope each connector's token to the least it needs. (Same class as the documented credential-less-bash limitation, but here the credential lives server-side.)
 - **Connector deployment is not yet verified live**: the egress round-trip with a real token, `hosted` connector cold-start latency inside a turn, and Google Workspace domain-wide delegation all need a deployed project and real credentials.

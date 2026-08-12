@@ -18,6 +18,12 @@ variable "budget_jpy" {
   default = 100000
 }
 
+variable "alert_email" {
+  type        = string
+  description = "Address notified when an agent pauses waiting for approval. Empty skips the alert."
+  default     = ""
+}
+
 variable "db_tier" {
   type        = string
   description = "db-f1-micro is enough for the working group; db-g1-small when latency matters."
