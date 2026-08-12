@@ -13,8 +13,12 @@ import TableStates from "@/components/table-states";
 
 const STATUS_FILTERS = ["needs approval", "running", "idle", "rescheduling", "terminated"] as const;
 
-const statusOf = (s: Session) =>
-  s.status === "idle" && s.stop_reason === "requires_action" ? "needs approval" : s.status;
+// "idle" is technically true of a session parked on an approval, and useless to
+// read: the run is not over, it is waiting on a person.
+const statusLabel = (status: string, stopReason: string | null) =>
+  status === "idle" && stopReason === "requires_action" ? "needs approval" : status;
+
+const statusOf = (s: Session) => statusLabel(s.status, s.stop_reason);
 
 const openSession = (id: string) => { window.location.hash = `#sessions/${id}`; };
 
@@ -304,6 +308,7 @@ function Timeline({
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState(known?.status ?? "idle");
+  const [stopReason, setStopReason] = useState<string | null>(known?.stop_reason ?? null);
   const [connected, setConnected] = useState(true);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const [raw, setRaw] = useState(false);
@@ -318,6 +323,7 @@ function Timeline({
       .then((s) => {
         setSession(s);
         setStatus(s.status);
+        setStopReason(s.stop_reason);
       })
       .catch(() => setMissing(true));
   }, [sessionId, known]);
@@ -345,8 +351,11 @@ function Timeline({
       setConnected(true);
       const event = JSON.parse(raw.data) as SessionEvent;
       setEvents((prev) => (prev.some((e) => e.seq === event.seq) ? prev : [...prev, event]));
-      if (event.type === "session.status_running") setStatus("running");
-      if (event.type === "session.status_idle") setStatus("idle");
+      if (event.type === "session.status_running") { setStatus("running"); setStopReason(null); }
+      if (event.type === "session.status_idle") {
+        setStatus("idle");
+        setStopReason((event.payload.stop_reason as string) ?? null);
+      }
       if (event.type === "session.status_rescheduling") setStatus("rescheduling");
       if (event.type === "session.status_terminated") {
         setStatus("terminated");
@@ -394,6 +403,8 @@ function Timeline({
 
   const { blocks, costUsd, modelRequestOpen } = useMemo(() => groupEvents(events), [events]);
 
+  const label = statusLabel(status, stopReason);
+  const needsAction = label === "needs approval";
   const live = status === "running" || status === "rescheduling";
   // A run stays "running" until the idle checkpoint, well after the agent has
   // answered, so the status alone would keep claiming work that is over. Real
@@ -434,7 +445,7 @@ function Timeline({
               {agentName(agents, session.agent_id)} · {relativeTime(session.created_at)}
             </span>
           )}
-          <span className={`badge ${status}`}>{status}</span>
+          <span className={`badge ${needsAction ? "requires_action" : status}`}>{label}</span>
           {costUsd !== null && (
             <span className="muted mono" title="session cost so far">${costUsd.toFixed(4)}</span>
           )}

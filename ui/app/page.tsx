@@ -13,8 +13,10 @@ import ArtifactViewer from "@/components/artifact-viewer";
 import Skills from "@/components/skills";
 import Docs from "@/components/docs";
 import Monitoring from "@/components/monitoring";
+import Approvals from "@/components/approvals";
 import {
   AgentsIcon,
+  ApprovalsIcon,
   ArtifactsIcon,
   DeploymentsIcon,
   DocsIcon,
@@ -26,17 +28,24 @@ import {
 } from "@/components/icons";
 
 const PAGES = [
-  "sessions", "agents", "deployments", "artifacts", "monitoring", "vaults", "memory", "skills",
-  "docs",
+  "sessions", "approvals", "deployments", "artifacts", "monitoring", "agents", "vaults",
+  "memory", "skills", "docs",
 ] as const;
 type Page = (typeof PAGES)[number];
 type Route = { page: Page; id?: string };
+
+const APPROVAL_POLL_MS = 15_000;
 
 const NAV: Record<Page, { label: string; icon: () => React.ReactNode; info: string }> = {
   sessions: {
     label: "Sessions",
     icon: SessionsIcon,
     info: "Live agent runs. Follow the event stream in real time, send messages, and approve or deny tool calls the agent is waiting on.",
+  },
+  approvals: {
+    label: "Approvals",
+    icon: ApprovalsIcon,
+    info: "Every tool call an agent is paused on, across all sessions. Allow or deny from here — the agent's container is released while it waits, so a pending approval costs nothing but blocks the work until someone answers.",
   },
   agents: {
     label: "Agents",
@@ -81,7 +90,7 @@ const NAV: Record<Page, { label: string; icon: () => React.ReactNode; info: stri
 };
 
 const NAV_SECTIONS: { label: string; pages: Page[] }[] = [
-  { label: "Work", pages: ["sessions", "deployments", "artifacts", "monitoring"] },
+  { label: "Work", pages: ["sessions", "approvals", "deployments", "artifacts", "monitoring"] },
   { label: "Configure", pages: ["agents", "skills", "vaults", "memory"] },
   { label: "Resources", pages: ["docs"] },
 ];
@@ -101,6 +110,7 @@ export default function Page() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<string | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
 
   const refresh = useCallback(async () => {
     const [agentResult, envResult, favResult] = await Promise.all([
@@ -114,6 +124,19 @@ export default function Page() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // The badge is the whole point of the inbox: a paused agent has to be visible
+  // from wherever you happen to be standing, not only from its own session.
+  const refreshApprovals = useCallback(async () => {
+    const result = await api<{ pending: number }>("/v1/tool_confirmations?limit=1");
+    setPendingApprovals(result.pending);
+  }, []);
+
+  useEffect(() => {
+    refreshApprovals();
+    const timer = setInterval(refreshApprovals, APPROVAL_POLL_MS);
+    return () => clearInterval(timer);
+  }, [refreshApprovals]);
 
   const toggleFavorite = useCallback(async (type: FavoriteType, id: string) => {
     const key = favKey(type, id);
@@ -202,6 +225,7 @@ export default function Page() {
               <span className="nav-label">{label}</span>
               {pages.map((page) => {
                 const { label: pageLabel, icon: Icon } = NAV[page];
+                const badge = page === "approvals" && pendingApprovals > 0;
                 return (
                   <a
                     key={page}
@@ -210,6 +234,11 @@ export default function Page() {
                   >
                     <Icon />
                     {pageLabel}
+                    {badge && (
+                      <span className="nav-count" aria-label={`${pendingApprovals} waiting`}>
+                        {pendingApprovals}
+                      </span>
+                    )}
                   </a>
                 );
               })}
@@ -260,6 +289,7 @@ export default function Page() {
                 ? <ArtifactViewer token={artifactDetail.slice("shared/".length)} agents={agents} />
                 : <ArtifactViewer artifactId={artifactDetail} agents={agents} />
             )}
+            {route.page === "approvals" && <Approvals onDecided={refreshApprovals} />}
             {route.page === "monitoring" && <Monitoring />}
             {route.page === "vaults" && <Vaults />}
             {route.page === "memory" && <MemoryStores />}

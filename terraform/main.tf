@@ -903,6 +903,64 @@ resource "google_billing_budget" "monthly" {
   }
 }
 
+# An approval nobody sees is the failure mode the gate is supposed to prevent, so
+# the pause has to reach a human who is not looking at the UI. Cloud Logging is
+# already collecting the control plane's output — a log-based metric on the marker
+# the permission gate writes turns that into mail, with no new service to run.
+# Empty alert_email skips all of it, like the budget above.
+
+resource "google_logging_metric" "approval_required" {
+  count  = var.alert_email != "" ? 1 : 0
+  name   = "naxos/approval_required"
+  filter = <<-EOT
+    resource.type="cloud_run_revision"
+    resource.labels.service_name="${google_cloud_run_v2_service.internal.name}"
+    textPayload:"naxos.approval_required"
+  EOT
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+}
+
+resource "google_monitoring_notification_channel" "approvals" {
+  count        = var.alert_email != "" ? 1 : 0
+  display_name = "naxos approvals"
+  type         = "email"
+  labels       = { email_address = var.alert_email }
+}
+
+resource "google_monitoring_alert_policy" "approval_required" {
+  count        = var.alert_email != "" ? 1 : 0
+  display_name = "naxos — agent waiting for approval"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "a tool call is waiting on a human"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.approval_required[0].name}\" AND resource.type=\"cloud_run_revision\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+      aggregations {
+        alignment_period   = "300s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+    }
+  }
+
+  # The session stays parked until someone answers, so the alert has to stay open
+  # until it is acknowledged rather than auto-closing on a quiet five minutes.
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  notification_channels = [google_monitoring_notification_channel.approvals[0].id]
+  documentation {
+    content = "An agent paused on a tool call that needs human approval. Decide it in the naxos Approvals view; it expires after CONFIRMATION_TTL_HOURS with no decision."
+  }
+}
+
 output "api_url" {
   value = google_cloud_run_v2_service.api.uri
 }

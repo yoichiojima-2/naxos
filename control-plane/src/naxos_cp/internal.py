@@ -289,8 +289,31 @@ async def _resolve_permission(conn, session_id: str, row: Any, body: "Permission
             "user_denied",
             existing["decided_by"],
         )
+    # Nobody answered in time. Distinct from a human denial, in the reason the agent
+    # sees and in the record, because they mean different things to a reviewer.
+    if existing and existing["status"] == "expired":
+        return (
+            {
+                "decision": "deny",
+                "by": "policy",
+                "reason": (
+                    "This call waited for human approval and timed out. "
+                    "Do not retry it; report that it needs approval and stop."
+                ),
+            },
+            "expired",
+            None,
+        )
     await store.upsert_confirmation(
         conn, session_id, body.call_hash, body.tool_name, body.input, body.tool_use_id
+    )
+    # The marker a log-based alert matches on, so a paused session reaches a human
+    # who is not looking at the app. See terraform/main.tf.
+    log.warning(
+        "naxos.approval_required session=%s agent=%s tool=%s",
+        session_id,
+        row["agent_id"],
+        body.tool_name,
     )
     return {"decision": "pending"}, "awaiting_confirmation", None
 
@@ -837,9 +860,13 @@ async def fire_deployment(deployment_id: str, _: str = Depends(caller_service_ac
     return await deployments.fire(deployment_id, trigger="schedule")
 
 
+EXPIRED_CONFIRMATION_MESSAGE = "Approval request timed out with no human decision."
+
+
 @router.post("/reconcile")
 async def reconcile(_: str = Depends(caller_service_account)) -> dict:
     woken = []
+    expired = []
     async with db.transaction() as conn:
         for row in await store.stale_wakeable_sessions(conn):
             try:
@@ -847,7 +874,28 @@ async def reconcile(_: str = Depends(caller_service_account)) -> dict:
                     woken.append(row["id"])
             except Exception:
                 log.exception("reconcile failed for %s", row["id"])
-    return {"woken": woken}
+        # An expired approval has to reach its session, or the agent stays parked on
+        # a decision that will never come. The resume path is the same one a human
+        # decision takes: queue the event, wake, let the gate answer the replay.
+        for row in await store.expire_confirmations(conn):
+            try:
+                await store.append_event(
+                    conn,
+                    row["session_id"],
+                    EventType.USER_TOOL_CONFIRMATION,
+                    {
+                        "type": str(EventType.USER_TOOL_CONFIRMATION),
+                        "call_hash": row["call_hash"],
+                        "result": "deny",
+                        "deny_message": EXPIRED_CONFIRMATION_MESSAGE,
+                    },
+                    principal="system:expiry",
+                )
+                await wake.wake(conn, row["session_id"])
+                expired.append(row["id"])
+            except Exception:
+                log.exception("expiring confirmation %s failed", row["id"])
+    return {"woken": woken, "expired": expired}
 
 
 app = create_app()

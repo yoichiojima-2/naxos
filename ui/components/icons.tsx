@@ -75,6 +75,13 @@ export const MonitoringIcon = () => (
   </svg>
 );
 
+export const ApprovalsIcon = () => (
+  <svg {...base}>
+    <path d="M12 3.2 19.5 6v5.8c0 4-3.1 7.2-7.5 9-4.4-1.8-7.5-5-7.5-9V6z" />
+    <path d="M9 11.8l2.2 2.2L15.4 10" />
+  </svg>
+);
+
 export const StarIcon = ({ filled = false }: { filled?: boolean }) => (
   <svg {...base} fill={filled ? "currentColor" : "none"}>
     <path d="M12 3.5 14.3 9l5.7.6-4.3 3.8 1.3 5.6-5-3-5 3 1.3-5.6L4 9.6 9.7 9z" />

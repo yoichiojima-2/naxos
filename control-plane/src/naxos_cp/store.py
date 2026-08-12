@@ -200,9 +200,13 @@ async def upsert_confirmation(
     tool_input: dict[str, Any],
     tool_use_id: str | None,
 ) -> asyncpg.Record:
+    # make_interval takes hours as an int; only secs is double precision.
+    ttl_seconds = config.CONFIRMATION_TTL_HOURS * 3600
     return await conn.fetchrow(
-        "INSERT INTO tool_confirmations (id, session_id, call_hash, tool_use_id, tool_name, input) "
-        "VALUES ($1, $2, $3, $4, $5, $6) "
+        "INSERT INTO tool_confirmations (id, session_id, call_hash, tool_use_id, tool_name, "
+        "  input, expires_at) "
+        "VALUES ($1, $2, $3, $4, $5, $6, "
+        "  CASE WHEN $7::float > 0 THEN now() + make_interval(secs => $7::float) END) "
         "ON CONFLICT (session_id, call_hash) DO UPDATE SET tool_use_id = EXCLUDED.tool_use_id "
         "RETURNING *",
         new_id("confirmation"),
@@ -211,7 +215,23 @@ async def upsert_confirmation(
         tool_use_id,
         tool_name,
         tool_input,
+        ttl_seconds,
     )
+
+
+async def expire_confirmations(conn: asyncpg.Connection) -> list[asyncpg.Record]:
+    """Time out approvals nobody answered. Terminated sessions are skipped: nothing
+    would ever consume the resume event, so the row would sit queued forever."""
+    return await conn.fetch(
+        "UPDATE tool_confirmations SET status = 'expired', decided_at = now() "
+        "WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= now() "
+        "  AND session_id IN (SELECT id FROM sessions WHERE status <> 'terminated') "
+        "RETURNING id, session_id, call_hash, tool_name"
+    )
+
+
+async def pending_confirmation_count(conn: asyncpg.Connection) -> int:
+    return await conn.fetchval("SELECT count(*) FROM tool_confirmations WHERE status = 'pending'")
 
 
 async def get_confirmation(

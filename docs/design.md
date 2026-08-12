@@ -73,8 +73,11 @@ create ──▶ [idle]  (no container; workspace created lazily in GCS)
 3. `always_ask` → look up `tool_confirmations` by `(session_id, call_hash)` where `call_hash = sha256(tool_name + canonical_json(input))`. Stored decision → return it. **The key is the call hash, not `tool_use_id`** — the SDK assigns a fresh `tool_use_id` when a pending call is replayed after resume (measured; §4.1).
 4. No decision → insert a pending row, emit `session.status_idle(stop_reason=requires_action)`, long-poll for the decision within the linger window. If it arrives, answer in-process (warm path). If not, **checkpoint and exit** — a blocked container costs nothing.
 5. A later `user.tool_confirmation` stores the decision and relaunches the sandbox. The sandbox resumes with a synthetic continuation prompt; the model re-issues the same tool call, the hook fires again, and step 3 answers instantly.
+6. **Nothing answers.** The pending row carries `expires_at = now() + CONFIRMATION_TTL_HOURS` (default 24h; 0 disables it). The reconciler marks anything past it `expired`, queues the same `user.tool_confirmation(deny)` event a human decision would, and wakes the session — so the replayed call is refused with a reason that tells the agent to stop rather than retry, and the run ends instead of parking forever. Terminated sessions are skipped: nothing would consume the resume event.
 
-Every branch above — including the pause and both denials — commits a `tool_calls` row in the same transaction before answering (§8). A paused call and the approved call that replaces it are two rows chained by `call_hash`, which is what makes the pause, the approver and the eventual execution all readable as one story.
+Every branch above — including the pause and both denials — commits a `tool_calls` row in the same transaction before answering (§8). A paused call and the approved call that replaces it are two rows chained by `call_hash`, which is what makes the pause, the approver and the eventual execution all readable as one story. `expired` is a decision of its own, distinct from `user_denied`: "nobody answered" and "a human said no" mean different things to whoever reads the record later.
+
+**Being paused is not the same as being seen.** A gate that only works when someone happens to have the right session open is not a control. Three things close that: `GET /v1/tool_confirmations` is a cross-session queue (the UI's Approvals view, with a pending count badged on every page); the gate emits a `naxos.approval_required` log line that a Terraform-provisioned log-based metric and alert policy turn into mail (§8); and expiry above bounds how long a forgotten approval can hold a session. Deciding stays `POST /v1/sessions/{id}/events` — the inbox hands back the `session_id` and `call_hash` that call needs, rather than adding a second decision path that could drift from the audit write and the wake.
 
 ### 4.1 Measured SDK resume semantics (`claude-agent-sdk` 0.2.134)
 
@@ -174,7 +177,8 @@ tool_confirmations (id, session_id,
         tool_use_id,                                -- audit only; not stable across resume
         tool_name, input jsonb,
         status CHECK IN ('pending','allowed','denied','expired'),
-        requested_at, expires_at, decided_by, decided_at)
+        requested_at, decided_by, decided_at,
+        expires_at)   -- CONFIRMATION_TTL_HOURS at insert; the reconciler sweeps it
 
 deployments (id, agent_id, agent_version,   -- NULL = latest at fire time
         name, cron, timezone DEFAULT 'Asia/Tokyo', initial_events jsonb,
@@ -439,6 +443,10 @@ POST   /v1/skills · GET /v1/skills[/{id}] · POST /v1/skills/{id}/archive
 POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 
+GET    /v1/tool_confirmations?status&agent_id&environment_id&session_id&limit
+                                           approval inbox across every session;
+                                           decide via POST /v1/sessions/{id}/events
+
 GET    /v1/tool_calls?session_id&agent_id&environment_id&tool_name&principal&decision
                       &result_status&since&until&cursor&limit
                                            the execution record; cursor = last row id
@@ -461,6 +469,8 @@ Documented deviations from CMA: IAP auth instead of API keys; environments opera
 - **Per-environment SA is the isolation boundary.** `sa-env-{env}` gets `aiplatform.user` (the only model exit), objectAdmin on its own session bucket, and `run.invoker` on `naxos-internal` + `naxos-egress` — nothing else by default. No secrets, no other environment's anything. BigQuery is a declarative per-environment opt-in: a `bigquery_datasets` list in `environments.json` grants the SA `bigquery.jobUser` plus `dataViewer` on exactly the listed datasets (`naxos_audit` itself is never grantable; the platform's own history is reachable only as authorized views in `naxos_audit_shared`, see §6 BigQuery) and is passed to the sandbox job as `BIGQUERY_DATASETS`, which is what decides whether the BigQuery tools exist at all — so data access stays Terraform-provisioned and reviewable, never API-granted. A fully prompt-injected agent is still boxed by IAM.
 - **Sandbox ↔ control-plane auth**: OIDC ID token of the env SA → Cloud Run IAM on `naxos-internal`, then an app-level check that the token's SA equals `environments.service_account_email` for the session being touched. No bearer tokens to mint or leak.
 - **Tool restriction**: a non-empty `tools` list on the agent version is enforced in the control plane's permission endpoint — a call to anything outside it is denied before any policy or confirmation lookup, and audited `not_allowed`. It cannot be enforced by the SDK: `allowed_tools` only pre-approves calls (measured, §4.1), and the CLI's built-ins cannot be withheld from the model at all, so the gate is the only place the restriction can actually hold. Entries may be globs, so `mcp__artifacts__*` names a whole built-in server. An empty list means unrestricted. Args are schema-validated in guarded wrapper code with caps enforced in code; errors return as tool results.
+- **Approval reaches a human off-app.** The gate logs `naxos.approval_required` when it parks a call. When `alert_email` is set, Terraform creates a log-based metric on that marker plus an alert policy that mails it — no new service, nothing always-on, and the signal stays inside the project. Empty `alert_email` skips all of it. The alert is deliberately coarse (see §14): it says somebody should look, not who must decide.
+
 - **Kill switch, three levels**: `agents.disabled` (checked at event accept and inside the permission gate before every tool call); session terminate; environment pause. Disabling an agent also pauses its deployments' Scheduler jobs.
 - **Audit**: the record is written at the permission gate, not reconstructed from what the sandbox reports. Every tool call blocks on `POST /internal/sessions/{id}/permission`, and that endpoint commits the `tool_calls` row inside the same transaction that resolves the decision — so the row exists before the tool runs, the decision label is computed control-plane side, and a call the sandbox never lives to report (OOM, lost lease, the 60-minute execution cap) is still on the record. `agent.tool_use` remains a timeline event and is no longer an audit source; the gate returns its `label` and `tool_call_id` so the two cannot drift. `principal` is the IAP email of whoever sent the turn — latched from the queued events at claim, not the session's creator — or `deployment:{id}` for cron, with `approved_by` naming the human who answered a gated call.
 
@@ -545,7 +555,7 @@ labels its own decision, and the sandbox uses that label verbatim).
   2. **Unblocking**: file the Vertex quota-increase request now, since it gates the removal of the Anthropic API-key exception. Until then the key exception stays, and no real internal data may be connected.
 - Egress proxy covers MCP + declared HTTP targets only; arbitrary bash egress is credential-less (documented limitation).
 - **No retention sweep on `tool_calls` yet.** Rows accumulate in Postgres after export. The bound is §9's sizing, not a policy; pruning exported rows past a retention window is the follow-up.
-- **Pending approvals have no inbox and no expiry.** `tool_confirmations.status = 'expired'` is in the CHECK constraint and never written (`expires_at` was dropped in `003_drop_unused.sql`), and a paused session is only visible by opening it — there is no cross-session queue and no notification. Governance that needs a human watching the right tab is the next gap to close.
+- **Approval notification is one channel, and it is coarse.** The log-based alert (§8) mails a single address on any pause; there is no routing to the agent's owner, no per-approver assignment, and no acknowledgement. It answers "somebody should look" rather than "you specifically must decide this". Per-approver routing needs an org/role model the platform does not have.
 - **Connectors run as a service identity** (§5.1): no OAuth authorization-code flow, no per-end-user identity. In the SaaS's own audit log every action is attributed to one integration account, so "which human caused this" is answerable from naxos's audit but not from Slack's or Jira's. Revisit if per-user attribution becomes a requirement.
 - **A connector granted to a tenant is reachable outside the tool gate.** `run.invoker` is network reach and the hosted servers rely on Cloud Run IAM alone, so an agent with Bash in a granted environment can call that connector directly with a self-minted ID token, bypassing the permission policy, the approval gate and `audit.tool_calls`. Governance inside the sandbox harness cannot close this — only the IAM grant can. Keep `connectors` in `environments.json` to tenants that may use the system with its shared credential, and scope each connector's token to the least it needs. (Same class as the documented credential-less-bash limitation, but here the credential lives server-side.)
 - **Connector deployment is not yet verified live**: the egress round-trip with a real token, `hosted` connector cold-start latency inside a turn, and Google Workspace domain-wide delegation all need a deployed project and real credentials.

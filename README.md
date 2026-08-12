@@ -8,6 +8,8 @@ A Google Cloud implementation of Claude Managed Agents: versioned agents, isolat
 
 ![Sessions — live agent runs with status, principal, and cost per session](docs/img/sessions.png)
 
+![Approvals — every tool call an agent is paused on, across all sessions, with the agent, the session and who it is for](docs/img/approvals.png)
+
 <details>
 <summary>A session timeline: event stream, tool calls, and a human approval gate</summary>
 
@@ -22,7 +24,7 @@ Hosted agent platforms run the agent loop and sandbox on the provider's cloud. n
 - **Data boundary** — model access via Vertex AI only; data never leaves the project.
 - **Internal-system integration** — self-hosted MCP servers reach closed-network systems without egress.
 - **Connectors without connector code** — Slack, Google Workspace, Notion, Jira, Confluence and GitHub attach as existing MCP servers, either self-hosted in the project or reached through the credential proxy. See [`docs/connectors.md`](docs/connectors.md).
-- **Execution-level governance** — human approval gates, an instant per-agent kill switch, and per-tenant IAM.
+- **Execution-level governance** — human approval gates with a cross-session inbox, an off-app alert and an expiry deadline; an instant per-agent kill switch; per-tenant IAM.
 - **An execution record you can hand to an auditor** — every tool call an agent attempted, recorded by the control plane at the permission gate: who asked, who approved, the arguments, the decision, and what came back. Queryable and exportable over `/v1/tool_calls`, and it outlives the session it describes.
 - **Scale-to-zero** — always *available* rather than always running; idle sessions checkpoint to storage and release their container.
 
