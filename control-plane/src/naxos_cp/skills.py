@@ -80,18 +80,21 @@ async def list_skills(tag: str | None = None, _: str = Depends(principal_of)) ->
 
 @router.patch("/skills/{skill_id}")
 async def update_skill(skill_id: str, body: SkillPatch, _: str = Depends(principal_of)) -> dict:
-    updates = body.model_dump(exclude_unset=True)
-    if not updates:
+    fields = body.model_fields_set
+    if not fields:
         raise HTTPException(400, "provide description and/or tags")
-    if "tags" in updates:
-        updates["tags"] = _dedupe(updates["tags"] or [])
-    sets = ", ".join(f"{name} = ${i}" for i, name in enumerate(updates, start=2))
     async with db.transaction() as conn:
         row = await conn.fetchrow(
-            f"UPDATE skills SET {sets}, updated_at = now() "
+            "UPDATE skills SET "
+            "  description = CASE WHEN $2 THEN $3 ELSE description END, "
+            "  tags = CASE WHEN $4 THEN $5 ELSE tags END, "
+            "  updated_at = now() "
             "WHERE id = $1 AND archived_at IS NULL RETURNING *",
             skill_id,
-            *updates.values(),
+            "description" in fields,
+            body.description,
+            "tags" in fields,
+            _dedupe(body.tags or []),
         )
     if row is None:
         raise HTTPException(404, "skill not found or archived")
