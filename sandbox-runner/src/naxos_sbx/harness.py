@@ -9,6 +9,7 @@ from claude_agent_sdk.types import (
     AssistantMessage,
     HookMatcher,
     ResultMessage,
+    StreamEvent,
     SystemMessage,
     TextBlock,
     ThinkingBlock,
@@ -30,6 +31,11 @@ log = logging.getLogger(__name__)
 # neither see, audit, nor pause it. The schedules MCP server is the durable,
 # governed replacement.
 SESSION_LOCAL_SCHEDULER_TOOLS = ["CronCreate", "CronDelete", "CronList", "ScheduleWakeup"]
+
+# Partial-text flushes ride pg_notify (8000-byte payload cap) as transient
+# frames, so chunks stay small and are paced rather than sent per token.
+STREAM_FLUSH_SECONDS = 0.3
+STREAM_CHUNK_CHARS = 1000
 
 CONTINUE_PROMPT = (
     "Continue the work you were doing before this session was resumed. "
@@ -84,6 +90,12 @@ class Harness:
         self.interrupted = False
         self.killed = False
         self.num_turns = 0
+        self._stream_seq = 0
+        self._stream_id: str | None = None
+        self._stream_text = ""
+        self._stream_last_flush = 0.0
+        self._stream_broken = False
+        self._closed_streams: list[str] = []
         for reserved in ("artifacts", "schedules", "bigquery"):
             if reserved in (config.mcp_servers or {}):
                 log.warning(
@@ -112,6 +124,50 @@ class Harness:
     async def flush(self) -> None:
         events, self.pending = self.pending, []
         await self.channel.emit(events, self.run_id)
+
+    # --- partial-text streaming -------------------------------------------
+
+    async def _on_stream_event(self, event: dict[str, Any]) -> None:
+        """Relay text deltas as transient frames; agent.message supersedes them.
+
+        Stream ids pair the deltas with the persisted message that follows, so
+        the UI can drop a late delta instead of replaying its text.
+        """
+        type_ = event.get("type")
+        if type_ == "content_block_start":
+            if (event.get("content_block") or {}).get("type") == "text":
+                self._stream_seq += 1
+                self._stream_id = f"{self.run_id}:{self._stream_seq}"
+                self._stream_text = ""
+        elif type_ == "content_block_delta" and self._stream_id is not None:
+            delta = event.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                self._stream_text += delta.get("text", "")
+                now = asyncio.get_running_loop().time()
+                if (
+                    len(self._stream_text) >= STREAM_CHUNK_CHARS
+                    or now - self._stream_last_flush >= STREAM_FLUSH_SECONDS
+                ):
+                    await self._flush_stream()
+        elif type_ == "content_block_stop" and self._stream_id is not None:
+            await self._flush_stream()
+            self._closed_streams.append(self._stream_id)
+            self._stream_id = None
+
+    async def _flush_stream(self) -> None:
+        if not self._stream_text or self._stream_id is None or self._stream_broken:
+            self._stream_text = "" if self._stream_broken else self._stream_text
+            return
+        text, self._stream_text = self._stream_text, ""
+        self._stream_last_flush = asyncio.get_running_loop().time()
+        try:
+            for i in range(0, len(text), STREAM_CHUNK_CHARS):
+                await self.channel.emit_stream(
+                    {"stream": self._stream_id, "text": text[i : i + STREAM_CHUNK_CHARS]}
+                )
+        except Exception:
+            self._stream_broken = True
+            log.exception("partial-text streaming failed; falling back to whole messages")
 
     # --- permission gate --------------------------------------------------
 
@@ -202,6 +258,7 @@ class Harness:
             disallowed_tools=SESSION_LOCAL_SCHEDULER_TOOLS,
             max_turns=self.config.max_turns,
             effort=self.config.effort,
+            include_partial_messages=True,
             resume=self.sdk_session_id,
             setting_sources=[],
             hooks={"PreToolUse": [HookMatcher(hooks=[self._pre_tool_use])]},
@@ -245,15 +302,30 @@ class Harness:
         return StopReason.END_TURN
 
     async def _drain(self, client: ClaudeSDKClient) -> None:
+        # Flushing after every message (not once per turn) is what makes the
+        # timeline live: tool calls and finished text blocks appear as they
+        # happen instead of when the whole turn ends.
+        # A turn interrupted mid-message can leave a closed stream id with no
+        # persisted message to claim it; stale ids must not tag the next turn.
+        self._closed_streams.clear()
+        self._stream_id = None
+        self._stream_text = ""
         self._queue(EventType.SPAN_MODEL_REQUEST_START, {})
+        await self.flush()
         async for message in client.receive_response():
+            if isinstance(message, StreamEvent):
+                await self._on_stream_event(message.event)
+                continue
             if isinstance(message, SystemMessage):
                 if message.subtype == "init":
                     self.sdk_session_id = message.data.get("session_id", self.sdk_session_id)
             elif isinstance(message, AssistantMessage):
                 for block in message.content:
                     if isinstance(block, TextBlock):
-                        self._queue(EventType.AGENT_MESSAGE, {"text": block.text})
+                        payload: dict[str, Any] = {"text": block.text}
+                        if self._closed_streams:
+                            payload["stream"] = self._closed_streams.pop(0)
+                        self._queue(EventType.AGENT_MESSAGE, payload)
                     elif isinstance(block, ThinkingBlock):
                         self._queue(EventType.AGENT_THINKING, {})
             elif isinstance(message, UserMessage):
@@ -281,3 +353,5 @@ class Harness:
                 await self.flush()
                 if self._budget_exhausted():
                     raise BudgetReached(self.cost_usd)
+                continue
+            await self.flush()

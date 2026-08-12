@@ -131,6 +131,10 @@ class ControlChannel:
         if events:
             await self._post("/events", {"events": events, "run_id": run_id})
 
+    async def emit_stream(self, delta: dict[str, Any]) -> None:
+        """Transient partial-text frame: relayed to SSE listeners, never stored."""
+        await self._post("/stream", delta)
+
     async def ask_permission(
         self, call_hash: str, tool_name: str, tool_input: dict[str, Any], tool_use_id: str | None
     ) -> dict[str, Any]:

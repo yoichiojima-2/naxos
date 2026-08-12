@@ -497,7 +497,9 @@ table.api td.d code { font-size: 0.9em; }
 </ol>
 <p>Then the processing loop: long-poll <code>/internal/sessions/{id}/queue?wait=25</code> (queued events + control signals: interrupt / kill / terminate) → SDK turn → batch-POST <code>agent.*</code>/<code>span.*</code> events to <code>/internal</code>.</p>
 
-<p><strong>Client-facing streaming.</strong> <code>GET /v1/sessions/{id}/events?stream=sse&amp;after={seq}</code> — the API polls <code>session_events</code> every 1s, emits SSE frames with <code>id:{seq}</code>, honors <code>Last-Event-ID</code> for reconnect replay, sends a ping comment every 15s. This is v1's <code>EventStream</code> re-derived but DB-backed: replay survives instance loss, so no Cloud Run session affinity is needed anywhere. LISTEN/NOTIFY is a later latency optimization, deliberately not built in v1.</p>
+<p><strong>Client-facing streaming.</strong> <code>GET /v1/sessions/{id}/events?stream=sse&amp;after={seq}</code> — the API replays from the cursor, then tails <code>session_events</code> on Postgres LISTEN/NOTIFY, emitting SSE frames with <code>id:{seq}</code>, honoring <code>Last-Event-ID</code> for reconnect replay, with a ping comment every 15s of quiet. Because the stream is DB-backed, replay survives instance loss, so no Cloud Run session affinity is needed anywhere.</p>
+
+<p><strong>Token-level partial text.</strong> The append-only event log cannot hold a row per token, so live typing rides <em>transient</em> <code>agent.message_delta</code> frames instead: the sandbox batches the SDK's partial-message text deltas (~0.3s cadence, ≤1000 chars/frame) to <code>POST /internal/sessions/{id}/stream</code>, which fans them out to SSE listeners over a second LISTEN/NOTIFY channel — nothing is stored. Delta frames carry no SSE <code>id:</code> line, so <code>Last-Event-ID</code> replay semantics are untouched; each frame carries a <code>stream</code> id that the persisted <code>agent.message</code> repeats, letting clients drop late deltas instead of duplicating text. Audit is unaffected: the persisted message remains the only durable record, and a lost delta loses nothing.</p>
 
 <p><strong>Interrupt.</strong> <code>user.interrupt</code> is inserted as an event and surfaced immediately on the control channel; the sandbox calls <code>client.interrupt()</code>. Jumps the queue, per CMA.</p>
 
@@ -822,7 +824,7 @@ table.api td.d code { font-size: 0.9em; }
   <tr><td class="m"><span class="mb get">GET</span></td><td class="p">/v1/skills/{id}/files[/{fid}]</td><td class="d">list / get (also <span class="mb del" style="width:auto;padding:0.2em 0.5em;">DELETE</span> on <code>/{fid}</code>)</td></tr>
 </table></div>
 
-<p>Internal surface (<code>naxos-internal</code>, IAM-only): per-session <code>claim / heartbeat / queue?wait / events / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)</code>, plus <code>deployments/{id}/fire</code> and <code>reconcile</code>.</p>
+<p>Internal surface (<code>naxos-internal</code>, IAM-only): per-session <code>claim / heartbeat / queue?wait / events / stream (transient partial-text fan-out) / checkpoint / config / skills / memory_writeback / artifacts (list·register·delete·share) / deployments (list·create·archive)</code>, plus <code>deployments/{id}/fire</code> and <code>reconcile</code>.</p>
 
 <h4>Event types (CMA vocabulary)</h4>
 <div class="chip-row"><span class="lbl">user.</span><span class="chip">message</span><span class="chip">interrupt</span><span class="chip">tool_confirmation</span><span class="chip">custom_tool_result</span></div>
@@ -830,7 +832,9 @@ table.api td.d code { font-size: 0.9em; }
 <div class="chip-row"><span class="lbl">session.</span><span class="chip">status_running</span><span class="chip">status_idle</span><span class="chip">status_terminated</span><span class="chip">error</span></div>
 <div class="chip-row"><span class="lbl">span.</span><span class="chip">model_request_start</span><span class="chip">model_request_end</span></div>
 
-<p style="margin-top: 1rem;">Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; <code>span.*</code> approximated from the SDK stream; <code>agent.artifact</code> puts the artifact lifecycle in the timeline; no outcomes / multiagent / webhooks initially.</p>
+<p style="margin-top: 1rem;">One transient frame type rides the SSE stream without being part of the persisted vocabulary: <code>agent.message_delta</code> (§4 token-level partial text) — never stored, never replayed, not client-sendable.</p>
+
+<p style="margin-top: 1rem;">Documented deviations from CMA: IAP auth instead of API keys; environments operator-provisioned; budget enforced post-response rather than pre-request; <code>span.*</code> approximated from the SDK stream; <code>agent.artifact</code> puts the artifact lifecycle in the timeline; no outcomes / multiagent / webhooks initially; untitled sessions auto-derive their title from the first <code>user.message</code> (explicit titles always win).</p>
 
 <h2 id="s8"><span class="num">8</span>Security model</h2>
 

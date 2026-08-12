@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { agentName, api, Agent, EVENT_TYPES, Session, SessionEvent, WorkspaceFile } from "@/lib/api";
+import {
+  agentName,
+  api,
+  Agent,
+  EVENT_TYPES,
+  STREAM_DELTA_TYPE,
+  Session,
+  SessionEvent,
+  StreamDelta,
+  WorkspaceFile,
+} from "@/lib/api";
 import { Block, ToolBlock, groupEvents, prettifyResult, toolSummary } from "@/lib/timeline";
 import { fullTime, relativeTime, shortId } from "@/lib/format";
 import { BackIcon } from "@/components/icons";
@@ -307,6 +317,10 @@ function Timeline({
   const [connected, setConnected] = useState(true);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const [raw, setRaw] = useState(false);
+  // The partial text of the message currently generating, keyed by its stream
+  // id. The persisted agent.message carrying the same id supersedes it.
+  const [streaming, setStreaming] = useState<{ stream: string; text: string } | null>(null);
+  const finalized = useRef<Set<string>>(new Set());
   const source = useRef<EventSource | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -330,7 +344,7 @@ function Timeline({
       endRef.current?.scrollIntoView({ block: "end" });
       followed.current = true;
     }
-  }, [events.length]);
+  }, [events.length, streaming?.text.length]);
 
   async function loadFiles() {
     if (files) { setFiles(null); return; }
@@ -345,16 +359,39 @@ function Timeline({
       setConnected(true);
       const event = JSON.parse(raw.data) as SessionEvent;
       setEvents((prev) => (prev.some((e) => e.seq === event.seq) ? prev : [...prev, event]));
+      if (event.type === "agent.message") {
+        // The durable message replaces its live preview. A missing stream id
+        // means streaming was off for that block — clear whatever is showing.
+        const stream = typeof event.payload.stream === "string" ? event.payload.stream : "";
+        if (stream) finalized.current.add(stream);
+        setStreaming((prev) => (prev && stream && prev.stream !== stream ? prev : null));
+      }
       if (event.type === "session.status_running") setStatus("running");
-      if (event.type === "session.status_idle") setStatus("idle");
+      if (event.type === "session.status_idle") {
+        setStatus("idle");
+        setStreaming(null);
+      }
+      if (event.type === "user.interrupt") setStreaming(null);
       if (event.type === "session.status_rescheduling") setStatus("rescheduling");
       if (event.type === "session.status_terminated") {
         setStatus("terminated");
+        setStreaming(null);
         es.close(); // the server ends the stream here; without close() EventSource reconnects forever
       }
     };
     // Named SSE events require a listener per type; a catch-all keeps this simple.
     EVENT_TYPES.forEach((type) => es.addEventListener(type, push));
+    es.addEventListener(STREAM_DELTA_TYPE, (raw: MessageEvent) => {
+      setConnected(true);
+      const delta = JSON.parse(raw.data) as StreamDelta;
+      const stream = delta.stream ?? "";
+      if (!stream || finalized.current.has(stream)) return;
+      setStreaming((prev) =>
+        prev && prev.stream === stream
+          ? { stream, text: prev.text + (delta.text ?? "") }
+          : { stream, text: delta.text ?? "" },
+      );
+    });
     es.onopen = () => setConnected(true);
     // A CLOSED source never retries (e.g. the session does not exist), so
     // "reconnecting…" would be a lie; the missing-session state covers it.
@@ -494,7 +531,13 @@ function Timeline({
                 onConfirm={confirm}
               />
             ))}
-        {(status === "rescheduling" || working) && (
+        {!raw && streaming && streaming.text && (
+          <div className="turn agent streaming">
+            <Markdown source={streaming.text} />
+            <span className="turn-meta stream-caret">…</span>
+          </div>
+        )}
+        {(status === "rescheduling" || (working && !streaming?.text)) && (
           <div className="event system">
             <span className="muted">
               <span className="spinner" />

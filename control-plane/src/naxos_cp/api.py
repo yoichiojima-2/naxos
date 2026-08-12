@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from naxos_shared.events import (
+    STREAM_DELTA_TYPE,
     Decision,
     EffortLevel,
     EventIn,
@@ -424,8 +425,8 @@ async def send_events(
         raise HTTPException(400, "events must not be empty")
     async with db.transaction() as conn:
         session = await conn.fetchrow(
-            "SELECT s.status, a.disabled FROM sessions s JOIN agents a ON a.id = s.agent_id "
-            "WHERE s.id = $1",
+            "SELECT s.status, s.title, a.disabled FROM sessions s "
+            "JOIN agents a ON a.id = s.agent_id WHERE s.id = $1",
             session_id,
         )
         if session is None:
@@ -453,6 +454,15 @@ async def send_events(
                 conn, session_id, event.type, event.model_dump(mode="json"), principal
             )
             created.append({"id": record["id"], "seq": record["seq"], "type": record["type"]})
+        if session["title"] is None:
+            title = sessions.derive_title(body.events)
+            if title:
+                await conn.execute(
+                    "UPDATE sessions SET title = $2, updated_at = now() "
+                    "WHERE id = $1 AND title IS NULL",
+                    session_id,
+                    title,
+                )
         await wake.wake(conn, session_id)
     return {"data": created}
 
@@ -480,34 +490,47 @@ async def get_events(
 
 
 async def _sse(session_id: str, after: int):
-    """Replay from `after`, then tail on LISTEN/NOTIFY. Frame ids are the seq."""
+    """Replay from `after`, then tail on LISTEN/NOTIFY. Frame ids are the seq.
+
+    Transient partial-text frames are interleaved without an id line, so they
+    never advance Last-Event-ID and are never replayed — the persisted
+    agent.message that follows carries the durable text.
+    """
     cursor = after
-    while True:
-        async with db.pool().acquire() as conn:
-            rows = await store.list_events(conn, session_id, cursor, 200)
-        for row in rows:
-            cursor = row["seq"]
-            payload = json.dumps(
-                {
-                    "type": row["type"],
-                    "seq": row["seq"],
-                    "payload": row["payload"],
-                    "principal": row["principal"],
-                    "created_at": row["created_at"].isoformat(),
-                },
-                default=str,
-            )
-            yield f"id: {row['seq']}\nevent: {row['type']}\ndata: {payload}\n\n"
-            if row["type"] == str(EventType.SESSION_STATUS_TERMINATED):
+    queue = notify.subscribe_stream(session_id)
+    try:
+        while True:
+            async with db.pool().acquire() as conn:
+                rows = await store.list_events(conn, session_id, cursor, 200)
+            for row in rows:
+                cursor = row["seq"]
+                payload = json.dumps(
+                    {
+                        "type": row["type"],
+                        "seq": row["seq"],
+                        "payload": row["payload"],
+                        "principal": row["principal"],
+                        "created_at": row["created_at"].isoformat(),
+                    },
+                    default=str,
+                )
+                yield f"id: {row['seq']}\nevent: {row['type']}\ndata: {payload}\n\n"
+                if row["type"] == str(EventType.SESSION_STATUS_TERMINATED):
+                    return
+            if rows:
+                continue
+            async with db.pool().acquire() as conn:
+                exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", session_id)
+            if not exists:
                 return
-        if rows:
-            continue
-        async with db.pool().acquire() as conn:
-            exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", session_id)
-        if not exists:
-            return
-        if not await notify.wait(session_id, config.SSE_PING_SECONDS):
-            yield ": ping\n\n"
+            result = await notify.wait_or_delta(session_id, queue, config.SSE_PING_SECONDS)
+            if result is False:
+                yield ": ping\n\n"
+            elif isinstance(result, dict):
+                data = json.dumps({"type": STREAM_DELTA_TYPE, **result}, default=str)
+                yield f"event: {STREAM_DELTA_TYPE}\ndata: {data}\n\n"
+    finally:
+        notify.unsubscribe_stream(session_id, queue)
 
 
 app = create_app()

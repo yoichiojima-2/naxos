@@ -1,6 +1,7 @@
 import pytest
+from claude_agent_sdk.types import AssistantMessage, ResultMessage, StreamEvent, TextBlock
 
-from naxos_sbx.harness import _result_text
+from naxos_sbx.harness import STREAM_CHUNK_CHARS, _result_text
 
 from .conftest import make_config, make_harness
 
@@ -99,6 +100,122 @@ async def test_pre_tool_use_pending_pauses_the_call():
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert harness.paused_call is not None
     assert channel.emitted[-1]["payload"]["decision"] == "awaiting_confirmation"
+
+
+def test_options_stream_partial_messages():
+    assert make_harness(make_config()).options().include_partial_messages is True
+
+
+class _StreamChannel:
+    def __init__(self, fail: bool = False):
+        self.session_id = "session_x"
+        self.fail = fail
+        self.deltas = []
+
+    async def emit_stream(self, delta):
+        if self.fail:
+            raise RuntimeError("stream endpoint down")
+        self.deltas.append(delta)
+
+
+def _block_start(block_type="text"):
+    return {"type": "content_block_start", "content_block": {"type": block_type}}
+
+
+def _text_delta(text):
+    return {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}}
+
+
+async def test_stream_deltas_relay_and_close_in_order():
+    channel = _StreamChannel()
+    harness = make_harness(make_config(), channel)
+    await harness._on_stream_event(_block_start())
+    await harness._on_stream_event(_text_delta("hel"))
+    await harness._on_stream_event({"type": "content_block_stop"})
+    assert "".join(d["text"] for d in channel.deltas) == "hel"
+    assert all(d["stream"] == channel.deltas[0]["stream"] for d in channel.deltas)
+    assert harness._closed_streams == [channel.deltas[0]["stream"]]
+
+
+async def test_stream_chunks_stay_under_the_notify_cap():
+    channel = _StreamChannel()
+    harness = make_harness(make_config(), channel)
+    await harness._on_stream_event(_block_start())
+    await harness._on_stream_event(_text_delta("x" * (STREAM_CHUNK_CHARS * 2 + 10)))
+    await harness._on_stream_event({"type": "content_block_stop"})
+    assert all(len(d["text"]) <= STREAM_CHUNK_CHARS for d in channel.deltas)
+    assert sum(len(d["text"]) for d in channel.deltas) == STREAM_CHUNK_CHARS * 2 + 10
+
+
+async def test_stream_ignores_non_text_blocks():
+    channel = _StreamChannel()
+    harness = make_harness(make_config(), channel)
+    await harness._on_stream_event(_block_start("tool_use"))
+    await harness._on_stream_event(_text_delta("ignored"))
+    await harness._on_stream_event({"type": "content_block_stop"})
+    assert channel.deltas == []
+    assert harness._closed_streams == []
+
+
+async def test_stream_failure_falls_back_without_raising():
+    channel = _StreamChannel(fail=True)
+    harness = make_harness(make_config(), channel)
+    await harness._on_stream_event(_block_start())
+    await harness._on_stream_event(_text_delta("boom"))
+    assert harness._stream_broken is True
+    # The closed stream id still tags the persisted message.
+    await harness._on_stream_event({"type": "content_block_stop"})
+    assert len(harness._closed_streams) == 1
+
+
+class _FakeClient:
+    def __init__(self, messages):
+        self.messages = messages
+
+    async def receive_response(self):
+        for message in self.messages:
+            yield message
+
+
+class _DrainChannel(_StreamChannel):
+    def __init__(self):
+        super().__init__()
+        self.emitted = []
+
+    async def emit(self, events, run_id):
+        self.emitted.extend(events)
+
+
+async def test_drain_streams_then_supersedes_with_the_persisted_message():
+    channel = _DrainChannel()
+    harness = make_harness(make_config(), channel)
+    stream = [
+        StreamEvent(uuid="u1", session_id="s", event=_block_start()),
+        StreamEvent(uuid="u2", session_id="s", event=_text_delta("hel")),
+        StreamEvent(uuid="u3", session_id="s", event=_text_delta("lo")),
+        StreamEvent(uuid="u4", session_id="s", event={"type": "content_block_stop"}),
+    ]
+    messages = [
+        *stream,
+        AssistantMessage(content=[TextBlock(text="hello")], model="claude-sonnet-5"),
+        ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            total_cost_usd=0.1,
+        ),
+    ]
+    await harness._drain(_FakeClient(messages))
+
+    assert "".join(d["text"] for d in channel.deltas) == "hello"
+    message = next(e for e in channel.emitted if e["type"] == "agent.message")
+    assert message["payload"]["text"] == "hello"
+    assert message["payload"]["stream"] == channel.deltas[0]["stream"]
+    types = [e["type"] for e in channel.emitted]
+    assert types.index("agent.message") < types.index("span.model_request_end")
 
 
 def test_result_text_unwraps_content_blocks():

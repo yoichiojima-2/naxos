@@ -19,7 +19,7 @@ from naxos_shared.ids import new_id
 from naxos_shared.paths import unsafe_relpath
 from pydantic import BaseModel, Field
 
-from . import artifacts, audit, config, db, deployments, favorites, store, wake
+from . import artifacts, audit, config, db, deployments, favorites, notify, store, wake
 from .auth import caller_service_account
 
 log = logging.getLogger(__name__)
@@ -221,6 +221,26 @@ async def sandbox_events(
                 )
     await audit.log_tool_calls(audit_rows)
     return {"ok": True, "count": len(body.events)}
+
+
+class StreamDelta(BaseModel):
+    stream: str = Field(max_length=200)
+    text: str
+
+
+@router.post("/sessions/{session_id}/stream")
+async def sandbox_stream(
+    session_id: str, body: StreamDelta, caller: str = Depends(caller_service_account)
+) -> dict:
+    """Fan a transient partial-text frame out to SSE listeners. Nothing is
+    stored: the persisted agent.message that follows is the durable record,
+    so audit and replay are untouched by streaming."""
+    async with db.transaction() as conn:
+        await _authorize(conn, session_id, caller)
+        sent = await notify.publish_stream(
+            conn, session_id, {"stream": body.stream, "text": body.text}
+        )
+    return {"ok": sent}
 
 
 class PermissionAsk(BaseModel):

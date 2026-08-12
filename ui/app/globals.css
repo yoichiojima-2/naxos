@@ -420,6 +420,43 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
 .md tr:last-child td { border-bottom: 1px solid var(--border); }
 .md th { color: var(--muted); text-transform: none; letter-spacing: normal; }
 
+/* --- code blocks: copy button + highlight palette ------------------------- */
+
+.md .codeblock { position: relative; margin: 10px 0; }
+.md .codeblock pre { margin: 0; }
+.copy-code {
+  position: absolute; top: 6px; right: 6px; z-index: 1;
+  padding: 2px 8px; font-size: 11px; font-family: var(--sans);
+  color: var(--muted); background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; opacity: 0; transition: opacity 0.1s;
+}
+.codeblock:hover .copy-code, .copy-code:focus-visible { opacity: 1; }
+.copy-code:hover { color: var(--accent); border-color: var(--accent); }
+
+.hljs-comment, .hljs-quote { color: var(--faint); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-type,
+.hljs-built_in { color: light-dark(#af2e9b, #d097ce); }
+.hljs-string, .hljs-regexp, .hljs-addition,
+.hljs-meta .hljs-string { color: light-dark(#216e4e, #7ee2b8); }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link { color: light-dark(#a54800, #fbc828); }
+.hljs-title, .hljs-section, .hljs-name,
+.hljs-selector-id, .hljs-selector-class { color: light-dark(#0055cc, #85b8ff); }
+.hljs-attr, .hljs-attribute, .hljs-variable,
+.hljs-template-variable, .hljs-params { color: light-dark(#206a83, #8bdbe5); }
+.hljs-meta, .hljs-doctag { color: var(--muted); }
+.hljs-deletion { color: var(--danger); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* The message still generating: partial text streamed ahead of the record. */
+.turn.agent.streaming .stream-caret { color: var(--faint); }
+@keyframes stream-pulse { 50% { opacity: 0.25; } }
+.stream-caret { animation: stream-pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .stream-caret { animation: none; }
+}
+
 /* --- artifact viewer ------------------------------------------------------ */
 
 .viewer-frame {

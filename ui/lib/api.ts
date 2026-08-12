@@ -147,6 +147,12 @@ export type SessionEvent = {
   created_at: string;
 };
 
+// Transient partial-text frame interleaved into the SSE stream while the agent
+// is generating. Never persisted, never replayed; the persisted agent.message
+// with the same `stream` id supersedes it. Mirrors naxos_shared.events.
+export const STREAM_DELTA_TYPE = "agent.message_delta";
+export type StreamDelta = { type: string; stream?: string; text?: string };
+
 export type Deployment = {
   id: string;
   name: string;
