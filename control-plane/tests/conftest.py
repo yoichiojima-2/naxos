@@ -10,7 +10,8 @@ os.environ.setdefault("NAXOS_DEV_MODE", "1")
 from naxos_cp import api, db, internal, wake
 
 TABLES = (
-    "favorites, session_runs, session_events, tool_confirmations, egress_routes, artifacts, "
+    "favorites, session_runs, tool_calls, session_events, tool_confirmations, egress_routes, "
+    "artifacts, "
     "sessions, "
     "agent_versions, "
     "agents, environments, deployment_runs, deployments, vault_credentials, vaults, "

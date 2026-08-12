@@ -32,6 +32,7 @@ export default function Chat({
   const [missing, setMissing] = useState(false);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [status, setStatus] = useState("idle");
+  const [stopReason, setStopReason] = useState<string | null>(null);
   const [connected, setConnected] = useState(true);
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null);
   const [raw, setRaw] = useState(false);
@@ -48,6 +49,7 @@ export default function Chat({
       .then((s) => {
         setSession(s);
         setStatus(s.status);
+        setStopReason(s.stop_reason);
         untitled.current = s.title == null;
       })
       .catch(() => setMissing(true));
@@ -98,9 +100,13 @@ export default function Chat({
         if (stream) finalized.current.add(stream);
         setStreaming((prev) => (prev && stream && prev.stream !== stream ? prev : null));
       }
-      if (event.type === "session.status_running") setStatus("running");
+      if (event.type === "session.status_running") {
+        setStatus("running");
+        setStopReason(null);
+      }
       if (event.type === "session.status_idle") {
         setStatus("idle");
+        setStopReason((event.payload.stop_reason as string) ?? null);
         setStreaming(null);
       }
       if (event.type === "user.interrupt") setStreaming(null);
@@ -182,7 +188,13 @@ export default function Chat({
               {agentName(agents, session.agent_id)} · {relativeTime(session.created_at)}
             </span>
           )}
-          <span className={`badge ${status}`}>{status}</span>
+          <span
+            className={`badge ${
+              status === "idle" && stopReason === "requires_action" ? "requires_action" : status
+            }`}
+          >
+            {status === "idle" && stopReason === "requires_action" ? "needs approval" : status}
+          </span>
           {costUsd !== null && (
             <span className="chat-sub mono" title="session cost so far">${costUsd.toFixed(4)}</span>
           )}

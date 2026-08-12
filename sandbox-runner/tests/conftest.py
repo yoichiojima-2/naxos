@@ -21,7 +21,7 @@ def make_harness(
     config: SessionConfig | None = None, channel=None, plugin_dir: str | None = None
 ) -> Harness:
     return Harness(
-        channel or SimpleNamespace(session_id="session_x"),
+        channel or SimpleNamespace(session_id="session_x", run_id="run_x"),
         config if config is not None else make_config(),
         "/tmp",
         plugin_dir=plugin_dir,

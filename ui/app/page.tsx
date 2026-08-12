@@ -16,9 +16,11 @@ import ArtifactViewer from "@/components/artifact-viewer";
 import Skills from "@/components/skills";
 import Docs from "@/components/docs";
 import Monitoring from "@/components/monitoring";
+import Approvals from "@/components/approvals";
 import DialogHost from "@/components/confirm";
 import {
   AgentsIcon,
+  ApprovalsIcon,
   ArtifactsIcon,
   DeploymentsIcon,
   DocsIcon,
@@ -30,8 +32,8 @@ import {
 } from "@/components/icons";
 
 const CONSOLE_PAGES = [
-  "sessions", "agents", "deployments", "artifacts", "monitoring", "vaults", "memory", "skills",
-  "docs",
+  "sessions", "approvals", "agents", "deployments", "artifacts", "monitoring", "vaults",
+  "memory", "skills", "docs",
 ] as const;
 type ConsolePage = (typeof CONSOLE_PAGES)[number];
 type Route = { page: ConsolePage | "new" | "chat"; id?: string };
@@ -41,6 +43,11 @@ const NAV: Record<ConsolePage, { label: string; icon: () => React.ReactNode; inf
     label: "All sessions",
     icon: SessionsIcon,
     info: "Every session on the platform, for operating rather than chatting: filter, set budgets, terminate, or delete in bulk. Open one to continue the conversation.",
+  },
+  approvals: {
+    label: "Approvals",
+    icon: ApprovalsIcon,
+    info: "Every tool call an agent is paused on, across all sessions. Allow or deny from here — the agent's container is released while it waits, so a pending approval costs nothing but blocks the work until someone answers.",
   },
   agents: {
     label: "Agents",
@@ -85,9 +92,11 @@ const NAV: Record<ConsolePage, { label: string; icon: () => React.ReactNode; inf
 };
 
 const CONSOLE_ORDER: ConsolePage[] = [
-  "sessions", "agents", "deployments", "artifacts", "monitoring", "skills", "vaults", "memory",
-  "docs",
+  "sessions", "approvals", "agents", "deployments", "artifacts", "monitoring", "skills",
+  "vaults", "memory", "docs",
 ];
+
+const APPROVAL_POLL_MS = 15_000;
 
 function parseHash(hash: string): Route {
   const [page, ...rest] = hash.replace(/^#/, "").split("/");
@@ -121,6 +130,7 @@ export default function Page() {
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
   const [query, setQuery] = useState("");
   const [sideOpen, setSideOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -141,6 +151,23 @@ export default function Page() {
     const result = await api<{ data: Session[] }>("/v1/sessions?limit=200");
     setSessions(result.data);
   }, []);
+
+  // The badge is the whole point of the inbox: a paused agent has to be visible
+  // from wherever you happen to be standing, not only from its own session.
+  const refreshApprovals = useCallback(async () => {
+    const result = await api<{ pending: number }>("/v1/tool_confirmations?limit=1");
+    setPendingApprovals(result.pending);
+  }, []);
+
+  useEffect(() => {
+    refreshApprovals();
+    const timer = setInterval(refreshApprovals, APPROVAL_POLL_MS);
+    window.addEventListener("naxos-sessions", refreshApprovals);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("naxos-sessions", refreshApprovals);
+    };
+  }, [refreshApprovals]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -307,6 +334,7 @@ export default function Page() {
           <span className="nav-label">Console</span>
           {CONSOLE_ORDER.map((page) => {
             const { label, icon: Icon } = NAV[page];
+            const badge = page === "approvals" && pendingApprovals > 0;
             return (
               <a
                 key={page}
@@ -315,6 +343,11 @@ export default function Page() {
               >
                 <Icon />
                 <span className="title">{label}</span>
+                {badge && (
+                  <span className="nav-count" aria-label={`${pendingApprovals} waiting`}>
+                    {pendingApprovals}
+                  </span>
+                )}
               </a>
             );
           })}
@@ -376,6 +409,7 @@ export default function Page() {
                 ? <ArtifactViewer token={route.id.slice("shared/".length)} agents={agents} />
                 : <ArtifactViewer artifactId={route.id} agents={agents} />
             )}
+            {consolePage === "approvals" && <Approvals onDecided={refreshApprovals} />}
             {consolePage === "monitoring" && <Monitoring />}
             {consolePage === "vaults" && <Vaults />}
             {consolePage === "memory" && <MemoryStores />}

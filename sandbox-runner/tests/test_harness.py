@@ -63,6 +63,7 @@ def test_cost_accumulates_on_top_of_prior_bursts():
 class _Channel:
     def __init__(self, verdict):
         self.session_id = "session_x"
+        self.run_id = "run_x"
         self.verdict = verdict
         self.emitted = []
 
@@ -85,12 +86,42 @@ class _Channel:
     ],
 )
 async def test_pre_tool_use_labels_every_decision(verdict, label, hook_decision):
+    """The fallback derivation, for a control plane rolled back to before it
+    labelled its own decisions."""
     channel = _Channel(verdict)
     harness = make_harness(make_config(), channel)
     result = await harness._pre_tool_use({"tool_name": "Bash", "tool_input": {}}, "tu_1", None)
     assert result["hookSpecificOutput"]["permissionDecision"] == hook_decision
     assert harness.pending[-1]["payload"]["decision"] == label
     assert harness.killed is (label == "killed")
+
+
+async def test_pre_tool_use_uses_the_gates_own_label():
+    """The gate decided and recorded it; re-deriving here would let the timeline
+    drift from the audit record."""
+    channel = _Channel(
+        {"decision": "allow", "by": "policy", "label": "user_allowed", "tool_call_id": "42"}
+    )
+    harness = make_harness(make_config(), channel)
+    await harness._pre_tool_use({"tool_name": "Bash", "tool_input": {}}, "tu_1", None)
+    assert harness.pending[-1]["payload"]["decision"] == "user_allowed"
+    assert harness.pending[-1]["payload"]["tool_call_id"] == "42"
+
+
+def test_usage_tokens_accumulate_across_model_responses():
+    harness = make_harness()
+    harness._accumulate_usage({"input_tokens": 100, "output_tokens": 20})
+    harness._accumulate_usage({"input_tokens": 50, "output_tokens": 5})
+    assert (harness.input_tokens, harness.output_tokens) == (150, 25)
+
+
+def test_usage_tokens_ignore_cache_counters_and_missing_usage():
+    """cache_read/creation are deliberately not folded in: the audited number has
+    to mean what its name says. cost_usd already carries the billed spend."""
+    harness = make_harness()
+    harness._accumulate_usage(None)
+    harness._accumulate_usage({"cache_read_input_tokens": 9000, "output_tokens": 7})
+    assert (harness.input_tokens, harness.output_tokens) == (0, 7)
 
 
 async def test_pre_tool_use_pending_pauses_the_call():
@@ -109,6 +140,7 @@ def test_options_stream_partial_messages():
 class _StreamChannel:
     def __init__(self, fail: bool = False):
         self.session_id = "session_x"
+        self.run_id = "run-test"
         self.fail = fail
         self.deltas = []
 

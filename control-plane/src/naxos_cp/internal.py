@@ -15,7 +15,7 @@ from naxos_shared.events import (
     StopReason,
     tool_matches,
 )
-from naxos_shared.ids import new_id
+from naxos_shared.ids import call_hash, canonical_json, new_id
 from naxos_shared.paths import unsafe_relpath
 from pydantic import BaseModel, Field
 
@@ -58,8 +58,14 @@ async def _agent_version(conn, row: Any) -> Any:
     )
 
 
+class Claim(BaseModel):
+    run_id: str | None = None
+
+
 @router.post("/sessions/{session_id}/claim")
-async def claim(session_id: str, caller: str = Depends(caller_service_account)) -> dict:
+async def claim(
+    session_id: str, body: Claim | None = None, caller: str = Depends(caller_service_account)
+) -> dict:
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
         if row["status"] == str(SessionStatus.TERMINATED):
@@ -67,6 +73,10 @@ async def claim(session_id: str, caller: str = Depends(caller_service_account)) 
         lease_id = await store.acquire_lease(conn, session_id, row["service_account_email"])
         if lease_id is None:
             raise HTTPException(409, "session is already leased")
+        # The sandbox's own run id, so tool_calls, session_runs and audit.runs all
+        # key on the same burst. sessions.execution_name is a full Cloud Run
+        # resource path and does not match it.
+        await store.set_current_run(conn, session_id, (body and body.run_id) or session_id)
         await store.set_status(conn, session_id, SessionStatus.RUNNING)
     return {"lease_id": lease_id}
 
@@ -169,6 +179,7 @@ async def queue(
             if state["status"] == str(SessionStatus.TERMINATED):
                 return {"control": "terminate", "events": []}
             events = await store.claim_queued_events(conn, session_id)
+            await store.latch_turn_principal(conn, session_id, events)
         if events:
             return {
                 "control": None,
@@ -194,6 +205,8 @@ class SandboxEvent(BaseModel):
 
 class SandboxEventsIn(BaseModel):
     events: list[SandboxEvent] = Field(default_factory=list)
+    # Accepted but no longer read: the run id now comes from the session, taken at
+    # claim, so the sandbox cannot report a burst it does not belong to.
     run_id: str | None = None
 
 
@@ -201,25 +214,23 @@ class SandboxEventsIn(BaseModel):
 async def sandbox_events(
     session_id: str, body: SandboxEventsIn, caller: str = Depends(caller_service_account)
 ) -> dict:
-    audit_rows = []
     async with db.transaction() as conn:
         row = await _authorize(conn, session_id, caller)
+        run_id = row["current_run_id"] or session_id
         for event in body.events:
             await store.append_event(conn, session_id, event.type, event.payload, processed=True)
-            if event.type is EventType.AGENT_TOOL_USE:
-                audit_rows.append(
-                    audit.tool_call_row(
-                        run_id=body.run_id or session_id,
-                        session_id=session_id,
-                        agent_id=row["agent_id"],
-                        principal=row["created_by"],
-                        tool_name=event.payload.get("tool_name", ""),
-                        args_redacted=str(event.payload.get("input", ""))[:2000],
-                        decision=event.payload.get("decision", "auto_allowed"),
-                        tool_use_id=event.payload.get("tool_use_id"),
-                    )
+            # agent.tool_use stays a timeline event only. The audit record for the
+            # call was already written by the permission gate, which is the one
+            # point every call must pass and the one place the decision is made.
+            if event.type is EventType.AGENT_TOOL_RESULT and event.payload.get("tool_use_id"):
+                await store.correlate_tool_result(
+                    conn,
+                    session_id,
+                    run_id,
+                    event.payload["tool_use_id"],
+                    bool(event.payload.get("is_error")),
+                    str(event.payload.get("content") or ""),
                 )
-    await audit.log_tool_calls(audit_rows)
     return {"ok": True, "count": len(body.events)}
 
 
@@ -250,45 +261,118 @@ class PermissionAsk(BaseModel):
     tool_use_id: str | None = None
 
 
-@router.post("/sessions/{session_id}/permission")
-async def permission(
-    session_id: str, body: PermissionAsk, caller: str = Depends(caller_service_account)
-) -> dict:
-    """Resolve one tool call against policy and any recorded human decision."""
-    async with db.transaction() as conn:
-        row = await _authorize(conn, session_id, caller)
-        if row["disabled"]:
-            return {"decision": "deny", "reason": "agent disabled", "killed": True}
-        version = await _agent_version(conn, row)
-        # The tools list is enforced here, not by the SDK: `allowed_tools` only
-        # pre-approves calls, and the CLI's own built-ins cannot be withheld from
-        # the model at all. An empty list means unrestricted.
-        allowed = list(version["tools"] or [])
-        if allowed and not tool_matches(body.tool_name, allowed):
-            return {
+def _capped_args(tool_input: dict[str, Any]) -> tuple[str, bool]:
+    """The exact canonical bytes call_hash was computed over, capped. Truncating
+    keeps the hash checkable against the full input; it does not forge it."""
+    encoded = canonical_json(tool_input)
+    raw = encoded.encode()
+    if len(raw) <= config.MAX_TOOL_ARGS_BYTES:
+        return encoded, False
+    return raw[: config.MAX_TOOL_ARGS_BYTES].decode(errors="ignore"), True
+
+
+async def _resolve_permission(conn, session_id: str, row: Any, body: "PermissionAsk") -> tuple:
+    """(verdict, decision label, approving principal) — the gate's own decision."""
+    if row["disabled"]:
+        return {"decision": "deny", "reason": "agent disabled", "killed": True}, "killed", None
+    version = await _agent_version(conn, row)
+    # The tools list is enforced here, not by the SDK: `allowed_tools` only
+    # pre-approves calls, and the CLI's own built-ins cannot be withheld from
+    # the model at all. An empty list means unrestricted.
+    allowed = list(version["tools"] or [])
+    if allowed and not tool_matches(body.tool_name, allowed):
+        return (
+            {
                 "decision": "deny",
                 "by": "policy",
                 "reason": (
                     f"{body.tool_name} is not one of this agent's tools "
                     f"({', '.join(allowed)}). Do not retry or work around it."
                 ),
-            }
-        policy = PermissionPolicy.model_validate(version["permission_policy"] or {})
-        if policy.mode_for(body.tool_name) is PermissionMode.ALWAYS_ALLOW:
-            return {"decision": "allow", "by": "policy"}
-        existing = await store.get_confirmation(conn, session_id, body.call_hash)
-        if existing and existing["status"] == "allowed":
-            return {"decision": "allow", "by": "user"}
-        if existing and existing["status"] == "denied":
-            return {
+            },
+            "not_allowed",
+            None,
+        )
+    policy = PermissionPolicy.model_validate(version["permission_policy"] or {})
+    if policy.mode_for(body.tool_name) is PermissionMode.ALWAYS_ALLOW:
+        return {"decision": "allow", "by": "policy"}, "auto_allowed", None
+    existing = await store.get_confirmation(conn, session_id, body.call_hash)
+    if existing and existing["status"] == "allowed":
+        return {"decision": "allow", "by": "user"}, "user_allowed", existing["decided_by"]
+    if existing and existing["status"] == "denied":
+        return (
+            {
                 "decision": "deny",
                 "by": "user",
                 "reason": existing["deny_message"] or "denied by operator",
-            }
-        await store.upsert_confirmation(
-            conn, session_id, body.call_hash, body.tool_name, body.input, body.tool_use_id
+            },
+            "user_denied",
+            existing["decided_by"],
         )
-    return {"decision": "pending"}
+    # Nobody answered in time. Distinct from a human denial, in the reason the agent
+    # sees and in the record, because they mean different things to a reviewer.
+    if existing and existing["status"] == "expired":
+        return (
+            {
+                "decision": "deny",
+                "by": "policy",
+                "reason": (
+                    "This call waited for human approval and timed out. "
+                    "Do not retry it; report that it needs approval and stop."
+                ),
+            },
+            "expired",
+            None,
+        )
+    await store.upsert_confirmation(
+        conn, session_id, body.call_hash, body.tool_name, body.input, body.tool_use_id
+    )
+    # The marker a log-based alert matches on, so a paused session reaches a human
+    # who is not looking at the app. See terraform/main.tf.
+    log.warning(
+        "naxos.approval_required session=%s agent=%s tool=%s",
+        session_id,
+        row["agent_id"],
+        body.tool_name,
+    )
+    return {"decision": "pending"}, "awaiting_confirmation", None
+
+
+@router.post("/sessions/{session_id}/permission")
+async def permission(
+    session_id: str, body: PermissionAsk, caller: str = Depends(caller_service_account)
+) -> dict:
+    """Resolve one tool call against policy and any recorded human decision, and
+    record it. This endpoint is the audit writer: it is the one point every tool
+    call must pass, so the row is committed before the tool runs and does not
+    depend on the sandbox surviving to report it."""
+    args_json, args_truncated = _capped_args(body.input)
+    if call_hash(body.tool_name, body.input) != body.call_hash:
+        # Only ever a bug: a wrong hash finds no approval, so it cannot widen access.
+        log.warning("call_hash mismatch on %s for session %s", body.tool_name, session_id)
+    async with db.transaction() as conn:
+        row = await _authorize(conn, session_id, caller)
+        verdict, label, approved_by = await _resolve_permission(conn, session_id, row, body)
+        tool_call_id = await store.record_tool_call(
+            conn,
+            session_id=session_id,
+            run_id=row["current_run_id"] or session_id,
+            agent_id=row["agent_id"],
+            agent_version=row["agent_version"],
+            environment_id=row["environment_id"],
+            principal=row["turn_principal"] or row["created_by"],
+            approved_by=approved_by,
+            tool_name=body.tool_name,
+            call_hash=body.call_hash,
+            tool_use_id=body.tool_use_id,
+            args_json=args_json,
+            args_truncated=args_truncated,
+            decision=label,
+            # A denied call still gets a tool result — the CLI synthesises one.
+            # Settling the status now keeps that from overwriting the denial.
+            result_status="denied" if verdict["decision"] == "deny" else None,
+        )
+    return {**verdict, "label": label, "tool_call_id": str(tool_call_id)}
 
 
 class Checkpoint(BaseModel):
@@ -301,6 +385,8 @@ class Checkpoint(BaseModel):
     run_id: str | None = None
     started_at: datetime | None = None
     num_turns: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @router.post("/sessions/{session_id}/checkpoint")
@@ -333,23 +419,35 @@ async def checkpoint(
         stop_reason_str = str(body.stop_reason)
         await conn.execute(
             "INSERT INTO session_runs (id, session_id, agent_id, environment_id, trigger_type, "
-            "  principal, model, status, stop_reason, num_turns, cost_usd, started_at) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) "
+            "  principal, model, status, stop_reason, num_turns, cost_usd, started_at, "
+            "  input_tokens, output_tokens) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "
             "ON CONFLICT (id) DO NOTHING",
             run_id,
             session_id,
             row["agent_id"],
             row["environment_id"],
             trigger_type,
-            created_by,
+            row["turn_principal"] or created_by,
             version["model"],
             status_str,
             stop_reason_str,
             body.num_turns,
             cost_delta,
             started_at,
+            body.input_tokens,
+            body.output_tokens,
         )
+        await store.close_open_tool_calls(conn, session_id)
+        deployment_run_id = None
         if trigger_type == "deployment":
+            # Read before record_burst: it may close the run, and audit.runs wants
+            # the run this burst belonged to either way.
+            deployment_run_id = await conn.fetchval(
+                "SELECT id FROM deployment_runs WHERE session_id = $1 "
+                "ORDER BY fired_at DESC LIMIT 1",
+                session_id,
+            )
             await deployments.record_burst(
                 conn,
                 session_id,
@@ -368,20 +466,29 @@ async def checkpoint(
         if pending and not body.terminated:
             await wake.wake(conn, session_id)
 
-    await audit.log_run(
-        run_id=run_id,
-        session_id=session_id,
-        agent_id=row["agent_id"],
-        environment_id=row["environment_id"],
-        principal=created_by,
-        trigger_type=trigger_type,
-        started_at=started_at,
-        status=status_str,
-        stop_reason=stop_reason_str,
-        num_turns=body.num_turns,
-        cost_usd=cost_delta,
-        model=version["model"],
-    )
+    # The record is already durable in Postgres, so a BigQuery outage must not fail
+    # the checkpoint — the export retries from the watermark on the next one.
+    try:
+        await audit.log_run(
+            run_id=run_id,
+            session_id=session_id,
+            agent_id=row["agent_id"],
+            environment_id=row["environment_id"],
+            principal=row["turn_principal"] or created_by,
+            trigger_type=trigger_type,
+            started_at=started_at,
+            status=status_str,
+            stop_reason=stop_reason_str,
+            num_turns=body.num_turns,
+            cost_usd=cost_delta,
+            model=version["model"],
+            input_tokens=body.input_tokens,
+            output_tokens=body.output_tokens,
+            deployment_run_id=deployment_run_id,
+        )
+        await audit.export_tool_calls(session_id)
+    except Exception:
+        log.exception("audit export failed for run %s", run_id)
     return {"ok": True}
 
 
@@ -754,9 +861,13 @@ async def fire_deployment(deployment_id: str, _: str = Depends(caller_service_ac
     return await deployments.fire(deployment_id, trigger="schedule")
 
 
+EXPIRED_CONFIRMATION_MESSAGE = "Approval request timed out with no human decision."
+
+
 @router.post("/reconcile")
 async def reconcile(_: str = Depends(caller_service_account)) -> dict:
     woken = []
+    expired = []
     async with db.transaction() as conn:
         for row in await store.stale_wakeable_sessions(conn):
             try:
@@ -764,7 +875,28 @@ async def reconcile(_: str = Depends(caller_service_account)) -> dict:
                     woken.append(row["id"])
             except Exception:
                 log.exception("reconcile failed for %s", row["id"])
-    return {"woken": woken}
+        # An expired approval has to reach its session, or the agent stays parked on
+        # a decision that will never come. The resume path is the same one a human
+        # decision takes: queue the event, wake, let the gate answer the replay.
+        for row in await store.expire_confirmations(conn):
+            try:
+                await store.append_event(
+                    conn,
+                    row["session_id"],
+                    EventType.USER_TOOL_CONFIRMATION,
+                    {
+                        "type": str(EventType.USER_TOOL_CONFIRMATION),
+                        "call_hash": row["call_hash"],
+                        "result": "deny",
+                        "deny_message": EXPIRED_CONFIRMATION_MESSAGE,
+                    },
+                    principal="system:expiry",
+                )
+                await wake.wake(conn, row["session_id"])
+                expired.append(row["id"])
+            except Exception:
+                log.exception("expiring confirmation %s failed", row["id"])
+    return {"woken": woken, "expired": expired}
 
 
 app = create_app()

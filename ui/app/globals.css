@@ -120,6 +120,12 @@ body {
 .side-item .dot.ask { background: var(--warn); }
 .side-item .dot.live { background: var(--ok); animation: pulse 1.4s ease-in-out infinite; }
 .side-empty { padding: 8px 12px; color: var(--faint); font-size: 13px; }
+.nav-count {
+  margin-left: auto; flex: none;
+  min-width: 18px; padding: 0 5px; border-radius: 9px;
+  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  color: var(--warn); background: var(--warn-soft);
+}
 
 .side-foot { flex: none; border-top: 1px solid var(--border); padding: 8px 10px; }
 .side-foot .side-item { padding: 5px 12px; font-size: 13px; }
@@ -185,6 +191,7 @@ body {
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .row.end { justify-content: flex-end; }
+.row.nowrap { flex-wrap: nowrap; }
 .muted { color: var(--muted); font-size: 13px; }
 .mono { font-family: var(--mono); font-size: 12.5px; }
 
@@ -199,6 +206,10 @@ body {
 .prewrap { white-space: pre-wrap; word-break: break-word; }
 
 .table-wrap { overflow-x: auto; }
+
+/* The approval inbox leads with the command, but who it belongs to and the
+   decision buttons matter more than every character of it. */
+.approval-tool { max-width: 420px; }
 
 .toast {
   position: fixed; bottom: calc(24px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);

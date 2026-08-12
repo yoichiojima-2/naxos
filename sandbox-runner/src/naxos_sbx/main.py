@@ -109,9 +109,11 @@ async def _finalize(
             sdk_session_id=harness.sdk_session_id if harness else None,
             cost_usd=harness.cost_usd if harness else None,
             stop_reason=str(stop_reason),
-            run_id=harness.run_id if harness else None,
+            run_id=channel.run_id,
             started_at=started_at,
             num_turns=harness.num_turns if harness else 0,
+            input_tokens=harness.input_tokens if harness else 0,
+            output_tokens=harness.output_tokens if harness else 0,
             errored=errored,
         )
     except Exception:
