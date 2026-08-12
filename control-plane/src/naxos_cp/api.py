@@ -479,10 +479,12 @@ async def get_events(
     if stream == "sse":
         last_event_id = request.headers.get("last-event-id")
         start = int(last_event_id) if last_event_id else after
+        # no-transform: intermediaries (the Next dev proxy included) buffer SSE
+        # to compress it, which stalls the stream until the connection closes.
         return StreamingResponse(
             _sse(session_id, start),
             media_type="text/event-stream",
-            headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
+            headers={"cache-control": "no-cache, no-transform", "x-accel-buffering": "no"},
         )
     async with db.transaction() as conn:
         rows = await store.list_events(conn, session_id, after, limit)

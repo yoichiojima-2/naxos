@@ -53,7 +53,8 @@ export async function apiConfirm(
   path: string,
   init?: RequestInit & { json?: unknown },
 ): Promise<boolean> {
-  if (!window.confirm(message)) return false;
+  const { confirmDialog } = await import("@/components/confirm");
+  if (!(await confirmDialog({ title: "Are you sure?", body: message, danger: true }))) return false;
   await api(path, init ?? { json: {} });
   return true;
 }

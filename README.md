@@ -1,17 +1,19 @@
 # naxos
 
-A Google Cloud implementation of Claude Managed Agents: versioned agents, isolated per-session sandboxes on Cloud Run, an event-sourced session API with SSE streaming — including token-level live text while the agent is typing — approval gates, vaults with an egress credential proxy, scheduled deployments, and full execution-level audit — inside a single GCP project with Vertex AI as the only model exit. Sessions title themselves from their first message, and the timeline renders markdown with syntax-highlighted, copyable code blocks.
+A Google Cloud implementation of Claude Managed Agents: versioned agents, isolated per-session sandboxes on Cloud Run, an event-sourced session API with SSE streaming — including token-level live text while the agent is typing — approval gates, vaults with an egress credential proxy, scheduled deployments, and full execution-level audit — inside a single GCP project with Vertex AI as the only model exit.
+
+The UI is chat-first: a Claude-app-style surface (sidebar of auto-titled conversations, live streaming replies, markdown with syntax-highlighted copyable code, inline tool-approval cards) on top of a console for operating the platform (all sessions, agents, deployments, monitoring, skills, vaults, memory).
 
 - Docs site: [yoichiojima-2.github.io/naxos](https://yoichiojima-2.github.io/naxos/)
 - Design: [`docs/design.md`](docs/design.md)
 - Constraints and conventions: [`CLAUDE.md`](CLAUDE.md)
 
-![Sessions — live agent runs with status, principal, and cost per session](docs/img/sessions.png)
+![Chat — conversations with agents, auto-titled and grouped by recency](docs/img/sessions.png)
 
 <details>
-<summary>A session timeline: event stream, tool calls, and a human approval gate</summary>
+<summary>A conversation paused on a human approval gate</summary>
 
-![Session timeline — the agent pauses on a gated tool call until a human allows or denies it](docs/img/session-timeline.png)
+![A chat where the agent pauses on a gated tool call until a human allows or denies it](docs/img/session-timeline.png)
 
 </details>
 

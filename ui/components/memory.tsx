@@ -96,8 +96,15 @@ export default function MemoryStores() {
       const collision = fresh.data.find(
         (m) => m.path === editing.path && m.id !== editing.id,
       );
-      if (collision && !window.confirm(`"${editing.path}" already exists — overwrite it?`)) {
-        return;
+      if (collision) {
+        const { confirmDialog } = await import("@/components/confirm");
+        const ok = await confirmDialog({
+          title: "Overwrite file?",
+          body: `"${editing.path}" already exists.`,
+          action: "Overwrite",
+          danger: true,
+        });
+        if (!ok) return;
       }
       await api(`/v1/memory_stores/${editing.storeId}/memories`, {
         json: { path: editing.path, content: editing.content },
