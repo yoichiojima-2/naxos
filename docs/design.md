@@ -186,9 +186,18 @@ deployments (id, agent_id, agent_version,   -- NULL = latest at fire time
         created_by, created_at)
 
 deployment_runs (id, deployment_id, session_id,
-        status CHECK IN ('queued','running','succeeded','failed'),
+        status CHECK IN ('queued','running','succeeded','failed','cancelled'),
         error_type,    -- session_error|budget_reached|timeout|retries_exhausted|infra_error
-        fired_at, finished_at)
+        error_type,    -- + session_error|agent_disabled|cancelled for a closed run
+        stop_reason, cost_usd, num_turns,
+        fired_at, started_at, finished_at)
+        -- Closed at the fired session's checkpoint. A run blocked on an operator
+        -- (requires_action, budget_reached — raising the budget resumes) stays
+        -- open and keeps accumulating; anything else ends it. Terminal failures
+        -- come from the control plane, which is where they are known: a crashed
+        -- burst still reports end_turn (the sandbox flags it with `errored`),
+        -- wake retries exhausted never reaches a checkpoint at all, and the kill
+        -- switch / terminate / delete cancel the run.
 
 session_runs (id, session_id, agent_id, environment_id,
         trigger_type, principal, model, status, stop_reason,
@@ -223,7 +232,8 @@ artifacts (id, session_id, agent_id, environment_id,
         -- content in GCS at sessions/{session_id}/artifacts/{name}
 
 skills (id, name UNIQUE,      -- ^[a-z0-9][a-z0-9-]{0,63}$, the mount directory name
-        description, archived_at, created_by, created_at, updated_at)
+        description, tags text[],   -- free-form labels, list-view filtering only
+        archived_at, created_by, created_at, updated_at)
 skill_files (id, skill_id, path, UNIQUE (skill_id, path),
         content,              -- ≤64KB per file
         updated_by, created_at, updated_at)
@@ -354,6 +364,11 @@ session, like vaults and memory).
   switch apply, and the call lands in `audit.tool_calls`.
 - **Not versioned** (like memory, documented): editing a skill changes it for
   every agent that references it, including pinned agent versions.
+- **Tags** (`skills.tags`, free-form labels, `PATCH /v1/skills/{id}`): an
+  organisational aid for a library that grows past what one list can show —
+  `GET /v1/skills?tag=` filters, the UI offers the same filter in the skills
+  view and in the agent form's skill picker. Tags carry no semantics for
+  mounting or governance; the sandbox never sees them.
 
 ### Storage split
 
@@ -423,6 +438,7 @@ GET    /v1/sessions/{id}/events?stream=sse&after={seq}  SSE (Last-Event-ID honor
 POST   /v1/deployments · GET /v1/deployments[/{id}]
 POST   /v1/deployments/{id}/pause | /unpause | /archive | /run
 GET    /v1/deployments/{id}/runs
+GET    /v1/deployments/runs?days=&deployment_id=&status=   -- run history + per-deployment rollup
 
 POST   /v1/vaults · GET /v1/vaults[/{id}] · POST /v1/vaults/{id}/archive
 POST   /v1/vaults/{id}/credentials         write-only; value → Secret Manager directly
@@ -439,7 +455,8 @@ DELETE /v1/artifacts/{id}                  row + blob
 POST   /v1/artifacts/{id}/share · DELETE …/share    mint / revoke the share token
 GET    /v1/artifacts/shared/{token}[/content]       stable share URL (still behind IAP)
 
-POST   /v1/skills · GET /v1/skills[/{id}] · POST /v1/skills/{id}/archive
+POST   /v1/skills · GET /v1/skills[/{id}] (?tag=) · PATCH /v1/skills/{id} (description, tags)
+POST   /v1/skills/{id}/archive
 POST   /v1/skills/{id}/files               upsert by path
 GET    /v1/skills/{id}/files · GET/DELETE …/files/{fid}
 
@@ -453,6 +470,8 @@ GET    /v1/tool_calls?session_id&agent_id&environment_id&tool_name&principal&dec
 GET    /v1/tool_calls/export?<same filters>  the whole filtered record as NDJSON
 
 GET    /v1/monitoring/summary?days=N       cost/usage aggregates from session_runs
+                                           (the deployments runs view reads
+                                            /v1/deployments/runs, not this)
 
 GET    /v1/favorites · POST /v1/favorites  per-principal stars on agents / sessions /
 DELETE /v1/favorites/{type}/{id}           artifacts / skills, surfaced first in UI lists
@@ -518,7 +537,7 @@ Each phase ends deployed and demoable.
 1. **Spike (blocking)**: Agent SDK resume semantics — pending tool_use replay through `can_use_tool`, transcript restore from a relocated directory, Vertex backend availability in asia-northeast1/global (resolves the model-region open issue).
 2. **Walking skeleton**: Terraform base (SQL, buckets, BQ, SAs, services, one `default` environment Job) + agents CRUD (versioned) + sessions + events + the full loop: create session → job launch → SDK turn on Vertex → events → SSE → idle checkpoint → resume. Audit (`runs` + `tool_calls`) and kill switch from day one. Reconciler.
 3. **Permissions + budget + interrupt**: `always_ask` round-trip including pause/release/resume, budget enforcement, minimal UI (session timeline + approval inbox).
-4. **Deployments**: Scheduler-per-deployment, `deployment_runs` with error types, pause/unpause/run-now, UI tab.
+4. **Deployments**: Scheduler-per-deployment, `deployment_runs` with error types, outcome and duration closed at checkpoint, pause/unpause/run-now, UI tab with a runs view (duration chart, per-deployment success rate and run history).
 5. **Vaults + egress proxy**: Secret Manager write path, MCP URL rewriting, header substitution, per-vault IAM.
 6. **Memory stores**: CRUD + mount/writeback + UI.
 7. **Hardening**: second environment (proves the fan-out), budget alerts, cost review at the phase gate.
@@ -528,7 +547,7 @@ Each phase ends deployed and demoable.
 - Phase 1 spike has an explicit pass/fail: resume replays the pending tool_use, or the fallback is adopted and documented here.
 - Every phase ships to the project and runs its end-to-end demo (Phase 2: curl create agent → session → SSE shows `agent.message` → `audit.runs` row exists → flip `disabled` → event rejected).
 - Approval flow: `always_ask` tool → container exits during the pause (verify zero cost while pending) → confirm via UI → session resumes and completes.
-- Deployments: cron fires → `deployment_runs` row → session completes; error path exercised by archiving the agent.
+- Deployments: cron fires → `deployment_runs` row → session completes and the run closes with its outcome, duration and cost; error path exercised by archiving the agent, and the budget/terminate paths by stopping a fired session.
 - Cost gate at Phase 7: one month of billing export reviewed against the ¥10k infra estimate.
 
 ## 13. GCP verification

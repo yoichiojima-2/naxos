@@ -361,47 +361,12 @@ class Checkpoint(BaseModel):
     cost_usd: float | None = None
     stop_reason: StopReason = StopReason.END_TURN
     terminated: bool = False
+    errored: bool = False
     run_id: str | None = None
     started_at: datetime | None = None
     num_turns: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-
-
-_DEPLOYMENT_ERROR_TYPE = {
-    StopReason.BUDGET_REACHED: "budget_reached",
-    StopReason.RETRIES_EXHAUSTED: "retries_exhausted",
-}
-
-
-async def _close_deployment_run(
-    conn, session_id: str, trigger_type: str, stop_reason: StopReason, terminated: bool
-) -> str | None:
-    """Settle the deployment_runs row this session was fired for. Without this the
-    row is inserted 'running' and never moves, so a scheduled run has no outcome."""
-    if trigger_type != "deployment":
-        return None
-    run = await conn.fetchrow(
-        "SELECT id, status FROM deployment_runs WHERE session_id = $1 "
-        "ORDER BY fired_at DESC LIMIT 1",
-        session_id,
-    )
-    if run is None:
-        return None
-    if run["status"] != "running":
-        return run["id"]
-    # requires_action means a human still has to answer; the run is not over.
-    if stop_reason is StopReason.REQUIRES_ACTION and not terminated:
-        return run["id"]
-    error_type = _DEPLOYMENT_ERROR_TYPE.get(stop_reason)
-    await conn.execute(
-        "UPDATE deployment_runs SET status = $2, error_type = $3, finished_at = now() "
-        "WHERE id = $1",
-        run["id"],
-        "failed" if error_type else "succeeded",
-        error_type,
-    )
-    return run["id"]
 
 
 @router.post("/sessions/{session_id}/checkpoint")
@@ -454,9 +419,25 @@ async def checkpoint(
             body.output_tokens,
         )
         await store.close_open_tool_calls(conn, session_id)
-        deployment_run_id = await _close_deployment_run(
-            conn, session_id, trigger_type, body.stop_reason, body.terminated
-        )
+        deployment_run_id = None
+        if trigger_type == "deployment":
+            # Read before record_burst: it may close the run, and audit.runs wants
+            # the run this burst belonged to either way.
+            deployment_run_id = await conn.fetchval(
+                "SELECT id FROM deployment_runs WHERE session_id = $1 "
+                "ORDER BY fired_at DESC LIMIT 1",
+                session_id,
+            )
+            await deployments.record_burst(
+                conn,
+                session_id,
+                stop_reason=body.stop_reason,
+                terminated=body.terminated,
+                errored=body.errored,
+                cost_delta=cost_delta,
+                num_turns=body.num_turns,
+                started_at=started_at,
+            )
         await store.release_lease(conn, session_id, body.lease_id)
         pending = await conn.fetchval(
             "SELECT count(*) FROM session_events WHERE session_id = $1 AND processed_at IS NULL",

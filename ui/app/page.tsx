@@ -280,7 +280,7 @@ export default function Page() {
                 onChange={refresh}
               />
             )}
-            {route.page === "deployments" && <Deployments agents={agents} />}
+            {route.page === "deployments" && <Deployments agents={agents} view={route.id} />}
             {route.page === "artifacts" && !route.id && (
               <Artifacts agents={agents} favorites={favorites} onToggleFavorite={toggleFavorite} />
             )}

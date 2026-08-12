@@ -265,6 +265,29 @@ tr.click:hover td { background: var(--panel2); }
 .badge.rescheduling { color: var(--warn); background: var(--warn-soft); animation: pulse 1.4s ease-in-out infinite; }
 .badge.terminated { color: var(--danger); background: var(--danger-soft); }
 .badge.requires_action { color: var(--warn); background: var(--warn-soft); }
+.badge.ok { color: var(--ok); background: var(--ok-soft); }
+
+/* --- tabs ----------------------------------------------------------------- */
+
+.tabs {
+  display: flex; gap: 4px; margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.tabs a {
+  padding: 7px 12px; margin-bottom: -1px;
+  color: var(--muted); text-decoration: none; font-size: 13.5px; font-weight: 500;
+  border-bottom: 2px solid transparent;
+}
+.tabs a:hover { color: var(--ink); }
+.tabs a.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+a.button-link {
+  border-radius: var(--radius-sm); padding: 6px 12px;
+  background: var(--neutral); color: var(--ink);
+  font-size: 14px; font-weight: 500; text-decoration: none;
+  transition: background 0.1s;
+}
+a.button-link:hover { background: var(--neutral-hover); }
 
 /* --- chips / key-value ---------------------------------------------------- */
 
@@ -545,6 +568,74 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
   color: var(--muted); font-size: 12px; white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- deployment runs ------------------------------------------------------ */
+
+/* Run state uses the app's status tokens, not the chart series hue: these are
+   reserved semantic colours. Green and red separate poorly for deuteranopes, so
+   every failed mark is also hatched and every one is labelled. */
+:root {
+  --run-ok: var(--ok);
+  --run-fail: var(--danger);
+  --run-cancel: var(--faint);
+  --run-active: var(--info);
+}
+
+.chip-sep { width: 1px; height: 20px; background: var(--border); }
+
+.run-focus-name { color: var(--ink); font-size: 15px; font-weight: 600; }
+
+.run-bar.ok { fill: var(--run-ok); }
+/* the hatch is the second cue for failed runs; a CSS fill would win over a
+   fill= attribute, so the pattern is applied here rather than on the mark */
+.run-bar.fail { fill: url(#run-hatch); }
+.run-bar.cancel { fill: var(--run-cancel); }
+.run-bar.active { fill: var(--run-active); }
+.run-bar.hot, .run-bar:focus-visible { stroke: var(--ink); stroke-width: 1.5; outline: none; }
+.run-hatch-bg { fill: var(--run-fail); }
+.run-hatch-line { stroke: var(--panel); stroke-width: 2; }
+.run-mean { stroke: var(--faint); stroke-width: 1; stroke-dasharray: 4 4; }
+
+.run-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+.run-legend-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--muted); font-size: 12.5px;
+}
+.run-swatch, .run-dot {
+  flex: none; display: inline-block; border-radius: 2px;
+  width: 10px; height: 10px;
+}
+.run-dot { border-radius: 999px; }
+.run-swatch.ok, .run-dot.ok { background: var(--run-ok); }
+.run-swatch.cancel, .run-dot.cancel { background: var(--run-cancel); }
+.run-swatch.active, .run-dot.active { background: var(--run-active); }
+.run-swatch.fail, .run-dot.fail, .run-cell.fail {
+  background: repeating-linear-gradient(
+    45deg, var(--run-fail) 0 4px, var(--panel) 4px 5px
+  );
+}
+
+.run-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px; margin-bottom: 16px;
+}
+.run-card { display: block; margin: 0; color: inherit; text-decoration: none; }
+.run-card:hover { border-color: var(--accent); }
+.run-card-name { color: var(--ink); font-weight: 600; }
+.run-card-sub { margin-top: 2px; }
+.run-card-stats {
+  display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px;
+  color: var(--muted); font-size: 12.5px;
+}
+.run-card-stats strong {
+  color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums;
+}
+
+.run-strip { display: flex; align-items: flex-end; gap: 2px; margin-top: 12px; min-height: 20px; }
+.run-cell { flex: none; width: 9px; height: 20px; border-radius: 2px; background: var(--run-cancel); }
+.run-cell.ok { background: var(--run-ok); }
+.run-cell.cancel { background: var(--run-cancel); }
+.run-cell.active { background: var(--run-active); }
 
 /* --- responsive shell ----------------------------------------------------- */
 

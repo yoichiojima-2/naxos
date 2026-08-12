@@ -158,6 +158,7 @@ class ControlChannel:
         num_turns: int = 0,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        errored: bool = False,
     ) -> None:
         await self._post(
             "/checkpoint",
@@ -172,5 +173,6 @@ class ControlChannel:
                 "num_turns": num_turns,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "errored": errored,
             },
         )

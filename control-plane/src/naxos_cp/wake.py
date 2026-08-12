@@ -35,6 +35,12 @@ async def wake(conn: asyncpg.Connection, session_id: str) -> bool:
             processed=True,
         )
         await store.set_status(conn, session_id, SessionStatus.IDLE, StopReason.RETRIES_EXHAUSTED)
+        # Local import: deployments reaches back here through sessions.
+        from . import deployments
+
+        await deployments.fail_open_runs(
+            conn, session_id, "retries_exhausted", "the sandbox could not be started"
+        )
         return False
     # Serialize concurrent wakes: without the lock, parallel transactions all read
     # the pre-launch count and overshoot the global sandbox cap.

@@ -161,12 +161,58 @@ export type Deployment = {
   created_at: string;
 };
 
+export const RUN_STATUSES = ["succeeded", "failed", "cancelled", "running", "queued"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
 export type DeploymentRun = {
   id: string;
+  deployment_id: string;
   session_id: string | null;
-  status: string;
+  status: RunStatus;
   error_type: string | null;
+  error_message: string | null;
+  stop_reason: string | null;
+  cost_usd: number;
+  num_turns: number;
   fired_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  queued_seconds: number | null;
+};
+
+export type DeploymentRunRow = DeploymentRun & {
+  deployment_name: string;
+  agent_id: string;
+  session_status: string | null;
+};
+
+export type DeploymentRunTotals = {
+  id: string;
+  name: string;
+  cron: string;
+  timezone: string;
+  agent_id: string;
+  paused: boolean;
+  archived: boolean;
+  runs: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  active: number;
+  finished: number;
+  cost_usd: number;
+  duration_seconds: number;
+  last_fired_at: string | null;
+  // Oldest first, independent of the run list's status filter and its cap.
+  recent: { id: string; status: RunStatus; fired_at: string }[];
+};
+
+export type RunsOverview = {
+  window_days: number;
+  now: string;
+  runs: DeploymentRunRow[];
+  deployments: DeploymentRunTotals[];
 };
 
 export type ToolConfirmation = {
@@ -249,7 +295,8 @@ export type Memory = {
   updated_at?: string;
 };
 export type Skill = {
-  id: string; name: string; description: string | null; ready: boolean; file_count?: number;
+  id: string; name: string; description: string | null; tags: string[]; ready: boolean;
+  file_count?: number;
 };
 export type SkillFile = { id: string; path: string; size?: number; content?: string };
 export type WorkspaceFile = { path: string; size: number };
