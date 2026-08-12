@@ -452,9 +452,26 @@ details.tool-call > pre.err { background: var(--danger-soft); color: var(--dange
 .event.user { border-color: var(--accent); }
 .event.agent { border-color: var(--ink); }
 .event.system { border: none; padding: 4px 0; }
-.event.ask {
-  border: 1px solid var(--warn); border-left-width: 3px; background: var(--warn-soft);
-  border-radius: var(--radius); padding: 12px 14px;
+
+/* Alert-style approval card: a plain panel with a bold ask and push buttons,
+   primary on the right. */
+.approval-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+  box-shadow: 0 4px 14px -6px var(--shadow-2);
+}
+.approval-title {
+  display: flex; align-items: baseline; gap: 8px;
+  color: var(--ink); font-size: 14.5px; font-weight: 600;
+}
+.approval-title .mono { font-size: 13px; }
+.approval-title .event-time { margin-left: auto; font-weight: 400; }
+.approval-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.approval-card pre {
+  background: var(--panel2); border-radius: var(--radius-sm); padding: 10px 12px;
+  margin: 10px 0 12px; max-height: 260px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: var(--mono); font-size: 12.5px;
 }
 
 /* --- chat home (new conversation) ------------------------------------------ */

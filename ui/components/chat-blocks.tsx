@@ -203,20 +203,23 @@ function ApprovalEvent({
   onConfirm: (hash: string, result: "allow" | "deny") => void;
 }) {
   const hash = String(event.payload.call_hash);
+  const tool = String(event.payload.tool_name ?? "this tool");
   return (
-    <div className="event ask">
-      <div className="row between">
+    <div className="approval-card">
+      <div className="approval-title">
         <span>
-          <span className="badge requires_action">approval</span>{" "}
-          <strong>{String(event.payload.tool_name ?? "")}</strong>{" "}
-          <EventTime at={event.created_at} />
+          Allow <span className="mono">{tool}</span>?
         </span>
-        <span className="row">
-          <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
-          <button className="danger" onClick={() => onConfirm(hash, "deny")}>Deny</button>
-        </span>
+        <EventTime at={event.created_at} />
       </div>
+      <p className="approval-sub">
+        The agent is paused on this tool call until you decide.
+      </p>
       <pre>{JSON.stringify(event.payload.input, null, 2)}</pre>
+      <div className="row end">
+        <button className="ghost" onClick={() => onConfirm(hash, "deny")}>Deny</button>
+        <button className="primary" onClick={() => onConfirm(hash, "allow")}>Allow</button>
+      </div>
     </div>
   );
 }
